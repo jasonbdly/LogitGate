@@ -5,7 +5,12 @@ from logitgate.backends.base import StubBackend
 from logitgate.gates.logit_gate import LogitGate
 from logitgate.integrations.langgraph import as_conditional_edge
 from logitgate.integrations.pytest_plugin import check
-from logitgate.integrations.deepeval import LogitGateMetric, LogitGateSystemOneModel
+from logitgate.integrations.deepeval import (
+    LLMTestCase,
+    LogitGateMetric,
+    LogitGateSystemOneModel,
+    NoulQuestion,
+)
 
 
 def test_pytest_plugin_check_sync():
@@ -48,13 +53,11 @@ def test_langgraph_conditional_edge():
 
 
 def test_deepeval_system_one_model():
-    from deepeval.metrics.jev_eval import Noul
-
     backend = StubBackend(default_prob=0.92)
     model = LogitGateSystemOneModel(backend=backend)
 
     questions = {
-        "q1": Noul(statement="Is artifact compliant?"),
+        "q1": NoulQuestion(instructions="Is artifact compliant?", statement="Is artifact compliant?"),
     }
     answers, latency = model.decide("Candidate artifact", questions)
     assert "q1" in answers.nouls
@@ -62,8 +65,6 @@ def test_deepeval_system_one_model():
 
 
 def test_deepeval_metric():
-    from deepeval.test_case import LLMTestCase
-
     backend = StubBackend(default_prob=0.95)
     metric = LogitGateMetric(
         rubric="Candidate meets criteria",
