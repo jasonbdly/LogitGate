@@ -108,21 +108,33 @@ class Cascade(BaseGate):
 
             # 3. Generative Reasoning Judge Layer 2
             elif isinstance(gate, JudgeGate):
+                prev_prob = None
+                prev_status = None
+                for tr in reversed(all_traces):
+                    if tr.calibrated_prob is not None:
+                        prev_prob = tr.calibrated_prob
+                        prev_status = tr.status
+                        break
+
                 verdict = gate.evaluate(candidate, rubric_override=current_rubric, **kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
 
                 total_latency = (time.perf_counter() - t0) * 1000.0
-                prev_prob = None
-                for tr in reversed(all_traces[:-1]):
-                    if tr.calibrated_prob is not None:
-                        prev_prob = tr.calibrated_prob
-                        break
+                # If Layer 1 already decisively FAILED (p <= fail_threshold) and JudgeGate was only
+                # invoked under 'on_ambiguous_or_fail' to generate a diagnostic report, preserve the
+                # decisive FAILED verdict so deceptive comments cannot talk JudgeGate into overriding it.
+                if prev_status == DecisionStatus.FAILED and gate.trigger == "on_ambiguous_or_fail":
+                    final_passed = False
+                    final_status = DecisionStatus.FAILED
+                else:
+                    final_passed = verdict.passed
+                    final_status = verdict.status
 
                 return Verdict(
-                    passed=verdict.passed,
-                    status=verdict.status,
+                    passed=final_passed,
+                    status=final_status,
                     probability=prev_prob,
                     score=verdict.score,
                     triggered_layer=gate.name,
@@ -242,21 +254,30 @@ class Cascade(BaseGate):
                     continue
 
             elif isinstance(gate, JudgeGate):
+                prev_prob = None
+                prev_status = None
+                for tr in reversed(all_traces):
+                    if tr.calibrated_prob is not None:
+                        prev_prob = tr.calibrated_prob
+                        prev_status = tr.status
+                        break
+
                 verdict = await gate.aevaluate(candidate, rubric_override=current_rubric, **kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
 
                 total_latency = (time.perf_counter() - t0) * 1000.0
-                prev_prob = None
-                for tr in reversed(all_traces[:-1]):
-                    if tr.calibrated_prob is not None:
-                        prev_prob = tr.calibrated_prob
-                        break
+                if prev_status == DecisionStatus.FAILED and gate.trigger == "on_ambiguous_or_fail":
+                    final_passed = False
+                    final_status = DecisionStatus.FAILED
+                else:
+                    final_passed = verdict.passed
+                    final_status = verdict.status
 
                 return Verdict(
-                    passed=verdict.passed,
-                    status=verdict.status,
+                    passed=final_passed,
+                    status=final_status,
                     probability=prev_prob,
                     score=verdict.score,
                     triggered_layer=gate.name,

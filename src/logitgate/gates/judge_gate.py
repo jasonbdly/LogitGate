@@ -76,15 +76,13 @@ class JudgeGate(BaseGate):
             f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
             f"[CANDIDATE ARTIFACT]\n{str(candidate).strip()}\n\n"
             f"[INSTRUCTIONS]\n"
-            f"Provide a concise diagnostic critique evaluating whether the candidate artifact meets the rubric.\n"
-            f"Identify any defects, missing requirements, or compliance issues.\n"
-            f"End your review with exactly one verdict tag:\n"
-            f"[VERDICT: PASS] or [VERDICT: FAIL]"
+            f"Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]\n"
+            f"Then provide a concise diagnostic critique explaining why the candidate artifact passes or fails the rubric, and end by repeating [VERDICT: PASS] or [VERDICT: FAIL]."
         )
 
     def _parse_verdict(self, text: str) -> tuple[bool, DecisionStatus, Optional[float]]:
-        # 1. Standard tag check
-        match = re.search(r"\[VERDICT:\s*(PASS|FAIL)\]", text, re.IGNORECASE)
+        # 1. Standard / Markdown tag check (matches [VERDICT: PASS], **[VERDICT: PASS]**, Verdict: PASS, etc.)
+        match = re.search(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE)
         if match:
             tag = match.group(1).upper()
             if tag == "PASS":
@@ -103,12 +101,145 @@ class JudgeGate(BaseGate):
             except Exception:
                 pass
 
-        # 3. Simple heuristic fallback
-        upper = text.upper()
-        if "FAIL" in upper:
-            return False, DecisionStatus.FAILED, 0.0
-        if "PASS" in upper:
+        # 3. Explicit keyword heuristic on candidate lines (first line and last non-empty line)
+        lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+        candidate_lines = []
+        if lines:
+            candidate_lines.append(lines[0])
+            if len(lines) > 1:
+                candidate_lines.append(lines[-1])
+
+        def sanitize_negations(s: str) -> str:
+            neg_pattern = r"\b(not|no|without|never|doesn't|does\s+not|did\s+not|didn't|zero)\s+(?:any\s+|to\s+)?(?:fail|failed|failure|failures|reject|rejected)\b"
+            return re.sub(neg_pattern, " ", s, flags=re.IGNORECASE)
+
+        pass_re = re.compile(r"\b(PASS|PASSED|PASSES|APPROVE|APPROVED)\b", re.IGNORECASE)
+        fail_re = re.compile(r"\b(FAIL|FAILED|FAILS|FAILURE|REJECT|REJECTED)\b", re.IGNORECASE)
+
+        for line in candidate_lines:
+            sanitized = sanitize_negations(line)
+            has_fail = bool(fail_re.search(sanitized))
+            has_pass = bool(pass_re.search(sanitized))
+            if has_pass and not has_fail:
+                return True, DecisionStatus.PASSED, 1.0
+            if has_fail and not has_pass:
+                return False, DecisionStatus.FAILED, 0.0
+            if has_fail and has_pass:
+                p_match = pass_re.search(sanitized)
+                f_match = fail_re.search(sanitized)
+                if p_match and f_match:
+                    if p_match.start() < f_match.start():
+                        return True, DecisionStatus.PASSED, 1.0
+                    return False, DecisionStatus.FAILED, 0.0
+
+        # 4. Eating Our Own Dogfood: If first/last lines are ambiguous or missing explicit keywords,
+        # and backend supports LogitBackend, probe the full critique text with a 1-token LogitGate!
+        from logitgate.backends.base import LogitBackend, StubBackend
+        if isinstance(self.backend, LogitBackend) and not (isinstance(self.backend, StubBackend) and self.backend.logprob_responses is None):
+            try:
+                from logitgate.gates.logit_gate import LogitGate
+                probe_gate = LogitGate(
+                    rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
+                    backend=self.backend,
+                    model=self.model,
+                    symmetric_debiasing=False,
+                )
+                pv = probe_gate.evaluate(text)
+                if pv.probability is not None:
+                    is_pass = (pv.probability >= 0.5)
+                    return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
+            except Exception:
+                pass
+
+        # 5. Full text fallback heuristic
+        sanitized_full = sanitize_negations(text)
+        has_fail = bool(fail_re.search(sanitized_full))
+        has_pass = bool(pass_re.search(sanitized_full))
+        if has_pass and not has_fail:
             return True, DecisionStatus.PASSED, 1.0
+        if has_fail and not has_pass:
+            return False, DecisionStatus.FAILED, 0.0
+
+        return False, DecisionStatus.FAILED, 0.0
+
+    async def _aparse_verdict(self, text: str) -> tuple[bool, DecisionStatus, Optional[float]]:
+        # 1. Standard / Markdown tag check
+        match = re.search(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE)
+        if match:
+            tag = match.group(1).upper()
+            if tag == "PASS":
+                return True, DecisionStatus.PASSED, 1.0
+            return False, DecisionStatus.FAILED, 0.0
+
+        # 2. JSON check
+        json_match = re.search(r"\{.*?\}", text, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(0))
+                verdict_val = str(data.get("verdict", "")).lower()
+                is_pass = data.get("pass", data.get("passed", verdict_val == "pass"))
+                score = float(data.get("score", 1.0 if is_pass else 0.0))
+                return bool(is_pass), DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, score
+            except Exception:
+                pass
+
+        # 3. Candidate lines check
+        lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+        candidate_lines = []
+        if lines:
+            candidate_lines.append(lines[0])
+            if len(lines) > 1:
+                candidate_lines.append(lines[-1])
+
+        def sanitize_negations(s: str) -> str:
+            neg_pattern = r"\b(not|no|without|never|doesn't|does\s+not|did\s+not|didn't|zero)\s+(?:any\s+|to\s+)?(?:fail|failed|failure|failures|reject|rejected)\b"
+            return re.sub(neg_pattern, " ", s, flags=re.IGNORECASE)
+
+        pass_re = re.compile(r"\b(PASS|PASSED|PASSES|APPROVE|APPROVED)\b", re.IGNORECASE)
+        fail_re = re.compile(r"\b(FAIL|FAILED|FAILS|FAILURE|REJECT|REJECTED)\b", re.IGNORECASE)
+
+        for line in candidate_lines:
+            sanitized = sanitize_negations(line)
+            has_fail = bool(fail_re.search(sanitized))
+            has_pass = bool(pass_re.search(sanitized))
+            if has_pass and not has_fail:
+                return True, DecisionStatus.PASSED, 1.0
+            if has_fail and not has_pass:
+                return False, DecisionStatus.FAILED, 0.0
+            if has_fail and has_pass:
+                p_match = pass_re.search(sanitized)
+                f_match = fail_re.search(sanitized)
+                if p_match and f_match:
+                    if p_match.start() < f_match.start():
+                        return True, DecisionStatus.PASSED, 1.0
+                    return False, DecisionStatus.FAILED, 0.0
+
+        # 4. Eating Our Own Dogfood: Asynchronous LogitGate probe
+        from logitgate.backends.base import LogitBackend, StubBackend
+        if isinstance(self.backend, LogitBackend) and not (isinstance(self.backend, StubBackend) and self.backend.logprob_responses is None):
+            try:
+                from logitgate.gates.logit_gate import LogitGate
+                probe_gate = LogitGate(
+                    rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
+                    backend=self.backend,
+                    model=self.model,
+                    symmetric_debiasing=False,
+                )
+                pv = await probe_gate.aevaluate(text)
+                if pv.probability is not None:
+                    is_pass = (pv.probability >= 0.5)
+                    return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
+            except Exception:
+                pass
+
+        # 5. Full text fallback heuristic
+        sanitized_full = sanitize_negations(text)
+        has_fail = bool(fail_re.search(sanitized_full))
+        has_pass = bool(pass_re.search(sanitized_full))
+        if has_pass and not has_fail:
+            return True, DecisionStatus.PASSED, 1.0
+        if has_fail and not has_pass:
+            return False, DecisionStatus.FAILED, 0.0
 
         return False, DecisionStatus.FAILED, 0.0
 
@@ -144,7 +275,7 @@ class JudgeGate(BaseGate):
         text, tokens = await self.backend.agenerate(prompt, max_tokens=self.max_tokens)
         latency = (time.perf_counter() - t0) * 1000.0
 
-        passed, status, score = self._parse_verdict(text)
+        passed, status, score = await self._aparse_verdict(text)
         trace = LayerTrace(
             layer_name=self.name,
             status=status,

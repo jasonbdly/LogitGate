@@ -11,6 +11,7 @@ class _ConfigState:
         self.pass_threshold: Optional[float] = None
         self.fail_threshold: Optional[float] = None
         self.logit_temperature: Optional[float] = None
+        self.num_ctx: Optional[int] = None
 
     def reset(self) -> None:
         self.backend = None
@@ -18,6 +19,7 @@ class _ConfigState:
         self.pass_threshold = None
         self.fail_threshold = None
         self.logit_temperature = None
+        self.num_ctx = None
 
 
 _state = _ConfigState()
@@ -77,6 +79,17 @@ class _DefaultsMeta(type):
     def logit_temperature(cls, val: Optional[float]) -> None:
         _state.logit_temperature = val
 
+    @property
+    def num_ctx(cls) -> Optional[int]:
+        if _state.num_ctx is not None:
+            return _state.num_ctx
+        val = os.environ.get("LOGITGATE_NUM_CTX")
+        return int(val) if val is not None else None
+
+    @num_ctx.setter
+    def num_ctx(cls, val: Optional[int]) -> None:
+        _state.num_ctx = val
+
 
 class LogitGateDefaults(metaclass=_DefaultsMeta):
     """Global configuration defaults for LogitGate."""
@@ -89,6 +102,7 @@ def configure(
     pass_threshold: Optional[float] = None,
     fail_threshold: Optional[float] = None,
     logit_temperature: Optional[float] = None,
+    num_ctx: Optional[int] = None,
 ) -> None:
     """Configures global defaults for LogitGate."""
     if backend is not None:
@@ -101,6 +115,8 @@ def configure(
         _state.fail_threshold = fail_threshold
     if logit_temperature is not None:
         _state.logit_temperature = logit_temperature
+    if num_ctx is not None:
+        _state.num_ctx = num_ctx
 
 
 def reset_config() -> None:

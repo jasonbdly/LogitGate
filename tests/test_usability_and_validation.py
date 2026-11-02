@@ -441,6 +441,53 @@ def test_judge_gate_max_tokens():
     assert v.passed is True
 
 
+def test_judge_gate_parse_verdict_robustness():
+    """JudgeGate._parse_verdict handles markdown bolding and avoids false failures on negations."""
+    judge = JudgeGate(rubric="Critique", backend=StubBackend())
+
+    # Case 1: Markdown bolding & variations
+    assert judge._parse_verdict("**[VERDICT: PASS]**")[0] is True
+    assert judge._parse_verdict("[**VERDICT: PASS**]")[0] is True
+    assert judge._parse_verdict("**Verdict:** PASS")[0] is True
+    assert judge._parse_verdict("Verdict: PASS")[0] is True
+    assert judge._parse_verdict("**Verdict**: FAIL")[0] is False
+    assert judge._parse_verdict("[VERDICT: FAIL]")[0] is False
+
+    # Case 2: Negation safety ("does not fail" in body shouldn't trigger FAIL)
+    qwen_sample = (
+        "**[VERDICT: PASS]**\n"
+        "The candidate artifact is well-formed.\n"
+        "The candidate does not fail any requirements, and all assertions succeed."
+    )
+    passed, status, score = judge._parse_verdict(qwen_sample)
+    assert passed is True
+    assert score == 1.0
+
+    # Case 3: Fallback without explicit tag but with negation
+    fallback_sample = (
+        "Evaluation summary: The implementation passes all tests without fail.\n"
+        "No failures were detected."
+    )
+    assert judge._parse_verdict(fallback_sample)[0] is True
+
+    # Case 4: Explicit failure
+    fail_sample = "Evaluation summary: The code failed on edge cases."
+    assert judge._parse_verdict(fail_sample)[0] is False
+
+    # Case 5: Verdict-first prompt check
+    prompt = judge._compile_prompt("def add(a, b): return a + b")
+    assert "Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in prompt
+
+    # Case 6: Dogfood LogitGate probe when text has zero explicit keywords
+    # Review text without "PASS" or "FAIL":
+    ambiguous_review = "Detailed evaluation notes: All boundary conditions behave as specified and unit test execution was verified."
+    # StubBackend with custom logprobs simulating model answering YES (PASS)
+    stub_pass = StubBackend(logprob_responses=[[{"token": "A", "logprob": -0.05}, {"token": "B", "logprob": -3.5}]])
+    judge_dogfood = JudgeGate(rubric="Critique", backend=stub_pass)
+    assert judge_dogfood._parse_verdict(ambiguous_review)[0] is True
+
+
+
 def test_cli_calibrate(tmp_path, capsys):
     """CLI calibrate subcommand runs auto-calibration and writes cache."""
     from logitgate.cli import main
