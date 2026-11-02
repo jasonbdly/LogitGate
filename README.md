@@ -181,7 +181,9 @@ Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.config
 | **`gemma4:31b` (Dense GPU)** | 2.12 GB (180.7 ms) | 2.70 GB (177.9 ms) | 2.93 GB (177.8 ms) | 2.66 GB (180.3 ms) | 3.23 GB (174.9 ms) | **100% GPU up to 65,536 tokens** |
 
 > [!TIP]
-> **Production Recommendation for 14B Models**: On 12–16 GB GPUs, set `LOGITGATE_NUM_CTX=16384` (or `8192`). Raising context to 32k on a 14B model allocates 2.4 GB of KV-cache into system RAM, increasing first-token latency from **99.7 ms to 314.5 ms (3.15x slower)** due to PCIe transfer overhead.
+> **Why `LogitGate` Survives GPU-to-CPU RAM Spillover (~314 ms vs. 80+ Seconds)**:
+> On `qwen2.5:14b` (which uses full global attention across all 48 layers), raising `num_ctx` to `32,768` spills `2.4 GB` of KV-cache into System RAM over PCIe, increasing 2-pass latency from **99.7 ms to 314.5 ms**. In traditional generative LLM-as-a-Judge, that PCIe transfer penalty is paid **sequentially on every single generated token** ($200\text{ ms} \times 400\text{ tokens} \approx 80\text{ seconds}$). Because `LogitGate` generates **zero output tokens**, the PCIe spillover penalty is paid only during the forward pass—meaning users can evaluate large 16k–32k documents without manual chunking in **~0.31 seconds** even when KV-cache spills into System RAM!
+> Furthermore, hybrid sliding-window architectures like **`gemma4:e4b` and `gemma4:26b` (MoE)** grow their KV-cache by only **`+0.63 GB` to `+0.76 GB` all the way out to `64k–128k` context**, staying 100% in VRAM at **~88–96 ms**.
 
 ---
 
