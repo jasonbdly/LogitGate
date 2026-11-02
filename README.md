@@ -284,6 +284,37 @@ assert verdict.passed, f"CI Gate Failed at {verdict.triggered_layer}: {verdict.r
 - **Resource Footprint**: Runs in ~2.2–3.2 GB System RAM (`qwen2.5:3b` / `llama3.2:3b`) or ~8.9 GB System RAM (`gemma4:e4b`) with 0 VRAM overhead—fitting comfortably inside a standard 16 GB GitHub Actions (`ubuntu-latest`) VM.
 - **Cost Savings**: 100% free runner tier without provisioning \$0.50–\$2.00/hr GPU runners.
 
+#### Reproducing Non-Deterministic App Failures Locally (`VerdictSnapshot` & `logitgate explain`)
+
+When testing non-deterministic LLM applications in CI using fast zero-token gating (`LogitGate(preset="fast_ci")` or `@check`), failures are caught in ~50ms without burning tokens. However, if a developer re-runs their non-deterministic application locally to debug, the LLM will generate a different output, making reproduction tricky.
+
+LogitGate solves this with deterministic **Verdict Snapshots**:
+1. When a test fails in CI (with `LOGITGATE_SAVE_FAILURES=1` or `@check(save_snapshot=True)`), LogitGate freezes the exact candidate output, rubric, and telemetry to `.logitgate/failures/fail_<timestamp>_<test>_<id>.json` (and updates `.logitgate/failures/latest.json`).
+2. Developers can replay and diagnose the exact failure locally with a single CLI command without re-running their non-deterministic application:
+
+```bash
+# Replay and explain the latest failure with full System-2 reasoning
+logitgate explain
+
+# Or explain a specific failure snapshot with custom tokens
+logitgate explain .logitgate/failures/fail_20261102_150648_test_rag_a1b2c3d4.json --max-tokens 150
+```
+
+Programmatic replay and inspection via Python:
+```python
+from logitgate import VerdictSnapshot
+
+# Load frozen snapshot from CI
+snapshot = VerdictSnapshot.load(".logitgate/failures/latest.json")
+
+# Re-run fast Layer-1 logit evaluation on the frozen candidate
+replay_verdict = snapshot.replay()
+
+# Or generate a deep Layer-2 diagnostic critique with reasoning enabled
+explanation = snapshot.explain(model="qwen2.5-coder:14b", think=True)
+print(explanation.reason)
+```
+
 ---
 
 ### 2. RAG & Chatbot Engineers (Hallucination & Groundedness Gating)

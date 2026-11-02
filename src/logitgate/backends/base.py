@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 def strip_reasoning_blocks(text: str) -> str:
     """Strips <think>...</think> reasoning traces from model responses."""
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    if "<think>" in cleaned:
+        cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
 
 
@@ -188,11 +190,11 @@ def resolve_logit_backend(
         if parsed.netloc:
             base_url = f"http://{parsed.netloc}"
             parsed_model = parsed.path.lstrip("/") if parsed.path else None
-            effective_model = model or parsed_model or None
-            return LlamaCppBackend(base_url=base_url, model=effective_model, **kwargs)
+            effective_model_opt: Optional[str] = model or parsed_model or None
+            return LlamaCppBackend(base_url=base_url, model=effective_model_opt, **kwargs)
         else:
-            effective_model = model or (parsed.path.lstrip("/") if parsed.path else None)
-            return LlamaCppBackend(model=effective_model, **kwargs)
+            effective_model_opt = model or (parsed.path.lstrip("/") if parsed.path else None)
+            return LlamaCppBackend(model=effective_model_opt, **kwargs)
 
     # Fallback to Ollama or Stub
     if "stub" in spec:

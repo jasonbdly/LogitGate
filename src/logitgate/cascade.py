@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 from logitgate.gates.ast_gate import ASTGate, ContractGate
 from logitgate.gates.base import BaseGate
@@ -39,24 +39,70 @@ class Cascade(BaseGate):
         pipeline_repr = " >> ".join(repr(g) for g in self.gates)
         return f"Cascade([{pipeline_repr}])"
 
+    def _handle_failure_snapshot(
+        self, candidate: Any, verdict: Verdict, current_rubric: Optional[str] = None, **kwargs: Any
+    ) -> Verdict:
+        if verdict.passed:
+            return verdict
+
+        save_on_fail = kwargs.get("save_on_fail")
+        from logitgate.config import get_default_save_failures
+        should_save = save_on_fail if save_on_fail is not None else get_default_save_failures()
+        if not should_save:
+            return verdict
+
+        if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
+            return verdict
+
+        from logitgate.snapshot import VerdictSnapshot
+        rubric = current_rubric or getattr(self.gates[0], "rubric", None) or "Cascade evaluation"
+        gate_config: dict[str, Any] = {"cascade_gates": [g.name for g in self.gates]}
+        for g in self.gates:
+            if isinstance(g, LogitGate):
+                gate_config.update({
+                    "rubric": g.rubric,
+                    "pass_threshold": g.pass_threshold,
+                    "fail_threshold": g.fail_threshold,
+                    "symmetric_debiasing": g.symmetric_debiasing,
+                    "logit_temperature": g.logit_temperature,
+                })
+                if g.model:
+                    gate_config["model"] = g.model
+                break
+
+        test_name = kwargs.get("test_name")
+        snapshot = VerdictSnapshot(
+            test_name=test_name,
+            rubric=rubric,
+            candidate=candidate,
+            verdict=verdict,
+            gate_config=gate_config,
+        )
+        saved_path = snapshot.save(directory=kwargs.get("snapshot_dir"))
+        if verdict.traces:
+            verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
+        return verdict
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         all_traces: list[LayerTrace] = []
         total_tokens = 0
         current_rubric = None
         last_verdict: Verdict | None = None
+        gate_kwargs = dict(kwargs)
+        gate_kwargs["save_on_fail"] = False
 
         for i, gate in enumerate(self.gates):
             # 1. Deterministic Layer 0 Gate
             if isinstance(gate, (ASTGate, ContractGate)):
-                verdict = gate.evaluate(candidate, **kwargs)
+                verdict = gate.evaluate(candidate, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
 
                 if not verdict.passed:
                     total_latency = (time.perf_counter() - t0) * 1000.0
-                    return Verdict(
+                    final_v = Verdict(
                         passed=False,
                         status=DecisionStatus.FAILED,
                         triggered_layer=gate.name,
@@ -65,11 +111,12 @@ class Cascade(BaseGate):
                         reason=verdict.reason,
                         traces=all_traces,
                     )
+                    return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
             # 2. First-Token Logit Gate Layer 1
             elif isinstance(gate, LogitGate):
                 current_rubric = gate.rubric
-                verdict = gate.evaluate(candidate, **kwargs)
+                verdict = gate.evaluate(candidate, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
@@ -89,22 +136,24 @@ class Cascade(BaseGate):
                     )
 
                 # Check lookahead to next JudgeGate
-                if i + 1 < len(self.gates) and isinstance(self.gates[i + 1], JudgeGate):
+                if i + 1 < len(self.gates):
                     next_judge = self.gates[i + 1]
-                    if verdict.status == DecisionStatus.FAILED and next_judge.trigger == "on_ambiguous_only":
-                        total_latency = (time.perf_counter() - t0) * 1000.0
-                        return Verdict(
-                            passed=False,
-                            status=DecisionStatus.FAILED,
-                            probability=verdict.probability,
-                            triggered_layer=gate.name,
-                            total_latency_ms=total_latency,
-                            total_tokens_generated=total_tokens,
-                            reason=f"Decisive failure at {gate.name}: P={verdict.probability:.4f}",
-                            traces=all_traces,
-                        )
-                    # Escalate to JudgeGate
-                    continue
+                    if isinstance(next_judge, JudgeGate):
+                        if verdict.status == DecisionStatus.FAILED and next_judge.trigger == "on_ambiguous_only":
+                            total_latency = (time.perf_counter() - t0) * 1000.0
+                            final_v = Verdict(
+                                passed=False,
+                                status=DecisionStatus.FAILED,
+                                probability=verdict.probability,
+                                triggered_layer=gate.name,
+                                total_latency_ms=total_latency,
+                                total_tokens_generated=total_tokens,
+                                reason=f"Decisive failure at {gate.name}: P={verdict.probability:.4f}",
+                                traces=all_traces,
+                            )
+                            return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
+                        # Escalate to JudgeGate
+                        continue
 
             # 3. Generative Reasoning Judge Layer 2
             elif isinstance(gate, JudgeGate):
@@ -116,15 +165,12 @@ class Cascade(BaseGate):
                         prev_status = tr.status
                         break
 
-                verdict = gate.evaluate(candidate, rubric_override=current_rubric, **kwargs)
+                verdict = gate.evaluate(candidate, rubric_override=current_rubric, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
 
                 total_latency = (time.perf_counter() - t0) * 1000.0
-                # If Layer 1 already decisively FAILED (p <= fail_threshold) and JudgeGate was only
-                # invoked under 'on_ambiguous_or_fail' to generate a diagnostic report, preserve the
-                # decisive FAILED verdict so deceptive comments cannot talk JudgeGate into overriding it.
                 if prev_status == DecisionStatus.FAILED and gate.trigger == "on_ambiguous_or_fail":
                     final_passed = False
                     final_status = DecisionStatus.FAILED
@@ -132,7 +178,7 @@ class Cascade(BaseGate):
                     final_passed = verdict.passed
                     final_status = verdict.status
 
-                return Verdict(
+                final_v = Verdict(
                     passed=final_passed,
                     status=final_status,
                     probability=prev_prob,
@@ -143,16 +189,17 @@ class Cascade(BaseGate):
                     reason=verdict.reason,
                     traces=all_traces,
                 )
+                return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
             # 4. Generic Gate
             else:
-                verdict = gate.evaluate(candidate, **kwargs)
+                verdict = gate.evaluate(candidate, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
                 if not verdict.passed and i == len(self.gates) - 1:
                     total_latency = (time.perf_counter() - t0) * 1000.0
-                    return Verdict(
+                    final_v = Verdict(
                         passed=False,
                         status=verdict.status,
                         probability=verdict.probability,
@@ -165,10 +212,11 @@ class Cascade(BaseGate):
                         reason=verdict.reason,
                         traces=all_traces,
                     )
+                    return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
         total_latency = (time.perf_counter() - t0) * 1000.0
         if last_verdict is not None:
-            return Verdict(
+            final_v = Verdict(
                 passed=last_verdict.passed,
                 status=last_verdict.status,
                 probability=last_verdict.probability,
@@ -181,6 +229,7 @@ class Cascade(BaseGate):
                 reason=last_verdict.reason,
                 traces=all_traces,
             )
+            return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
         return Verdict(
             passed=True,
@@ -197,17 +246,19 @@ class Cascade(BaseGate):
         total_tokens = 0
         current_rubric = None
         last_verdict: Verdict | None = None
+        gate_kwargs = dict(kwargs)
+        gate_kwargs["save_on_fail"] = False
 
         for i, gate in enumerate(self.gates):
             if isinstance(gate, (ASTGate, ContractGate)):
-                verdict = await gate.aevaluate(candidate, **kwargs)
+                verdict = await gate.aevaluate(candidate, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
 
                 if not verdict.passed:
                     total_latency = (time.perf_counter() - t0) * 1000.0
-                    return Verdict(
+                    final_v = Verdict(
                         passed=False,
                         status=DecisionStatus.FAILED,
                         triggered_layer=gate.name,
@@ -216,10 +267,11 @@ class Cascade(BaseGate):
                         reason=verdict.reason,
                         traces=all_traces,
                     )
+                    return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
             elif isinstance(gate, LogitGate):
                 current_rubric = gate.rubric
-                verdict = await gate.aevaluate(candidate, **kwargs)
+                verdict = await gate.aevaluate(candidate, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
@@ -237,21 +289,23 @@ class Cascade(BaseGate):
                         traces=all_traces,
                     )
 
-                if i + 1 < len(self.gates) and isinstance(self.gates[i + 1], JudgeGate):
+                if i + 1 < len(self.gates):
                     next_judge = self.gates[i + 1]
-                    if verdict.status == DecisionStatus.FAILED and next_judge.trigger == "on_ambiguous_only":
-                        total_latency = (time.perf_counter() - t0) * 1000.0
-                        return Verdict(
-                            passed=False,
-                            status=DecisionStatus.FAILED,
-                            probability=verdict.probability,
-                            triggered_layer=gate.name,
-                            total_latency_ms=total_latency,
-                            total_tokens_generated=total_tokens,
-                            reason=f"Decisive failure at {gate.name}: P={verdict.probability:.4f}",
-                            traces=all_traces,
-                        )
-                    continue
+                    if isinstance(next_judge, JudgeGate):
+                        if verdict.status == DecisionStatus.FAILED and next_judge.trigger == "on_ambiguous_only":
+                            total_latency = (time.perf_counter() - t0) * 1000.0
+                            final_v = Verdict(
+                                passed=False,
+                                status=DecisionStatus.FAILED,
+                                probability=verdict.probability,
+                                triggered_layer=gate.name,
+                                total_latency_ms=total_latency,
+                                total_tokens_generated=total_tokens,
+                                reason=f"Decisive failure at {gate.name}: P={verdict.probability:.4f}",
+                                traces=all_traces,
+                            )
+                            return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
+                        continue
 
             elif isinstance(gate, JudgeGate):
                 prev_prob = None
@@ -262,7 +316,7 @@ class Cascade(BaseGate):
                         prev_status = tr.status
                         break
 
-                verdict = await gate.aevaluate(candidate, rubric_override=current_rubric, **kwargs)
+                verdict = await gate.aevaluate(candidate, rubric_override=current_rubric, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
@@ -275,7 +329,7 @@ class Cascade(BaseGate):
                     final_passed = verdict.passed
                     final_status = verdict.status
 
-                return Verdict(
+                final_v = Verdict(
                     passed=final_passed,
                     status=final_status,
                     probability=prev_prob,
@@ -286,15 +340,16 @@ class Cascade(BaseGate):
                     reason=verdict.reason,
                     traces=all_traces,
                 )
+                return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
             else:
-                verdict = await gate.aevaluate(candidate, **kwargs)
+                verdict = await gate.aevaluate(candidate, **gate_kwargs)
                 all_traces.extend(verdict.traces)
                 total_tokens += verdict.total_tokens_generated
                 last_verdict = verdict
                 if not verdict.passed and i == len(self.gates) - 1:
                     total_latency = (time.perf_counter() - t0) * 1000.0
-                    return Verdict(
+                    final_v = Verdict(
                         passed=False,
                         status=verdict.status,
                         probability=verdict.probability,
@@ -307,10 +362,11 @@ class Cascade(BaseGate):
                         reason=verdict.reason,
                         traces=all_traces,
                     )
+                    return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
         total_latency = (time.perf_counter() - t0) * 1000.0
         if last_verdict is not None:
-            return Verdict(
+            final_v = Verdict(
                 passed=last_verdict.passed,
                 status=last_verdict.status,
                 probability=last_verdict.probability,
@@ -323,6 +379,7 @@ class Cascade(BaseGate):
                 reason=last_verdict.reason,
                 traces=all_traces,
             )
+            return self._handle_failure_snapshot(candidate, final_v, current_rubric, **kwargs)
 
         return Verdict(
             passed=True,

@@ -95,6 +95,45 @@ def create_parser() -> argparse.ArgumentParser:
         help="Optional custom path to calibration cache JSON file",
     )
 
+    explain_parser = subparsers.add_parser(
+        "explain",
+        help="Replay frozen failure snapshot and generate full Layer-2 diagnostic explanation",
+    )
+    explain_parser.add_argument(
+        "snapshot_path",
+        nargs="?",
+        default=".logitgate/failures",
+        help="Path to snapshot JSON file or directory containing latest.json (default: .logitgate/failures)",
+    )
+    explain_parser.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="Generative backend specifier (e.g. stub://..., ollama://...)",
+    )
+    explain_parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Optional model name for backend",
+    )
+    explain_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Maximum tokens for generative explanation",
+    )
+    explain_parser.add_argument(
+        "--no-think",
+        action="store_true",
+        help="Disable Chain-of-Thought reasoning tokens in generative explanation",
+    )
+    explain_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output enriched verdict and traces in JSON format",
+    )
+
     return parser
 
 
@@ -122,6 +161,47 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
         print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
         print("Calibration successfully saved to cache.")
+        return 0
+
+    if args.command == "explain":
+        from logitgate.snapshot import VerdictSnapshot
+        try:
+            snapshot = VerdictSnapshot.load(args.snapshot_path)
+        except Exception as e:
+            sys.stderr.write(f"Error loading snapshot from '{args.snapshot_path}': {e}\n")
+            return 1
+
+        think = False if args.no_think else True
+        verdict = snapshot.explain(
+            backend=args.backend,
+            model=args.model,
+            max_tokens=args.max_tokens,
+            think=think,
+        )
+
+        if args.json:
+            print(verdict.model_dump_json(indent=2))
+        else:
+            print("=" * 60)
+            print("LOGITGATE FAILURE REPLAY & EXPLANATION")
+            print("=" * 60)
+            print(f"Snapshot ID:     {snapshot.snapshot_id}")
+            if snapshot.test_name:
+                print(f"Test Name:       {snapshot.test_name}")
+            print(f"Timestamp:       {snapshot.timestamp}")
+            print(f"Rubric:          {snapshot.rubric}")
+            orig_prob = snapshot.verdict.probability
+            prob_str = f"{orig_prob:.4f}" if orig_prob is not None else "N/A"
+            print(f"Original Prob:   {prob_str}")
+            print(f"Triggered Layer: {snapshot.verdict.triggered_layer}")
+            print("-" * 60)
+            print(f"Replay Verdict:  {verdict.status.value.upper()}")
+            print(f"Replay Latency:  {verdict.total_latency_ms:.2f}ms")
+            print(f"Tokens Spent:    {verdict.total_tokens_generated}")
+            print("-" * 60)
+            print("Diagnostic Critique:")
+            print(verdict.reason or "(No reason provided)")
+            print("=" * 60)
         return 0
 
     if args.command != "eval":
@@ -153,6 +233,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         fail_threshold=args.fail_threshold,
     )
 
+    evaluator: Cascade | LogitGate
     if args.ast_syntax:
         evaluator = Cascade([
             ASTGate(syntax=True),

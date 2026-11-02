@@ -274,7 +274,6 @@ def test_cascade_validation():
 
 def test_global_configure_and_reset():
     """logitgate.configure updates global defaults and reset_config restores them."""
-    import logitgate
     from logitgate import LogitGateDefaults, configure, reset_config
 
     reset_config()
@@ -309,7 +308,6 @@ def test_global_configure_and_reset():
 
 def test_env_var_resolution(monkeypatch):
     """LOGITGATE_* environment variables resolve dynamically."""
-    import logitgate
     from logitgate import LogitGateDefaults, reset_config
 
     reset_config()
@@ -503,3 +501,183 @@ def test_cli_calibrate(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Optimal Temperature" in captured.out
     assert (tmp_path / "cli_cal.json").exists()
+
+
+# ==============================================================================
+# 9. VerdictSnapshot & Failure Reproduction Tests
+# ==============================================================================
+
+def test_verdict_snapshot_save_load(tmp_path):
+    from logitgate.snapshot import VerdictSnapshot
+
+    v = Verdict(
+        passed=False,
+        status=DecisionStatus.FAILED,
+        probability=0.15,
+        triggered_layer="LogitGate",
+        total_latency_ms=25.0,
+        total_tokens_generated=0,
+        reason="Failed threshold",
+        traces=[
+            LayerTrace(
+                layer_name="LogitGate",
+                status=DecisionStatus.FAILED,
+                latency_ms=25.0,
+                calibrated_prob=0.15,
+            )
+        ],
+    )
+    snap = VerdictSnapshot(
+        test_name="test_login_auth",
+        rubric="Must not reveal passwords",
+        candidate="pwd = 123",
+        verdict=v,
+        gate_config={"pass_threshold": 0.85, "fail_threshold": 0.20},
+    )
+
+    assert len(snap.snapshot_id) == 8
+    assert snap.timestamp
+    assert snap.test_name == "test_login_auth"
+
+    save_dir = tmp_path / "failures"
+    saved_file = snap.save(directory=save_dir)
+    assert saved_file.exists()
+    assert (save_dir / "latest.json").exists()
+
+    # Load from directory
+    loaded_dir = VerdictSnapshot.load(save_dir)
+    assert loaded_dir.snapshot_id == snap.snapshot_id
+    assert loaded_dir.test_name == "test_login_auth"
+    assert loaded_dir.candidate == "pwd = 123"
+    assert loaded_dir.verdict.probability == 0.15
+
+    # Load from file
+    loaded_file = VerdictSnapshot.load(saved_file)
+    assert loaded_file.snapshot_id == snap.snapshot_id
+    assert loaded_file.rubric == "Must not reveal passwords"
+
+
+def test_verdict_snapshot_replay_and_explain():
+    from logitgate.snapshot import VerdictSnapshot
+
+    v = Verdict(
+        passed=False,
+        status=DecisionStatus.FAILED,
+        probability=0.15,
+        triggered_layer="LogitGate",
+        total_latency_ms=25.0,
+        total_tokens_generated=0,
+        reason="Failed threshold",
+        traces=[
+            LayerTrace(
+                layer_name="LogitGate",
+                status=DecisionStatus.FAILED,
+                latency_ms=25.0,
+                calibrated_prob=0.15,
+            )
+        ],
+    )
+    snap = VerdictSnapshot(
+        test_name="test_repro",
+        rubric="Candidate code must be clean and safe.",
+        candidate="eval('1 + 1')",
+        verdict=v,
+        gate_config={"pass_threshold": 0.85, "fail_threshold": 0.20},
+    )
+
+    # Replay with StubBackend
+    replayed = snap.replay(backend=StubBackend(default_prob=0.95))
+    assert replayed.passed is True
+    assert replayed.status == DecisionStatus.PASSED
+
+    # Explain with StubBackend
+    stub_judge = StubBackend(
+        diagnostic_text="[VERDICT: FAIL] The candidate uses dangerous eval().",
+        tokens_generated=22,
+    )
+    explained = snap.explain(backend=stub_judge)
+    assert explained.passed is False
+    assert explained.status == DecisionStatus.FAILED
+    assert explained.triggered_layer == "JudgeGate"
+    assert "[VERDICT: FAIL] The candidate uses dangerous eval()." in (explained.reason or "")
+    assert len(explained.traces) == 2
+    assert explained.traces[0].layer_name == "LogitGate"
+    assert explained.traces[1].layer_name == "JudgeGate"
+    assert explained.total_tokens_generated == 22
+
+
+def test_logit_gate_save_on_fail(tmp_path):
+    from pathlib import Path
+    from logitgate.snapshot import VerdictSnapshot
+
+    gate = LogitGate(rubric="Must be safe", backend=StubBackend(default_prob=0.10))
+    verdict = gate.evaluate(
+        "unsafe payload",
+        save_on_fail=True,
+        snapshot_dir=tmp_path / "logit_fails",
+        test_name="test_safety",
+    )
+    assert verdict.passed is False
+    assert "snapshot_path" in verdict.traces[-1].metadata
+    snap_path = Path(verdict.traces[-1].metadata["snapshot_path"])
+    assert snap_path.exists()
+
+    snap = VerdictSnapshot.load(snap_path)
+    assert snap.test_name == "test_safety"
+    assert snap.candidate == "unsafe payload"
+
+
+def test_logit_gate_configure_save_failures(tmp_path):
+    from logitgate.config import configure, reset_config
+
+    configure(save_failures=True, snapshot_dir=str(tmp_path / "global_fails"))
+    try:
+        gate = LogitGate(rubric="Must be valid", backend=StubBackend(default_prob=0.10))
+        verdict = gate.evaluate("invalid data")
+        assert verdict.passed is False
+        assert "snapshot_path" in verdict.traces[-1].metadata
+        assert (tmp_path / "global_fails" / "latest.json").exists()
+    finally:
+        reset_config()
+
+
+def test_cascade_save_on_fail(tmp_path):
+    from logitgate.snapshot import VerdictSnapshot
+
+    cascade = ASTGate(syntax=True) >> LogitGate(
+        rubric="Clean code",
+        backend=StubBackend(default_prob=0.10),
+    )
+    verdict = cascade.evaluate(
+        "x = 1",
+        save_on_fail=True,
+        snapshot_dir=tmp_path / "cascade_fails",
+        test_name="test_cascade_pipeline",
+    )
+    assert verdict.passed is False
+    assert "snapshot_path" in verdict.traces[-1].metadata
+    snap = VerdictSnapshot.load(tmp_path / "cascade_fails")
+    assert snap.test_name == "test_cascade_pipeline"
+
+
+def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
+    from logitgate.integrations.pytest_plugin import check
+    from logitgate.snapshot import VerdictSnapshot
+
+    monkeypatch.setenv("LOGITGATE_SNAPSHOT_DIR", str(tmp_path / "check_fails"))
+
+    @check("Must pass criteria", backend=StubBackend(default_prob=0.05), save_snapshot=True)
+    def my_flaky_test():
+        return "failing candidate"
+
+    with pytest.raises(AssertionError) as exc_info:
+        my_flaky_test()
+
+    err_msg = str(exc_info.value)
+    assert "Snapshot saved to:" in err_msg
+    assert "logitgate explain" in err_msg
+    assert (tmp_path / "check_fails" / "latest.json").exists()
+
+    snap = VerdictSnapshot.load(tmp_path / "check_fails")
+    assert snap.test_name == "my_flaky_test"
+    assert snap.candidate == "failing candidate"

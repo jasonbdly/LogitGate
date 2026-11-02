@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from logitgate.gates.ast_gate import ASTGate
 from logitgate.models import DecisionStatus
 

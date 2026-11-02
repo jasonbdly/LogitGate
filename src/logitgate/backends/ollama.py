@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 import httpx
 
@@ -163,13 +162,15 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
-        # Default to thinking enabled for generative Layer 2 Judge unless max_tokens is tightly capped (< 256)
-        think_default = False if (max_tokens is not None and max_tokens < 256) else True
+        think_default = True if max_tokens is None else False
+        think_val = kwargs.pop("think", think_default)
+        if think_val is None:
+            think_val = think_default
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "think": kwargs.pop("think", think_default),
+            "think": think_val,
             "options": opts,
         }
         if self.keep_alive is not None:
@@ -184,7 +185,33 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         content = data.get("message", {}).get("content", "")
         tokens = data.get("eval_count", 0)
-        return strip_reasoning_blocks(content), tokens
+        visible_text = strip_reasoning_blocks(content)
+
+        # Mid-Thought Truncation Safety Net: True Continuation
+        # If thinking was enabled and 100% of generated tokens were consumed inside <think>,
+        # visible_text is empty while raw content was non-empty. Close </think> and continue
+        # with think=False so all max_tokens go to visible diagnostic output while preserving CoT.
+        if not visible_text and content and think_val:
+            raw_thinking = content.rstrip()
+            assistant_prefill = raw_thinking + "\n</think>\n"
+            continuation_opts = dict(opts)
+            if max_tokens is not None:
+                continuation_opts["num_predict"] = max_tokens
+            continuation_payload = dict(payload)
+            continuation_payload["messages"] = [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": assistant_prefill},
+            ]
+            continuation_payload["think"] = False
+            continuation_payload["options"] = continuation_opts
+            resp_cont = self.client.post(f"{self.base_url}/api/chat", json=continuation_payload)
+            resp_cont.raise_for_status()
+            data_cont = resp_cont.json()
+            content_cont = data_cont.get("message", {}).get("content", "")
+            tokens_cont = data_cont.get("eval_count", 0)
+            return strip_reasoning_blocks(content_cont), tokens + tokens_cont
+
+        return visible_text, tokens
 
     async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         opts: dict[str, Any] = {
@@ -195,12 +222,15 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
-        think_default = False if (max_tokens is not None and max_tokens < 256) else True
+        think_default = True if max_tokens is None else False
+        think_val = kwargs.pop("think", think_default)
+        if think_val is None:
+            think_val = think_default
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "think": kwargs.pop("think", think_default),
+            "think": think_val,
             "options": opts,
         }
         if self.keep_alive is not None:
@@ -215,4 +245,27 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         content = data.get("message", {}).get("content", "")
         tokens = data.get("eval_count", 0)
-        return strip_reasoning_blocks(content), tokens
+        visible_text = strip_reasoning_blocks(content)
+
+        # Mid-Thought Truncation Safety Net: True Continuation
+        if not visible_text and content and think_val:
+            raw_thinking = content.rstrip()
+            assistant_prefill = raw_thinking + "\n</think>\n"
+            continuation_opts = dict(opts)
+            if max_tokens is not None:
+                continuation_opts["num_predict"] = max_tokens
+            continuation_payload = dict(payload)
+            continuation_payload["messages"] = [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": assistant_prefill},
+            ]
+            continuation_payload["think"] = False
+            continuation_payload["options"] = continuation_opts
+            resp_cont = await self.async_client.post(f"{self.base_url}/api/chat", json=continuation_payload)
+            resp_cont.raise_for_status()
+            data_cont = resp_cont.json()
+            content_cont = data_cont.get("message", {}).get("content", "")
+            tokens_cont = data_cont.get("eval_count", 0)
+            return strip_reasoning_blocks(content_cont), tokens + tokens_cont
+
+        return visible_text, tokens

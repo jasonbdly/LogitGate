@@ -28,6 +28,18 @@ def test_strip_reasoning_blocks() -> None:
     no_think = "Standard answer without thinking."
     assert strip_reasoning_blocks(no_think) == "Standard answer without thinking."
 
+    # Unclosed <think> truncated mid-thought
+    unclosed = "<think>Pondering that gets cut off due to max_tokens"
+    assert strip_reasoning_blocks(unclosed) == ""
+
+    # Unclosed <think> with text before it
+    with_pre = "Prefix answer.<think>Cut off reasoning..."
+    assert strip_reasoning_blocks(with_pre) == "Prefix answer."
+
+    # Closed block followed by unclosed block
+    closed_then_unclosed = "<think>First thought</think>Middle answer<think>Second thought cut off"
+    assert strip_reasoning_blocks(closed_then_unclosed) == "Middle answer"
+
 
 # ---------------------------------------------------------------------------
 # OllamaBackend Tests
@@ -159,6 +171,136 @@ async def test_ollama_backend_async_and_reuse() -> None:
     # 4. aclose
     await backend.aclose()
     assert async_client.is_closed
+
+
+def test_ollama_backend_generate_auto_recovery_mid_thought_truncation() -> None:
+    captured_payloads: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        captured_payloads.append(payload)
+        if len(captured_payloads) == 1:
+            # First request: consumed 50 tokens inside <think>, truncated mid-thought
+            assert payload.get("think") is True
+            assert payload.get("options", {}).get("num_predict") == 50
+            return httpx.Response(
+                200,
+                json={
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>I am analyzing whether the candidate meets the rubric and considering edge cases",
+                    },
+                    "eval_count": 50,
+                },
+            )
+        else:
+            # Second request: True continuation with closed </think> and think=False
+            assert payload.get("think") is False
+            assert len(payload.get("messages", [])) == 2
+            assert payload["messages"][0]["role"] == "user"
+            assert payload["messages"][1]["role"] == "assistant"
+            assert payload["messages"][1]["content"].endswith("</think>\n")
+            assert "<think>I am analyzing" in payload["messages"][1]["content"]
+            assert payload.get("options", {}).get("num_predict") == 50
+            return httpx.Response(
+                200,
+                json={
+                    "message": {
+                        "role": "assistant",
+                        "content": "[VERDICT: FAIL] The candidate failed the rubric requirements.",
+                    },
+                    "eval_count": 18,
+                },
+            )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    backend = OllamaBackend(client=client)
+
+    text, tokens = backend.generate("Explain rubric", max_tokens=50, think=True)
+    assert text == "[VERDICT: FAIL] The candidate failed the rubric requirements."
+    assert tokens == 68  # 50 + 18 total tokens
+    assert len(captured_payloads) == 2
+    assert captured_payloads[0]["think"] is True
+    assert captured_payloads[1]["think"] is False
+    assert captured_payloads[1]["messages"][1]["role"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_ollama_backend_agenerate_auto_recovery() -> None:
+    captured_payloads: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        captured_payloads.append(payload)
+        if len(captured_payloads) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>Async reasoning that was truncated...",
+                    },
+                    "eval_count": 40,
+                },
+            )
+        else:
+            assert payload.get("think") is False
+            assert len(payload.get("messages", [])) == 2
+            assert payload["messages"][1]["role"] == "assistant"
+            assert payload["messages"][1]["content"].endswith("</think>\n")
+            return httpx.Response(
+                200,
+                json={
+                    "message": {
+                        "role": "assistant",
+                        "content": "[VERDICT: PASS] All criteria verified.",
+                    },
+                    "eval_count": 15,
+                },
+            )
+
+    transport = httpx.MockTransport(handler)
+    async_client = httpx.AsyncClient(transport=transport)
+    backend = OllamaBackend(async_client=async_client)
+
+    text, tokens = await backend.agenerate("Explain async", max_tokens=40, think=True)
+    assert text == "[VERDICT: PASS] All criteria verified."
+    assert tokens == 55
+    assert len(captured_payloads) == 2
+    assert captured_payloads[0]["think"] is True
+    assert captured_payloads[1]["think"] is False
+
+
+def test_ollama_backend_think_defaults_with_max_tokens() -> None:
+    captured_payloads: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        captured_payloads.append(payload)
+        return httpx.Response(
+            200,
+            json={
+                "message": {"role": "assistant", "content": "Sample response"},
+                "eval_count": 10,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    backend = OllamaBackend(client=client)
+
+    # 1. max_tokens=None -> default think=True
+    backend.generate("prompt 1", max_tokens=None)
+    assert captured_payloads[-1]["think"] is True
+
+    # 2. max_tokens=100 -> default think=False
+    backend.generate("prompt 2", max_tokens=100)
+    assert captured_payloads[-1]["think"] is False
+
+    # 3. max_tokens=100 with explicit think=True -> think=True
+    backend.generate("prompt 3", max_tokens=100, think=True)
+    assert captured_payloads[-1]["think"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -528,3 +670,69 @@ def test_cli_eval_human_output_and_file(
     assert code == 0
     captured = capsys.readouterr()
     assert "Verdict: PASSED" in captured.out
+
+
+def test_cli_explain_json_and_human(tmp_path: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    from logitgate.models import Verdict, DecisionStatus, LayerTrace
+    from logitgate.snapshot import VerdictSnapshot
+
+    v = Verdict(
+        passed=False,
+        status=DecisionStatus.FAILED,
+        probability=0.12,
+        triggered_layer="LogitGate",
+        total_latency_ms=45.0,
+        total_tokens_generated=0,
+        reason="LogitGate prob=0.1200",
+        traces=[
+            LayerTrace(
+                layer_name="LogitGate",
+                status=DecisionStatus.FAILED,
+                latency_ms=45.0,
+                calibrated_prob=0.12,
+            )
+        ],
+    )
+    snap = VerdictSnapshot(
+        test_name="test_bad_app",
+        rubric="No hardcoded secrets",
+        candidate="API_KEY = 'secret123'",
+        verdict=v,
+    )
+    snap_dir = tmp_path / "failures"
+    saved_path = snap.save(directory=snap_dir)
+
+    # 1. explain with exact file and --json
+    code = main([
+        "explain",
+        str(saved_path),
+        "--backend",
+        "stub://default",
+        "--json",
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["triggered_layer"] == "JudgeGate"
+    assert len(data["traces"]) == 2  # LogitGate trace + JudgeGate trace
+
+    # 2. explain with directory (resolves latest.json) and human output
+    code2 = main([
+        "explain",
+        str(snap_dir),
+        "--backend",
+        "stub://default",
+    ])
+    assert code2 == 0
+    captured2 = capsys.readouterr()
+    assert "LOGITGATE FAILURE REPLAY & EXPLANATION" in captured2.out
+    assert "Snapshot ID:" in captured2.out
+    assert "test_bad_app" in captured2.out
+    assert "Diagnostic Critique:" in captured2.out
+
+    # 3. explain with missing path
+    code3 = main([
+        "explain",
+        str(tmp_path / "nonexistent"),
+    ])
+    assert code3 == 1

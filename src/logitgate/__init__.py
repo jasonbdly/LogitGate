@@ -3,12 +3,15 @@ from logitgate.config import (
     configure,
     reset_config,
     get_default_backend,
+    get_default_save_failures,
+    get_default_snapshot_dir,
 )
 from logitgate.models import (
     Verdict,
     LayerTrace,
     DecisionStatus,
 )
+from logitgate.snapshot import VerdictSnapshot
 from logitgate.debiasing.permutation import (
     fit_calibration,
     CalibrationResult,
@@ -55,6 +58,7 @@ __all__ = [
     "JudgeGate",
     "Cascade",
     "Verdict",
+    "VerdictSnapshot",
     "LayerTrace",
     "DecisionStatus",
     "StubBackend",
@@ -83,4 +87,6 @@ __all__ = [
     "configure",
     "reset_config",
     "get_default_backend",
+    "get_default_save_failures",
+    "get_default_snapshot_dir",
 ]

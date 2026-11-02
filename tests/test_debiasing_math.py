@@ -4,7 +4,7 @@ import math
 import pytest
 from logitgate.backends.base import StubBackend
 from logitgate.debiasing.permutation import combine_symmetric_log_odds, fit_calibration
-from logitgate.debiasing.softmax import extract_token_logprob, compute_binary_log_odds
+from logitgate.debiasing.softmax import extract_token_logprob
 from logitgate.debiasing.inversion import (
     compile_binary_prompt,
     compile_batch_binary_prompt,

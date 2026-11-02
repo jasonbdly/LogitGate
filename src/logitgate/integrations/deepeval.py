@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict, Optional, Tuple
 
-from logitgate.backends.base import LogitBackend, resolve_logit_backend
+from logitgate.backends.base import LogitBackend
 from logitgate.gates.logit_gate import LogitGate
 
 # Graceful optional imports for DeepEval

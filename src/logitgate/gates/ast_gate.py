@@ -275,7 +275,7 @@ class ASTGate(BaseGate):
 
                 props = self.json_schema.get("properties")
                 if isinstance(props, dict):
-                    type_map = {
+                    type_map: dict[str, type | tuple[type, ...]] = {
                         "string": str,
                         "integer": int,
                         "number": (int, float),

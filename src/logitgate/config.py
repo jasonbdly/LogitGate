@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Optional
 
 
 class _ConfigState:
@@ -12,6 +12,8 @@ class _ConfigState:
         self.fail_threshold: Optional[float] = None
         self.logit_temperature: Optional[float] = None
         self.num_ctx: Optional[int] = None
+        self.save_failures: Optional[bool] = None
+        self.snapshot_dir: Optional[str] = None
 
     def reset(self) -> None:
         self.backend = None
@@ -20,6 +22,8 @@ class _ConfigState:
         self.fail_threshold = None
         self.logit_temperature = None
         self.num_ctx = None
+        self.save_failures = None
+        self.snapshot_dir = None
 
 
 _state = _ConfigState()
@@ -90,6 +94,26 @@ class _DefaultsMeta(type):
     def num_ctx(cls, val: Optional[int]) -> None:
         _state.num_ctx = val
 
+    @property
+    def save_failures(cls) -> bool:
+        if _state.save_failures is not None:
+            return _state.save_failures
+        return os.environ.get("LOGITGATE_SAVE_FAILURES", "0").lower() in ("1", "true", "yes")
+
+    @save_failures.setter
+    def save_failures(cls, val: Optional[bool]) -> None:
+        _state.save_failures = val
+
+    @property
+    def snapshot_dir(cls) -> str:
+        if _state.snapshot_dir is not None:
+            return _state.snapshot_dir
+        return os.environ.get("LOGITGATE_SNAPSHOT_DIR", ".logitgate/failures")
+
+    @snapshot_dir.setter
+    def snapshot_dir(cls, val: Optional[str]) -> None:
+        _state.snapshot_dir = val
+
 
 class LogitGateDefaults(metaclass=_DefaultsMeta):
     """Global configuration defaults for LogitGate."""
@@ -103,6 +127,8 @@ def configure(
     fail_threshold: Optional[float] = None,
     logit_temperature: Optional[float] = None,
     num_ctx: Optional[int] = None,
+    save_failures: Optional[bool] = None,
+    snapshot_dir: Optional[str] = None,
 ) -> None:
     """Configures global defaults for LogitGate."""
     if backend is not None:
@@ -117,6 +143,10 @@ def configure(
         _state.logit_temperature = logit_temperature
     if num_ctx is not None:
         _state.num_ctx = num_ctx
+    if save_failures is not None:
+        _state.save_failures = save_failures
+    if snapshot_dir is not None:
+        _state.snapshot_dir = snapshot_dir
 
 
 def reset_config() -> None:
@@ -132,3 +162,13 @@ def get_default_backend() -> str:
 def get_default_model() -> Optional[str]:
     """Resolves default model string via configure() or LOGITGATE_MODEL."""
     return LogitGateDefaults.model
+
+
+def get_default_save_failures() -> bool:
+    """Resolves default failure saving flag via configure() or LOGITGATE_SAVE_FAILURES."""
+    return LogitGateDefaults.save_failures
+
+
+def get_default_snapshot_dir() -> str:
+    """Resolves default snapshot directory via configure() or LOGITGATE_SNAPSHOT_DIR."""
+    return LogitGateDefaults.snapshot_dir

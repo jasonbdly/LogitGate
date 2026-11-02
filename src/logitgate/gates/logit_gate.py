@@ -16,7 +16,6 @@ from logitgate.debiasing.inversion import (
 from logitgate.debiasing.permutation import combine_symmetric_log_odds
 from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
-    compute_normalized_probabilities,
     extract_token_logprob,
 )
 from logitgate.gates.base import BaseGate
@@ -60,6 +59,7 @@ class LogitGate(BaseGate):
         query_first: bool = True,
         logit_temperature: Optional[float | Literal["auto"]] = None,
         preset: Optional[Literal["strict", "balanced", "fast_ci"]] = None,
+        save_on_fail: Optional[bool] = None,
         name: str = "LogitGate",
     ) -> None:
         if preset is not None:
@@ -132,12 +132,53 @@ class LogitGate(BaseGate):
 
         self.rubric = rubric.strip()
         self.preset = preset
+        self.save_on_fail = save_on_fail
         self.pass_threshold = effective_pass_thresh
         self.fail_threshold = effective_fail_thresh
         self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
         self.name = name
+
+    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        if verdict.passed:
+            return verdict
+
+        save_on_fail = kwargs.get("save_on_fail", self.save_on_fail)
+        from logitgate.config import get_default_save_failures
+        should_save = save_on_fail if save_on_fail is not None else get_default_save_failures()
+        if not should_save:
+            return verdict
+
+        if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
+            return verdict
+
+        from logitgate.snapshot import VerdictSnapshot
+        gate_config = {
+            "rubric": self.rubric,
+            "pass_threshold": self.pass_threshold,
+            "fail_threshold": self.fail_threshold,
+            "symmetric_debiasing": self.symmetric_debiasing,
+            "query_first": self.query_first,
+            "logit_temperature": self.logit_temperature,
+            "preset": self.preset,
+            "name": self.name,
+        }
+        if hasattr(self, "model") and self.model:
+            gate_config["model"] = self.model
+
+        test_name = kwargs.get("test_name")
+        snapshot = VerdictSnapshot(
+            test_name=test_name,
+            rubric=self.rubric,
+            candidate=candidate,
+            verdict=verdict,
+            gate_config=gate_config,
+        )
+        saved_path = snapshot.save(directory=kwargs.get("snapshot_dir"))
+        if verdict.traces:
+            verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
+        return verdict
 
     def __repr__(self) -> str:
         rubric_repr = repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
@@ -206,7 +247,7 @@ class LogitGate(BaseGate):
             tokens_generated=0,
         )
 
-        return Verdict(
+        verdict = Verdict(
             passed=passed,
             status=status,
             probability=round(calibrated_prob, 4),
@@ -216,6 +257,7 @@ class LogitGate(BaseGate):
             reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
             traces=[trace],
         )
+        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
@@ -277,7 +319,7 @@ class LogitGate(BaseGate):
             tokens_generated=0,
         )
 
-        return Verdict(
+        verdict = Verdict(
             passed=passed,
             status=status,
             probability=round(calibrated_prob, 4),
@@ -287,6 +329,7 @@ class LogitGate(BaseGate):
             reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
             traces=[trace],
         )
+        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
 
     def evaluate_batch(self, candidate: Any, rubrics: Sequence[str]) -> list[Verdict]:
         """

@@ -4,7 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
 from pydantic import BaseModel
 
 
