@@ -163,11 +163,13 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
+        # Default to thinking enabled for generative Layer 2 Judge unless max_tokens is tightly capped (< 256)
+        think_default = False if (max_tokens is not None and max_tokens < 256) else True
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "think": False,
+            "think": kwargs.pop("think", think_default),
             "options": opts,
         }
         if self.keep_alive is not None:
@@ -193,11 +195,12 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
+        think_default = False if (max_tokens is not None and max_tokens < 256) else True
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "think": False,
+            "think": kwargs.pop("think", think_default),
             "options": opts,
         }
         if self.keep_alive is not None:

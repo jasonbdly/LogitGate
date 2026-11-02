@@ -41,6 +41,7 @@ class JudgeGate(BaseGate):
         model: Optional[str] = None,
         trigger: TriggerMode = "on_ambiguous_or_fail",
         max_tokens: Optional[int] = None,
+        think: Optional[bool] = None,
         name: str = "JudgeGate",
     ) -> None:
         valid_triggers = {"on_ambiguous_or_fail", "on_ambiguous_only", "always"}
@@ -59,6 +60,7 @@ class JudgeGate(BaseGate):
         self.model = effective_model
         self.trigger = trigger
         self.max_tokens = max_tokens
+        self.think = think
         self.name = name
 
     def __repr__(self) -> str:
@@ -246,7 +248,10 @@ class JudgeGate(BaseGate):
     def evaluate(self, candidate: Any, rubric_override: Optional[str] = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt = self._compile_prompt(candidate, rubric_override=rubric_override)
-        text, tokens = self.backend.generate(prompt, max_tokens=self.max_tokens)
+        gen_kwargs = dict(kwargs)
+        if self.think is not None and "think" not in gen_kwargs:
+            gen_kwargs["think"] = self.think
+        text, tokens = self.backend.generate(prompt, max_tokens=self.max_tokens, **gen_kwargs)
         latency = (time.perf_counter() - t0) * 1000.0
 
         passed, status, score = self._parse_verdict(text)
@@ -272,7 +277,10 @@ class JudgeGate(BaseGate):
     async def aevaluate(self, candidate: Any, rubric_override: Optional[str] = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt = self._compile_prompt(candidate, rubric_override=rubric_override)
-        text, tokens = await self.backend.agenerate(prompt, max_tokens=self.max_tokens)
+        gen_kwargs = dict(kwargs)
+        if self.think is not None and "think" not in gen_kwargs:
+            gen_kwargs["think"] = self.think
+        text, tokens = await self.backend.agenerate(prompt, max_tokens=self.max_tokens, **gen_kwargs)
         latency = (time.perf_counter() - t0) * 1000.0
 
         passed, status, score = await self._aparse_verdict(text)
