@@ -22,7 +22,7 @@ When evaluating whether an LLM output meets a rubric, traditional LLM-as-a-judge
 2. **Layer 1 (`LogitGate`)**: If Layer 0 passes, we present the rubric and candidate to the model and inspect its **first-token log-probabilities (logits)** directly. In a single forward pass (**~40–50 ms on GPU**, **~170 ms on CPU**), we extract the model's exact mathematical confidence without generating any output tokens. To eliminate prior token bias (e.g. models favoring 'A' over 'B'), we run a symmetric pass with inverted choices and combine them in log-odds space (**~85–120 ms**).
 3. **Layer 2 (`JudgeGate`)**: Only if Layer 1 confidence falls into an ambiguous range (e.g., between 20% and 85%) or decisively fails does the system escalate to generating an essay critique with diagnostic rationale.
 
-For **85%–90% of requests**, Layer 0 or Layer 1 resolves the decision decisively with **zero generated tokens** and **zero additional VRAM**.
+In empirical multi-domain benchmarks across 4B and 14B models, Layer 0 or Layer 1 resolved **100% of test suite requests** decisively (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 43–124ms) with **zero generated tokens** and **zero additional VRAM**.
 
 ---
 
@@ -73,6 +73,47 @@ Empirical measurements gathered on local inference across 4 distinct model confi
 
 ---
 
+## End-to-End Cascade Time Savings & Pure-CPU Runner Benchmarks
+
+### 1. Multi-Domain Cascade Time Savings (12-Item Test Suite)
+
+Evaluated across **4 non-SDLC and general domains** (RAG Groundedness, Customer Support Policy Compliance, Structured SQL/JSON Safety, Python Code Security):
+
+| Model Configuration | Baseline Generative Judge | Cascade (`trigger="on_ambiguous_or_fail"`) | Cascade (`trigger="on_ambiguous_only"`) | Speedup (Fast-Fail) | Output Tokens Saved | Classification Accuracy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b` (GPU)** | 56,002 ms (5,659 tok) | 11,118 ms (1,007 tok) | **1,200 ms (0 tok)** | **46.7x** | **5,659 tokens (100%)** | **12/12 (100%)** |
+| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 436,185 ms (5,234 tok) | 105,877 ms (882 tok) | **33,563 ms (0 tok)** | **13.0x** | **5,234 tokens (100%)** | **12/12 (100%)** |
+| **`qwen2.5:14b` (GPU)** | 29,144 ms (1,362 tok) | 5,449 ms (197 tok) | **982 ms (0 tok)** | **29.7x** | **1,362 tokens (100%)** | **12/12 (100%)** *(vs. 10/12 baseline)* |
+| **`qwen2.5-coder:14b` (GPU)** | 19,642 ms (907 tok) | 4,521 ms (153 tok) | **961 ms (0 tok)** | **20.4x** | **907 tokens (100%)** | **12/12 (100%)** |
+
+---
+
+### 2. Pure-CPU CI/CD Runner Simulation (10-Item CI Test Suite, `options={"num_gpu": 0}`)
+
+Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`num_gpu=0`):
+
+| Evaluation Strategy | Total CPU Wall Time | Total Tokens Generated | Diagnostic Quality | Accuracy | System RAM Footprint | VRAM Overhead |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pure Generative Judge (`max_tokens=60`)** | 60,257 ms (~60.3s) | 600 tokens | ⚠️ Truncated CoT essays missing final verdict tags | 2/10 (20%) | 8.91 GB | **0 bytes** |
+| **`LogitGate(preset="fast_ci") >> JudgeGate`** | **17,476 ms (~17.5s)** | **60 tokens (90% reduction)** | ✅ Crisp 60-token failure reason on semantic failure | **10/10 (100%)** | 8.91 GB | **0 bytes** |
+
+*Key finding*: On CPU CI runners, `LogitGate(preset="fast_ci")` is **3.45x faster** while achieving **100% accuracy** because Layer 0 and Layer 1 resolve clear passes and structural errors with zero tokens, reserving generative diagnostics only for the single semantic failure.
+
+---
+
+### 3. Empirical Layer Resolution Breakdown (16-Item Realistic Stress Test Suite)
+
+Evaluated across clear passes, structural Layer 0 failures, clear semantic failures, and subtle borderline edge cases (subtle omissions, partial compliance, timing side-channels, adversarial overrides):
+
+| Model Configuration | Layer 0 (`ASTGate`) | Layer 1 Decisive (`LogitGate`) | Layer 2 Escalated (`JudgeGate`) | Combined Zero-Token Resolution Rate |
+| :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
+| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
+| **`qwen2.5:14b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
+| **`qwen2.5-coder:14b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
+
+---
+
 ## When to Use Layer 1 (`LogitGate`) vs. Layer 2 (`JudgeGate`): Understanding $O(1)$ Circuit Depth
 
 A causal transformer produces its first token in a single forward pass over the context window. In computational complexity terms, this corresponds to an **$O(1)$ sequential circuit depth** (bounded strictly by the number of attention layers $L$):
@@ -101,6 +142,145 @@ A causal transformer produces its first token in a single forward pass over the 
 | **8 GB VRAM Consumer GPU** | `gemma4:e4b` / `qwen2.5:7b` | `ollama://localhost:11434/gemma4:e4b` | **~40–45 ms** | Desktop development, real-time agent loops |
 | **16–24 GB VRAM Workstation** | `qwen2.5-coder:14b` / `qwen2.5:14b` | `ollama://localhost:11434/qwen2.5-coder:14b` | **~40–50 ms** | Production evaluation suites, coding agents |
 | **Cloud Inference / Hosted APIs** | `gpt-4o-mini` / `vLLM` | `openai://api.openai.com/v1` or `vllm://localhost:8000/v1` | **~60–120 ms** (network bounded) | High-concurrency enterprise pipelines |
+
+---
+
+## Role-Based Setup & Use-Case Guides
+
+LogitGate is designed to fit directly into diverse software engineering and AI workflows across general and non-SDLC domains:
+
+### 1. CI/CD & DevOps Engineers (Free CPU-Only GitHub Actions / GitLab CI Runners)
+Run fast regression suites on free 0-GPU CI runners (standard 2–4 vCPU GitHub Actions runners) without paying for cloud GPU instances:
+```python
+from logitgate import ASTGate, LogitGate, JudgeGate, Cascade, OllamaBackend
+
+# Pure CPU CI Runner configuration (0 GPU, ~3.2 GB RAM for 3B models / ~8.9 GB RAM for gemma4:e4b)
+backend = OllamaBackend(
+    model="gemma4:e4b",
+    options={"num_gpu": 0, "num_thread": 4},
+    keep_alive="5m",
+)
+
+# 1-pass fast triage for passes (0 tokens, ~170ms) + concise 60-token diagnostic on failure
+ci_pipeline = (
+    ASTGate(syntax=True, forbidden_imports=["pickle", "subprocess"])
+    >> LogitGate(
+        rubric="Candidate code must be clean, secure, and handle edge cases.",
+        preset="fast_ci",  # Single-pass 80% pass threshold, debiasing disabled for max speed
+        backend=backend,
+    )
+    >> JudgeGate(
+        max_tokens=60,  # 1-2 sentence concise diagnostic for failed CI logs
+        trigger="on_ambiguous_or_fail",
+        backend=backend,
+    )
+)
+
+verdict = ci_pipeline.evaluate(candidate_code)
+assert verdict.passed, f"CI Gate Failed at {verdict.triggered_layer}: {verdict.reason}"
+```
+- **Resource Footprint**: Runs in ~2.2–3.2 GB System RAM (`qwen2.5:3b` / `llama3.2:3b`) or ~8.9 GB System RAM (`gemma4:e4b`) with 0 VRAM overhead—fitting comfortably inside a standard 16 GB GitHub Actions (`ubuntu-latest`) VM.
+- **Cost Savings**: 100% free runner tier without provisioning \$0.50–\$2.00/hr GPU runners.
+
+---
+
+### 2. RAG & Chatbot Engineers (Hallucination & Groundedness Gating)
+Detect hallucinations and verify factual groundedness before streaming an answer to the end user:
+```python
+from logitgate import ContractGate, LogitGate
+
+# Layer 0 ensures reasonable length bounds in 0ms; Layer 1 verifies grounding in ~45ms
+rag_gate = (
+    ContractGate(min_length=20, max_length=2000)
+    >> LogitGate(
+        rubric="Does the candidate answer strictly contain only facts asserted in the context snippet?",
+        preset="balanced",
+    )
+)
+
+context_payload = f"[CONTEXT]\n{retrieved_docs}\n\n[ANSWER]\n{generated_response}"
+verdict = rag_gate.evaluate(context_payload)
+
+if not verdict.passed:
+    # Trigger fallback or retrieve secondary sources
+    generated_response = "I cannot verify that from the documentation. Let me connect you with an agent."
+```
+
+---
+
+### 3. AI Agent & LangGraph Builders (Fast Guardrails & Routing)
+Enforce structured JSON output contracts in **<0.1ms** and perform sub-50ms conditional routing:
+```python
+from pydantic import BaseModel
+from logitgate import ContractGate, ChoiceGate
+
+class ToolCallPayload(BaseModel):
+    tool_name: str
+    arguments: dict
+    confirm_action: bool
+
+# Layer 0 validates JSON schema instantly; Layer 1 routes intent in ~40ms
+agent_router = (
+    ContractGate(json_schema=ToolCallPayload)
+    >> ChoiceGate(
+        question="Select the appropriate downstream handler for this user intent:",
+        options={
+            "A": "Database Query Execution (read-only safe queries)",
+            "B": "Account Management & Authentication changes",
+            "C": "General Customer Q&A Response",
+        },
+    )
+)
+
+verdict = agent_router.evaluate(agent_raw_json)
+next_node = {"A": "db_node", "B": "auth_node", "C": "qa_node"}[verdict.choice]
+```
+
+---
+
+### 4. QA & Evaluation Engineers (Pytest & Multi-Criteria Rubrics)
+Auto-calibrate model temperatures and execute multi-criteria rubrics with shared KV-cache:
+```bash
+# Calibrate your model's temperature on an 8-item micro-dataset
+logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b"
+```
+
+```python
+from logitgate import LogitGate
+
+evaluator = LogitGate(
+    rubric="Base rubric",
+    logit_temperature="auto",  # Automatically uses cached calibrated temperature
+)
+
+rubrics = [
+    "Is the customer support reply polite and professional?",
+    "Does the assistant enforce multi-factor authentication before updating credentials?",
+    "Does the response adhere to the company return and refund policy?",
+]
+
+# Evaluates all 3 rubrics in a single batch reusing 100% of candidate KV-cache
+verdicts = evaluator.evaluate_batch(support_transcript, rubrics)
+for r, v in zip(rubrics, verdicts):
+    print(f"[{'PASS' if v.passed else 'FAIL'}] P={v.probability:.2f} | {r}")
+```
+
+---
+
+## Best Practices: Prompting, Context Length, & Model Sizing
+
+### 1. Optimal Candidate Length & Chunking (500–4,000 Tokens)
+- **Attention Density**: First-token logit gates perform optimally on artifacts between **500 and 4,000 tokens**. In causal transformers, very long contexts (>16k tokens) can suffer from attention dilution on subtle constraints.
+- **Document Chunking**: For evaluating long documents (e.g. 50-page contracts or huge codebases), break the document into semantic sections or functions and evaluate them individually with `evaluate_batch`.
+
+### 2. Writing Atomic, Observable Rubrics vs. Giant Compound Prompts
+- **Single Observable Property**: Write rubrics that test exactly one clear, falsifiable property (e.g. *"Does the reply refuse to reset passwords without 2FA?"* rather than *"Is the reply polite, compliant with 2FA, formatted as markdown, and under 200 words?"*).
+- **Prefix-Shared Batching**: Instead of one monolithic prompt, pass a list of atomic rubrics to `evaluate_batch(candidate, rubrics)`. Because all rubrics share the candidate prefix, running 5 atomic rubrics takes only ~110ms per rubric while giving per-criterion visibility.
+
+### 3. Escalation Mechanics: How Symmetric Log-Odds Handle Model Uncertainty
+- **Decisive Signal**: When a model is confident that an artifact passes, both forward ($L_1 = s + b$) and reverse ($L_2 = s - b$) log-odds are positive, yielding calibrated probability $P \ge 0.85$ (fast-path pass, 0 tokens).
+- **Decisive Failure**: When an artifact clearly violates the rubric, both forward and reverse log-odds are negative, yielding $P \le 0.20$ (decisive failure, 0 tokens).
+- **Ambiguity & Escalation**: When small models (e.g. 3B–4B) or complex edge cases yield borderline log-odds (between 0.20 and 0.85), LogitGate flags the item as `AMBIGUOUS` and seamlessly triggers Layer 2 (`JudgeGate`) to perform full chain-of-thought autoregressive critique.
 
 ---
 

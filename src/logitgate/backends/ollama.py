@@ -152,11 +152,13 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
-    def generate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         opts: dict[str, Any] = {
             "temperature": 0.0,
             "num_ctx": self.num_ctx,
         }
+        if max_tokens is not None:
+            opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
         payload: dict[str, Any] = {
@@ -179,11 +181,13 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("eval_count", 0)
         return strip_reasoning_blocks(content), tokens
 
-    async def agenerate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         opts: dict[str, Any] = {
             "temperature": 0.0,
             "num_ctx": self.num_ctx,
         }
+        if max_tokens is not None:
+            opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
         payload: dict[str, Any] = {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Literal, Mapping, Optional, Sequence
 
 from logitgate.backends.base import LogitBackend, resolve_logit_backend
 from logitgate.config import LogitGateDefaults, get_default_backend, get_default_model
@@ -56,19 +56,40 @@ class LogitGate(BaseGate):
         model: Optional[str] = None,
         pass_threshold: Optional[float] = None,
         fail_threshold: Optional[float] = None,
-        symmetric_debiasing: bool = True,
+        symmetric_debiasing: Optional[bool] = None,
         query_first: bool = True,
-        logit_temperature: Optional[float] = None,
+        logit_temperature: Optional[float | Literal["auto"]] = None,
+        preset: Optional[Literal["strict", "balanced", "fast_ci"]] = None,
         name: str = "LogitGate",
     ) -> None:
+        if preset is not None:
+            if preset == "strict":
+                default_pass = 0.90
+                default_fail = 0.25
+                default_sym = True
+            elif preset == "balanced":
+                default_pass = 0.85
+                default_fail = 0.20
+                default_sym = True
+            elif preset == "fast_ci":
+                default_pass = 0.80
+                default_fail = 0.20
+                default_sym = False
+            else:
+                raise ValueError(f"Invalid preset '{preset}'. Must be one of ['strict', 'balanced', 'fast_ci']")
+        else:
+            default_pass = LogitGateDefaults.pass_threshold
+            default_fail = LogitGateDefaults.fail_threshold
+            default_sym = True
+
         effective_pass_thresh = (
-            LogitGateDefaults.pass_threshold if pass_threshold is None else pass_threshold
+            default_pass if pass_threshold is None else pass_threshold
         )
         effective_fail_thresh = (
-            LogitGateDefaults.fail_threshold if fail_threshold is None else fail_threshold
+            default_fail if fail_threshold is None else fail_threshold
         )
-        effective_temp = (
-            LogitGateDefaults.logit_temperature if logit_temperature is None else logit_temperature
+        effective_sym = (
+            default_sym if symmetric_debiasing is None else symmetric_debiasing
         )
 
         if not rubric or not rubric.strip():
@@ -81,20 +102,39 @@ class LogitGate(BaseGate):
             raise ValueError(
                 f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
             )
-        if effective_temp <= 0.0:
-            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
 
         effective_backend = (
             get_default_backend() if (backend is None or backend == "default") else backend
         )
         effective_model = model or get_default_model()
-
-        self.rubric = rubric.strip()
         self.backend = resolve_logit_backend(effective_backend, model=effective_model)
         self.model = effective_model
+
+        if logit_temperature == "auto":
+            from logitgate.debiasing.permutation import auto_calibrate_backend, get_model_temperature
+            temp = get_model_temperature(effective_model)
+            if temp == 1.0 and effective_model not in ("default", "stub", None):
+                cal_res = auto_calibrate_backend(self.backend, model_key=effective_model)
+                temp = cal_res.optimal_temperature
+            effective_temp = temp
+        elif logit_temperature is not None:
+            effective_temp = float(logit_temperature)
+        else:
+            from logitgate.debiasing.permutation import get_model_temperature
+            if LogitGateDefaults.logit_temperature != 1.0:
+                effective_temp = LogitGateDefaults.logit_temperature
+            else:
+                model_temp = get_model_temperature(effective_model)
+                effective_temp = model_temp if model_temp != 1.0 else LogitGateDefaults.logit_temperature
+
+        if effective_temp <= 0.0:
+            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+
+        self.rubric = rubric.strip()
+        self.preset = preset
         self.pass_threshold = effective_pass_thresh
         self.fail_threshold = effective_fail_thresh
-        self.symmetric_debiasing = symmetric_debiasing
+        self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
         self.name = name

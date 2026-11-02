@@ -5,6 +5,7 @@ import json
 import re
 import time
 from typing import Any, Callable, Optional, Sequence, Union
+from pydantic import BaseModel
 
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
@@ -77,6 +78,9 @@ class ASTGate(BaseGate):
         forbidden_patterns: Optional[Sequence[str]] = None,
         required_sections: Optional[Sequence[str]] = None,
         acyclic_dag: bool = False,
+        json_schema: Optional[dict[str, Any] | type[BaseModel]] = None,
+        min_length: Optional[int] = None,
+        max_length: Optional[int] = None,
         validators: Optional[Sequence[Callable[[Any], Union[bool, tuple[bool, str]]]]] = None,
         name: str = "ASTGate",
     ) -> None:
@@ -85,6 +89,9 @@ class ASTGate(BaseGate):
         self.forbidden_patterns = list(forbidden_patterns) if forbidden_patterns else None
         self.required_sections = list(required_sections) if required_sections else None
         self.acyclic_dag = acyclic_dag
+        self.json_schema = json_schema
+        self.min_length = min_length
+        self.max_length = max_length
         self.validators = list(validators) if validators else None
         self.name = name
 
@@ -100,6 +107,13 @@ class ASTGate(BaseGate):
             features.append(f"required_sections={self.required_sections!r}")
         if self.acyclic_dag:
             features.append("acyclic_dag=True")
+        if self.json_schema:
+            schema_name = getattr(self.json_schema, "__name__", str(self.json_schema))
+            features.append(f"json_schema={schema_name}")
+        if self.min_length is not None:
+            features.append(f"min_length={self.min_length}")
+        if self.max_length is not None:
+            features.append(f"max_length={self.max_length}")
         if self.validators:
             features.append(f"validators=[{len(self.validators)} callables]")
         feat_str = f", {', '.join(features)}" if features else ""
@@ -108,6 +122,227 @@ class ASTGate(BaseGate):
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         candidate_str = str(candidate)
+
+        # 0. Min / Max Length Checks
+        if self.min_length is not None and len(candidate_str) < self.min_length:
+            latency = (time.perf_counter() - t0) * 1000.0
+            err = f"Artifact length {len(candidate_str)} is less than minimum required length {self.min_length}"
+            trace = LayerTrace(
+                layer_name=self.name,
+                status=DecisionStatus.FAILED,
+                latency_ms=latency,
+                diagnostic_report=err,
+            )
+            return Verdict(
+                passed=False,
+                status=DecisionStatus.FAILED,
+                triggered_layer=self.name,
+                total_latency_ms=latency,
+                total_tokens_generated=0,
+                reason=err,
+                traces=[trace],
+            )
+
+        if self.max_length is not None and len(candidate_str) > self.max_length:
+            latency = (time.perf_counter() - t0) * 1000.0
+            err = f"Artifact length {len(candidate_str)} exceeds maximum allowed length {self.max_length}"
+            trace = LayerTrace(
+                layer_name=self.name,
+                status=DecisionStatus.FAILED,
+                latency_ms=latency,
+                diagnostic_report=err,
+            )
+            return Verdict(
+                passed=False,
+                status=DecisionStatus.FAILED,
+                triggered_layer=self.name,
+                total_latency_ms=latency,
+                total_tokens_generated=0,
+                reason=err,
+                traces=[trace],
+            )
+
+        # 0b. JSON Schema Check
+        if self.json_schema is not None:
+            parsed_json: Any = None
+            if isinstance(candidate, (dict, list)):
+                parsed_json = candidate
+            elif isinstance(candidate, str):
+                try:
+                    parsed_json = json.loads(candidate)
+                except json.JSONDecodeError as e:
+                    latency = (time.perf_counter() - t0) * 1000.0
+                    err = f"Invalid JSON syntax: {e}"
+                    trace = LayerTrace(
+                        layer_name=self.name,
+                        status=DecisionStatus.FAILED,
+                        latency_ms=latency,
+                        diagnostic_report=err,
+                    )
+                    return Verdict(
+                        passed=False,
+                        status=DecisionStatus.FAILED,
+                        triggered_layer=self.name,
+                        total_latency_ms=latency,
+                        total_tokens_generated=0,
+                        reason=err,
+                        traces=[trace],
+                    )
+            else:
+                latency = (time.perf_counter() - t0) * 1000.0
+                err = f"Expected JSON string, dict, or list; got {type(candidate).__name__}"
+                trace = LayerTrace(
+                    layer_name=self.name,
+                    status=DecisionStatus.FAILED,
+                    latency_ms=latency,
+                    diagnostic_report=err,
+                )
+                return Verdict(
+                    passed=False,
+                    status=DecisionStatus.FAILED,
+                    triggered_layer=self.name,
+                    total_latency_ms=latency,
+                    total_tokens_generated=0,
+                    reason=err,
+                    traces=[trace],
+                )
+
+            if isinstance(self.json_schema, type) and issubclass(self.json_schema, BaseModel):
+                try:
+                    if isinstance(parsed_json, dict):
+                        self.json_schema.model_validate(parsed_json)
+                    else:
+                        self.json_schema.model_validate_json(candidate_str)
+                except Exception as e:
+                    latency = (time.perf_counter() - t0) * 1000.0
+                    err = f"JSON validation failed for schema {self.json_schema.__name__}: {e}"
+                    trace = LayerTrace(
+                        layer_name=self.name,
+                        status=DecisionStatus.FAILED,
+                        latency_ms=latency,
+                        diagnostic_report=err,
+                    )
+                    return Verdict(
+                        passed=False,
+                        status=DecisionStatus.FAILED,
+                        triggered_layer=self.name,
+                        total_latency_ms=latency,
+                        total_tokens_generated=0,
+                        reason=err,
+                        traces=[trace],
+                    )
+            elif isinstance(self.json_schema, dict):
+                if not isinstance(parsed_json, dict):
+                    latency = (time.perf_counter() - t0) * 1000.0
+                    err = f"Expected JSON object (dict) for schema validation, got {type(parsed_json).__name__}"
+                    trace = LayerTrace(
+                        layer_name=self.name,
+                        status=DecisionStatus.FAILED,
+                        latency_ms=latency,
+                        diagnostic_report=err,
+                    )
+                    return Verdict(
+                        passed=False,
+                        status=DecisionStatus.FAILED,
+                        triggered_layer=self.name,
+                        total_latency_ms=latency,
+                        total_tokens_generated=0,
+                        reason=err,
+                        traces=[trace],
+                    )
+
+                required_keys = self.json_schema.get("required")
+                if isinstance(required_keys, (list, tuple, set)):
+                    for req_key in required_keys:
+                        if req_key not in parsed_json:
+                            latency = (time.perf_counter() - t0) * 1000.0
+                            err = f"Missing required JSON key: '{req_key}'"
+                            trace = LayerTrace(
+                                layer_name=self.name,
+                                status=DecisionStatus.FAILED,
+                                latency_ms=latency,
+                                diagnostic_report=err,
+                            )
+                            return Verdict(
+                                passed=False,
+                                status=DecisionStatus.FAILED,
+                                triggered_layer=self.name,
+                                total_latency_ms=latency,
+                                total_tokens_generated=0,
+                                reason=err,
+                                traces=[trace],
+                            )
+
+                props = self.json_schema.get("properties")
+                if isinstance(props, dict):
+                    type_map = {
+                        "string": str,
+                        "integer": int,
+                        "number": (int, float),
+                        "boolean": bool,
+                        "array": list,
+                        "object": dict,
+                    }
+                    for prop_name, prop_def in props.items():
+                        if prop_name in parsed_json and isinstance(prop_def, dict) and "type" in prop_def:
+                            expected_type_str = prop_def["type"]
+                            expected_type = type_map.get(expected_type_str)
+                            if expected_type and not isinstance(parsed_json[prop_name], expected_type):
+                                latency = (time.perf_counter() - t0) * 1000.0
+                                err = f"Property '{prop_name}' has invalid type: expected {expected_type_str}, got {type(parsed_json[prop_name]).__name__}"
+                                trace = LayerTrace(
+                                    layer_name=self.name,
+                                    status=DecisionStatus.FAILED,
+                                    latency_ms=latency,
+                                    diagnostic_report=err,
+                                )
+                                return Verdict(
+                                    passed=False,
+                                    status=DecisionStatus.FAILED,
+                                    triggered_layer=self.name,
+                                    total_latency_ms=latency,
+                                    total_tokens_generated=0,
+                                    reason=err,
+                                    traces=[trace],
+                                )
+                elif "required" not in self.json_schema:
+                    for key, expected in self.json_schema.items():
+                        if key not in parsed_json:
+                            latency = (time.perf_counter() - t0) * 1000.0
+                            err = f"Missing required JSON key: '{key}'"
+                            trace = LayerTrace(
+                                layer_name=self.name,
+                                status=DecisionStatus.FAILED,
+                                latency_ms=latency,
+                                diagnostic_report=err,
+                            )
+                            return Verdict(
+                                passed=False,
+                                status=DecisionStatus.FAILED,
+                                triggered_layer=self.name,
+                                total_latency_ms=latency,
+                                total_tokens_generated=0,
+                                reason=err,
+                                traces=[trace],
+                            )
+                        if isinstance(expected, type) and not isinstance(parsed_json[key], expected):
+                            latency = (time.perf_counter() - t0) * 1000.0
+                            err = f"Key '{key}' expected type {expected.__name__}, got {type(parsed_json[key]).__name__}"
+                            trace = LayerTrace(
+                                layer_name=self.name,
+                                status=DecisionStatus.FAILED,
+                                latency_ms=latency,
+                                diagnostic_report=err,
+                            )
+                            return Verdict(
+                                passed=False,
+                                status=DecisionStatus.FAILED,
+                                triggered_layer=self.name,
+                                total_latency_ms=latency,
+                                total_tokens_generated=0,
+                                reason=err,
+                                traces=[trace],
+                            )
 
         # 1. Syntax Check
         parsed_ast: Optional[ast.AST] = None

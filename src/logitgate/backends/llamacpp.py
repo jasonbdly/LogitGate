@@ -140,12 +140,15 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         )
         return self._extract_chat_top_logprobs(res)
 
-    def _in_process_generate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    def _in_process_generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         messages = [{"role": "user", "content": prompt}]
+        call_kwargs: dict[str, Any] = {"temperature": 0.0}
+        if max_tokens is not None:
+            call_kwargs["max_tokens"] = max_tokens
+        call_kwargs.update(kwargs)
         res = self.llm.create_chat_completion(
             messages=messages,
-            temperature=0.0,
-            **kwargs,
+            **call_kwargs,
         )
         choices = res.get("choices", [])
         content = choices[0].get("message", {}).get("content", "") if choices else ""
@@ -265,9 +268,9 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         resp.raise_for_status()
         return self._extract_completion_logprobs(resp.json())
 
-    def generate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         if self.llm is not None:
-            return self._in_process_generate(prompt, **kwargs)
+            return self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs)
 
         if not self._use_completion_fallback:
             url = f"{self.base_url}/v1/chat/completions"
@@ -276,6 +279,8 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.0,
             }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
             payload.update(kwargs)
             resp = self.client.post(url, json=payload)
             if resp.status_code == 404:
@@ -291,6 +296,8 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         # Fallback to /completion
         url = f"{self.base_url}/completion"
         payload = {"prompt": prompt, "temperature": 0.0}
+        if max_tokens is not None:
+            payload["n_predict"] = max_tokens
         payload.update(kwargs)
         resp = self.client.post(url, json=payload)
         resp.raise_for_status()
@@ -299,10 +306,10 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("tokens_predicted", data.get("tokens_evaluated", 0))
         return strip_reasoning_blocks(content), tokens
 
-    async def agenerate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         if self.llm is not None:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, self._in_process_generate, prompt)
+            return await loop.run_in_executor(None, lambda: self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs))
 
         if not self._use_completion_fallback:
             url = f"{self.base_url}/v1/chat/completions"
@@ -311,6 +318,8 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.0,
             }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
             payload.update(kwargs)
             resp = await self.async_client.post(url, json=payload)
             if resp.status_code == 404:
@@ -326,6 +335,8 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         # Fallback to /completion
         url = f"{self.base_url}/completion"
         payload = {"prompt": prompt, "temperature": 0.0}
+        if max_tokens is not None:
+            payload["n_predict"] = max_tokens
         payload.update(kwargs)
         resp = await self.async_client.post(url, json=payload)
         resp.raise_for_status()

@@ -152,13 +152,15 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
-    def generate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         payload.update(kwargs)
         resp = self.client.post(url, json=payload, headers=self._headers())
         resp.raise_for_status()
@@ -168,13 +170,15 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("usage", {}).get("completion_tokens", 0)
         return strip_reasoning_blocks(content), tokens
 
-    async def agenerate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         payload.update(kwargs)
         resp = await self.async_client.post(url, json=payload, headers=self._headers())
         resp.raise_for_status()

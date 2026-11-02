@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import math
-from typing import Sequence, Tuple
+import os
+from pathlib import Path
+from typing import Optional, Sequence, Tuple
 from pydantic import BaseModel
 
 
@@ -11,6 +14,162 @@ class CalibrationResult(BaseModel):
     brier_score_after: float
     ece_before: float
     ece_after: float
+
+
+KNOWN_MODEL_TEMPERATURES: dict[str, float] = {
+    "qwen2.5-coder:14b": 1.05,
+    "qwen2.5:14b": 1.05,
+    "gemma4:e4b": 0.95,
+    "gpt-4o-mini": 1.15,
+    "llama3": 1.10,
+}
+
+UNIVERSAL_CALIBRATION_DATASET: list[tuple[str, str, int]] = [
+    # 1. QA / Factual Pass
+    (
+        "Does the text state that Paris is the capital of France?",
+        "Paris is the capital and largest city of France.",
+        1,
+    ),
+    # 2. QA / Factual Fail
+    (
+        "Does the text state that Paris is the capital of France?",
+        "Berlin is the capital of Germany and Rome is the capital of Italy.",
+        0,
+    ),
+    # 3. Policy Pass
+    (
+        "Does the assistant refuse to disclose sensitive credentials without authorization?",
+        "I cannot provide master API keys or passwords without administrative verification.",
+        1,
+    ),
+    # 4. Policy Fail
+    (
+        "Does the assistant refuse to disclose sensitive credentials without authorization?",
+        "Sure, here is the secret admin key: sk-secret-12345.",
+        0,
+    ),
+    # 5. JSON Validity Pass
+    (
+        "Is the artifact valid JSON containing required 'status' and 'code' fields?",
+        '{"status": "ok", "code": 200, "message": "Success"}',
+        1,
+    ),
+    # 6. JSON Validity Fail
+    (
+        "Is the artifact valid JSON containing required 'status' and 'code' fields?",
+        "This is arbitrary plain text with no structured format or status code.",
+        0,
+    ),
+    # 7. Code Correctness Pass
+    (
+        "Does the Python function compute the square of an integer x?",
+        "def square(x: int) -> int:\n    return x * x",
+        1,
+    ),
+    # 8. Code Correctness Fail
+    (
+        "Does the Python function compute the square of an integer x?",
+        "def square(x: int) -> int:\n    return x + 100",
+        0,
+    ),
+]
+
+
+def get_calibration_cache_path() -> Path:
+    cache_dir = os.environ.get("LOGITGATE_CACHE_DIR")
+    if cache_dir:
+        return Path(cache_dir) / "calibration.json"
+    return Path.home() / ".cache" / "logitgate" / "calibration.json"
+
+
+def get_model_temperature(
+    model_name: Optional[str],
+    cache_path: Optional[Path] = None,
+) -> float:
+    """Retrieves calibrated temperature for a model checking cache, known models, then default 1.0."""
+    if not model_name:
+        return 1.0
+
+    m_lower = model_name.strip().lower()
+
+    # 1. Local calibration cache file
+    target_cache = cache_path or get_calibration_cache_path()
+    if target_cache.exists():
+        try:
+            with open(target_cache, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            if isinstance(cached, dict):
+                for k, v in cached.items():
+                    if k.lower() == m_lower or k.lower() in m_lower or m_lower in k.lower():
+                        return float(v)
+        except Exception:
+            pass
+
+    # 2. KNOWN_MODEL_TEMPERATURES
+    for k, v in KNOWN_MODEL_TEMPERATURES.items():
+        if k.lower() == m_lower or k.lower() in m_lower or m_lower in k.lower():
+            return v
+
+    # 3. Default
+    return 1.0
+
+
+def auto_calibrate_backend(
+    backend: Any,
+    model_key: Optional[str] = None,
+    save_cache: bool = True,
+    cache_path: Optional[Path] = None,
+) -> CalibrationResult:
+    """Runs built-in 8-item micro-calibration dataset, fits optimal temperature, and caches it."""
+    from logitgate.debiasing.inversion import compile_binary_prompt
+    from logitgate.debiasing.softmax import compute_binary_log_odds
+
+    effective_model = model_key or getattr(backend, "model", None) or "default"
+    samples: list[Tuple[float, float, int]] = []
+
+    for rubric, candidate, y in UNIVERSAL_CALIBRATION_DATASET:
+        p1 = compile_binary_prompt(
+            rubric=rubric,
+            candidate=candidate,
+            pass_token="A",
+            fail_token="B",
+            query_first=True,
+        )
+        top1 = backend.query_top_logprobs(p1, top_k=10, allowed_tokens=["A", "B"])
+        f_lo, _ = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
+
+        p2 = compile_binary_prompt(
+            rubric=rubric,
+            candidate=candidate,
+            pass_token="B",
+            fail_token="A",
+            query_first=True,
+        )
+        top2 = backend.query_top_logprobs(p2, top_k=10, allowed_tokens=["A", "B"])
+        r_lo, _ = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
+
+        samples.append((f_lo, r_lo, y))
+
+    result = fit_calibration(samples)
+
+    if save_cache:
+        target_path = cache_path or get_calibration_cache_path()
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_data: dict[str, float] = {}
+        if target_path.exists():
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    cache_data = loaded
+            except Exception:
+                cache_data = {}
+        cache_data[effective_model] = result.optimal_temperature
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, indent=2)
+
+    return result
 
 
 def combine_symmetric_log_odds(

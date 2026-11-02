@@ -13,6 +13,9 @@ from logitgate.debiasing.permutation import (
     fit_calibration,
     CalibrationResult,
     combine_symmetric_log_odds,
+    auto_calibrate_backend,
+    get_model_temperature,
+    KNOWN_MODEL_TEMPERATURES,
 )
 from logitgate.debiasing.softmax import (
     extract_token_logprob,
@@ -60,6 +63,9 @@ __all__ = [
     "LlamaCppBackend",
     "fit_calibration",
     "CalibrationResult",
+    "auto_calibrate_backend",
+    "get_model_temperature",
+    "KNOWN_MODEL_TEMPERATURES",
     "check",
     "combine_symmetric_log_odds",
     "extract_token_logprob",

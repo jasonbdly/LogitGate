@@ -364,3 +364,95 @@ async def test_aevaluate_batch_stampede_prevention():
     verdicts = await gate.aevaluate_batch("Candidate artifact", rubrics)
     assert len(verdicts) == 3
     assert all(v.passed for v in verdicts)
+
+
+# ==============================================================================
+# 4. Calibration, Presets, ContractGate & max_tokens Tests
+# ==============================================================================
+
+def test_auto_calibrate_backend(tmp_path):
+    """auto_calibrate_backend fits temperature on micro-calibration dataset and caches it."""
+    from logitgate import auto_calibrate_backend, get_model_temperature, KNOWN_MODEL_TEMPERATURES
+
+    backend = StubBackend(default_prob=0.92)
+    cache_file = tmp_path / "calibration.json"
+    res = auto_calibrate_backend(backend, model_key="test-model", save_cache=True, cache_path=cache_file)
+
+    assert res.optimal_temperature > 0.0
+    assert cache_file.exists()
+    assert get_model_temperature("test-model", cache_path=cache_file) == res.optimal_temperature
+    assert get_model_temperature("qwen2.5-coder:14b") == KNOWN_MODEL_TEMPERATURES["qwen2.5-coder:14b"]
+    assert get_model_temperature("non-existent-model-xyz") == 1.0
+
+
+def test_logit_gate_presets():
+    """LogitGate initializes with threshold & debiasing presets."""
+    gate_ci = LogitGate(rubric="Test rubric", preset="fast_ci")
+    assert gate_ci.pass_threshold == 0.80
+    assert gate_ci.fail_threshold == 0.20
+    assert gate_ci.symmetric_debiasing is False
+
+    gate_strict = LogitGate(rubric="Test rubric", preset="strict")
+    assert gate_strict.pass_threshold == 0.90
+    assert gate_strict.fail_threshold == 0.25
+    assert gate_strict.symmetric_debiasing is True
+
+    gate_bal = LogitGate(rubric="Test rubric", preset="balanced")
+    assert gate_bal.pass_threshold == 0.85
+    assert gate_bal.fail_threshold == 0.20
+    assert gate_bal.symmetric_debiasing is True
+
+    with pytest.raises(ValueError, match="Invalid preset"):
+        LogitGate(rubric="Test rubric", preset="invalid_preset")  # type: ignore
+
+
+def test_contract_gate_json_schema_and_length():
+    """ContractGate validates JSON schema, Pydantic models, and min/max length in 0ms."""
+    from pydantic import BaseModel
+    from logitgate import ContractGate
+
+    class UserPayload(BaseModel):
+        id: int
+        name: str
+
+    gate_pydantic = ContractGate(json_schema=UserPayload)
+    assert gate_pydantic.evaluate('{"id": 42, "name": "LogitGate"}').passed
+    assert not gate_pydantic.evaluate('{"id": "not_int", "name": "LogitGate"}').passed
+    assert not gate_pydantic.evaluate('invalid json string').passed
+
+    gate_dict = ContractGate(json_schema={"required": ["action", "status"]})
+    assert gate_dict.evaluate('{"action": "deploy", "status": "ok"}').passed
+    assert not gate_dict.evaluate('{"action": "deploy"}').passed
+
+    gate_len = ContractGate(min_length=5, max_length=15)
+    assert not gate_len.evaluate("abc").passed
+    assert not gate_len.evaluate("this string exceeds fifteen characters").passed
+    assert gate_len.evaluate("valid length").passed
+
+
+def test_judge_gate_max_tokens():
+    """JudgeGate supports max_tokens for concise CPU diagnostics."""
+    stub = StubBackend()
+    judge = JudgeGate(rubric="Critique", max_tokens=60, backend=stub)
+    assert judge.max_tokens == 60
+    assert "max_tokens=60" in repr(judge)
+
+    v = judge.evaluate("Candidate code")
+    assert v.passed is True
+
+
+def test_cli_calibrate(tmp_path, capsys):
+    """CLI calibrate subcommand runs auto-calibration and writes cache."""
+    from logitgate.cli import main
+
+    cache_file = str(tmp_path / "cli_cal.json")
+    ret = main([
+        "calibrate",
+        "--backend", "stub://0.95",
+        "--model", "custom-ci-model",
+        "--cache-path", cache_file,
+    ])
+    assert ret == 0
+    captured = capsys.readouterr()
+    assert "Optimal Temperature" in captured.out
+    assert (tmp_path / "cli_cal.json").exists()

@@ -44,14 +44,14 @@ class GenerativeBackend(abc.ABC):
     """Abstract base class for generative reasoning & diagnostics."""
 
     @abc.abstractmethod
-    def generate(self, prompt: str) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         """Returns (generated_text, tokens_generated)."""
         pass
 
-    async def agenerate(self, prompt: str) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         """Async variant of generate."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.generate, prompt)
+        return await loop.run_in_executor(None, lambda: self.generate(prompt, max_tokens=max_tokens, **kwargs))
 
 
 class StubBackend(LogitBackend, GenerativeBackend):
@@ -127,12 +127,12 @@ class StubBackend(LogitBackend, GenerativeBackend):
     ) -> list[dict[str, Any]]:
         return self.query_top_logprobs(prompt, top_k, allowed_tokens)
 
-    def generate(self, prompt: str) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
         self.prompt_log.append(prompt)
         return self.diagnostic_text, self.tokens_generated
 
-    async def agenerate(self, prompt: str) -> tuple[str, int]:
-        return self.generate(prompt)
+    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+        return self.generate(prompt, max_tokens=max_tokens, **kwargs)
 
 
 def resolve_logit_backend(

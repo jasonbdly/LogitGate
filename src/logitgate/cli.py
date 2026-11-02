@@ -72,12 +72,57 @@ def create_parser() -> argparse.ArgumentParser:
         help="Output verdict and traces in JSON format",
     )
 
+    cal_parser = subparsers.add_parser(
+        "calibrate",
+        help="Run micro-calibration dataset to fit and cache optimal logit temperature",
+    )
+    cal_parser.add_argument(
+        "--backend",
+        type=str,
+        default="stub://default",
+        help="Backend specifier (e.g. stub://default, ollama://..., llamacpp://...)",
+    )
+    cal_parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Optional model name for backend",
+    )
+    cal_parser.add_argument(
+        "--cache-path",
+        type=str,
+        default=None,
+        help="Optional custom path to calibration cache JSON file",
+    )
+
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = create_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "calibrate":
+        from pathlib import Path
+        from logitgate.backends.base import resolve_logit_backend
+        from logitgate.debiasing.permutation import auto_calibrate_backend
+
+        backend = resolve_logit_backend(args.backend, model=args.model)
+        cache_path = Path(args.cache_path) if args.cache_path else None
+        effective_model = args.model or getattr(backend, "model", "default")
+
+        print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
+        result = auto_calibrate_backend(
+            backend,
+            model_key=effective_model,
+            save_cache=True,
+            cache_path=cache_path,
+        )
+        print(f"Optimal Temperature: {result.optimal_temperature:.4f}")
+        print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
+        print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
+        print("Calibration successfully saved to cache.")
+        return 0
 
     if args.command != "eval":
         parser.print_help()

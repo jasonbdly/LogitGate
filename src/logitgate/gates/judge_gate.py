@@ -40,6 +40,7 @@ class JudgeGate(BaseGate):
         backend: Optional[str | GenerativeBackend] = None,
         model: Optional[str] = None,
         trigger: TriggerMode = "on_ambiguous_or_fail",
+        max_tokens: Optional[int] = None,
         name: str = "JudgeGate",
     ) -> None:
         valid_triggers = {"on_ambiguous_or_fail", "on_ambiguous_only", "always"}
@@ -57,6 +58,7 @@ class JudgeGate(BaseGate):
         self.backend = resolve_generative_backend(effective_backend, model=effective_model)
         self.model = effective_model
         self.trigger = trigger
+        self.max_tokens = max_tokens
         self.name = name
 
     def __repr__(self) -> str:
@@ -65,7 +67,8 @@ class JudgeGate(BaseGate):
             if self.rubric
             else "None (inherited)"
         )
-        return f"JudgeGate(rubric={rubric_repr}, trigger='{self.trigger}', backend={self.backend!r})"
+        max_tok_str = f", max_tokens={self.max_tokens}" if self.max_tokens is not None else ""
+        return f"JudgeGate(rubric={rubric_repr}, trigger='{self.trigger}'{max_tok_str}, backend={self.backend!r})"
 
     def _compile_prompt(self, candidate: Any, rubric_override: Optional[str] = None) -> str:
         effective_rubric = (rubric_override or self.rubric or "Evaluate if the artifact complies with standards.").strip()
@@ -112,7 +115,7 @@ class JudgeGate(BaseGate):
     def evaluate(self, candidate: Any, rubric_override: Optional[str] = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt = self._compile_prompt(candidate, rubric_override=rubric_override)
-        text, tokens = self.backend.generate(prompt)
+        text, tokens = self.backend.generate(prompt, max_tokens=self.max_tokens)
         latency = (time.perf_counter() - t0) * 1000.0
 
         passed, status, score = self._parse_verdict(text)
@@ -138,7 +141,7 @@ class JudgeGate(BaseGate):
     async def aevaluate(self, candidate: Any, rubric_override: Optional[str] = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt = self._compile_prompt(candidate, rubric_override=rubric_override)
-        text, tokens = await self.backend.agenerate(prompt)
+        text, tokens = await self.backend.agenerate(prompt, max_tokens=self.max_tokens)
         latency = (time.perf_counter() - t0) * 1000.0
 
         passed, status, score = self._parse_verdict(text)
