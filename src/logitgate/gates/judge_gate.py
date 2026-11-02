@@ -6,6 +6,7 @@ import time
 from typing import Any, Literal, Optional
 
 from logitgate.backends.base import GenerativeBackend, resolve_generative_backend
+from logitgate.config import get_default_backend, get_default_model
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
@@ -13,25 +14,58 @@ TriggerMode = Literal["on_ambiguous_or_fail", "on_ambiguous_only", "always"]
 
 
 class JudgeGate(BaseGate):
-    """
-    Generative System-2 Reasoning Judge (Layer 2).
+    """Generative System-2 Reasoning Judge (Layer 2).
+
     Generates actionable diagnostic critiques and explicit failure explanations
-    only when triggered by upstream gate ambiguity or failure.
+    using an autoregressive LLM only when triggered by upstream gate ambiguity or failure.
+
+    Args:
+        rubric: Optional evaluation rubric. If omitted, inherits the rubric from
+            upstream LogitGate when executing inside a Cascade.
+        backend: Backend instance or specifier URI implementing `GenerativeBackend`.
+        model: Optional model identifier string for the backend.
+        trigger: Activation policy for this judge layer:
+            - 'on_ambiguous_or_fail': Triggers if upstream gate returns AMBIGUOUS or FAILED.
+            - 'on_ambiguous_only': Triggers only on AMBIGUOUS; decisive FAILED short-circuits.
+            - 'always': Always executes generative critique regardless of upstream confidence.
+        name: Identifier for this gate instance.
+
+    Raises:
+        ValueError: If trigger is not one of the allowed modes, or rubric is empty whitespace.
     """
 
     def __init__(
         self,
         rubric: Optional[str] = None,
-        backend: str | GenerativeBackend = "stub://default",
+        backend: Optional[str | GenerativeBackend] = None,
         model: Optional[str] = None,
         trigger: TriggerMode = "on_ambiguous_or_fail",
         name: str = "JudgeGate",
     ) -> None:
-        self.rubric = rubric
-        self.backend = resolve_generative_backend(backend, model=model)
-        self.model = model
+        valid_triggers = {"on_ambiguous_or_fail", "on_ambiguous_only", "always"}
+        if trigger not in valid_triggers:
+            raise ValueError(f"Invalid trigger '{trigger}'. Must be one of {sorted(valid_triggers)}")
+        if rubric is not None and not rubric.strip():
+            raise ValueError("rubric cannot be empty or whitespace")
+
+        effective_backend = (
+            get_default_backend() if (backend is None or backend == "default") else backend
+        )
+        effective_model = model or get_default_model()
+
+        self.rubric = rubric.strip() if rubric is not None else None
+        self.backend = resolve_generative_backend(effective_backend, model=effective_model)
+        self.model = effective_model
         self.trigger = trigger
         self.name = name
+
+    def __repr__(self) -> str:
+        rubric_repr = (
+            repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
+            if self.rubric
+            else "None (inherited)"
+        )
+        return f"JudgeGate(rubric={rubric_repr}, trigger='{self.trigger}', backend={self.backend!r})"
 
     def _compile_prompt(self, candidate: Any, rubric_override: Optional[str] = None) -> str:
         effective_rubric = (rubric_override or self.rubric or "Evaluate if the artifact complies with standards.").strip()

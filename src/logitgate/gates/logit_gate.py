@@ -6,6 +6,7 @@ import time
 from typing import Any, Mapping, Optional, Sequence
 
 from logitgate.backends.base import LogitBackend, resolve_logit_backend
+from logitgate.config import LogitGateDefaults, get_default_backend, get_default_model
 from logitgate.debiasing.inversion import (
     compile_batch_binary_prompt,
     compile_binary_prompt,
@@ -23,33 +24,89 @@ from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
 
 class LogitGate(BaseGate):
-    """
-    Sub-50ms first-token Logit Gate (Layer 1).
-    Performs symmetric log-odds debiasing, prefix-cache-friendly inversion,
-    and temperature calibration without autoregressive token generation.
+    """Sub-50ms first-token Logit Gate (Layer 1).
+
+    Computes mathematically debiased binary classification confidence scores directly
+    from the language model's first-token logits without generating any output tokens.
+    Uses symmetric log-odds debiasing across forward and reverse label mappings to
+    cancel prior token biases (e.g. Zhao et al., 2021) and positional biases.
+
+    Args:
+        rubric: Clear evaluation criterion or question to test against candidate.
+        backend: Backend instance or specifier URI (e.g. 'ollama://', 'openai://', 'stub://').
+        model: Optional model identifier string for the backend.
+        pass_threshold: Probability threshold required to award a PASSED verdict (default: 0.85).
+        fail_threshold: Probability threshold below which a decisive FAILED verdict is awarded (default: 0.20).
+        symmetric_debiasing: When True, runs forward (A=Pass, B=Fail) and reverse (B=Pass, A=Fail)
+            passes and averages them in log-odds space.
+        query_first: When True, compiles prompt with rubric and candidate first, ensuring
+            identical KV-cache prefixes across both passes.
+        logit_temperature: Post-hoc temperature scaling parameter (default: 1.0).
+        name: Identifier for this gate instance.
+
+    Raises:
+        ValueError: If rubric is empty, thresholds are outside [0, 1], pass_threshold <= fail_threshold,
+            or logit_temperature <= 0.
     """
 
     def __init__(
         self,
         rubric: str,
-        backend: str | LogitBackend = "stub://default",
+        backend: Optional[str | LogitBackend] = None,
         model: Optional[str] = None,
-        pass_threshold: float = 0.85,
-        fail_threshold: float = 0.20,
+        pass_threshold: Optional[float] = None,
+        fail_threshold: Optional[float] = None,
         symmetric_debiasing: bool = True,
         query_first: bool = True,
-        logit_temperature: float = 1.0,
+        logit_temperature: Optional[float] = None,
         name: str = "LogitGate",
     ) -> None:
-        self.rubric = rubric
-        self.backend = resolve_logit_backend(backend, model=model)
-        self.model = model
-        self.pass_threshold = pass_threshold
-        self.fail_threshold = fail_threshold
+        effective_pass_thresh = (
+            LogitGateDefaults.pass_threshold if pass_threshold is None else pass_threshold
+        )
+        effective_fail_thresh = (
+            LogitGateDefaults.fail_threshold if fail_threshold is None else fail_threshold
+        )
+        effective_temp = (
+            LogitGateDefaults.logit_temperature if logit_temperature is None else logit_temperature
+        )
+
+        if not rubric or not rubric.strip():
+            raise ValueError("rubric cannot be empty or whitespace")
+        if not (0.0 <= effective_pass_thresh <= 1.0):
+            raise ValueError(f"pass_threshold must be between 0.0 and 1.0, got {effective_pass_thresh}")
+        if not (0.0 <= effective_fail_thresh <= 1.0):
+            raise ValueError(f"fail_threshold must be between 0.0 and 1.0, got {effective_fail_thresh}")
+        if effective_pass_thresh <= effective_fail_thresh:
+            raise ValueError(
+                f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
+            )
+        if effective_temp <= 0.0:
+            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+
+        effective_backend = (
+            get_default_backend() if (backend is None or backend == "default") else backend
+        )
+        effective_model = model or get_default_model()
+
+        self.rubric = rubric.strip()
+        self.backend = resolve_logit_backend(effective_backend, model=effective_model)
+        self.model = effective_model
+        self.pass_threshold = effective_pass_thresh
+        self.fail_threshold = effective_fail_thresh
         self.symmetric_debiasing = symmetric_debiasing
         self.query_first = query_first
-        self.logit_temperature = logit_temperature
+        self.logit_temperature = effective_temp
         self.name = name
+
+    def __repr__(self) -> str:
+        rubric_repr = repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
+        return (
+            f"LogitGate(rubric={rubric_repr}, "
+            f"pass_threshold={self.pass_threshold}, "
+            f"fail_threshold={self.fail_threshold}, "
+            f"backend={self.backend!r})"
+        )
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
@@ -351,35 +408,74 @@ class LogitGate(BaseGate):
                 traces=[trace],
             )
 
-        coros = [_eval_single(idx) for idx in range(len(rubrics))]
-        return list(await asyncio.gather(*coros))
+        if len(rubrics) == 1:
+            return [await _eval_single(0)]
+
+        # Prevent KV-cache stampede: populate server cache with first item
+        first_verdict = await _eval_single(0)
+        rest_verdicts = await asyncio.gather(*[_eval_single(idx) for idx in range(1, len(rubrics))])
+        return [first_verdict, *rest_verdicts]
 
 
 class ChoiceGate(BaseGate):
-    """
-    Evaluates discrete K-ary choice options debiased via forward and reverse option orderings.
-    Supports temperature scaling and native async evaluation.
+    """Discrete K-ary categorical decision and routing gate.
+
+    Evaluates K discrete options from first-token logits, cancelling label order
+    and position bias via symmetric permutation debiasing (Zheng et al., 2023).
+
+    Args:
+        question: Decision question or routing prompt.
+        options: Mapping of option tokens (e.g., 'A', 'B', 'C') to their descriptions.
+        backend: Backend instance or specifier URI.
+        model: Optional model identifier string for the backend.
+        symmetric_debiasing: When True, queries options in forward and reversed orderings
+            and computes the debiased logprob average.
+        query_first: When True, compiles prompt with question and candidate first.
+        logit_temperature: Temperature scaling factor for softmax normalization (default: 1.0).
+        name: Identifier for this gate instance.
+
+    Raises:
+        ValueError: If question is empty, options has fewer than 2 items, or logit_temperature <= 0.
     """
 
     def __init__(
         self,
         question: str,
         options: Mapping[str, str],
-        backend: str | LogitBackend = "stub://default",
+        backend: Optional[str | LogitBackend] = None,
         model: Optional[str] = None,
         symmetric_debiasing: bool = True,
         query_first: bool = True,
-        logit_temperature: float = 1.0,
+        logit_temperature: Optional[float] = None,
         name: str = "ChoiceGate",
     ) -> None:
-        self.question = question
+        effective_temp = (
+            LogitGateDefaults.logit_temperature if logit_temperature is None else logit_temperature
+        )
+        if not question or not question.strip():
+            raise ValueError("question cannot be empty or whitespace")
+        if not options or len(options) < 2:
+            raise ValueError(f"ChoiceGate requires at least 2 options, got {len(options) if options else 0}")
+        if effective_temp <= 0.0:
+            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+
+        effective_backend = (
+            get_default_backend() if (backend is None or backend == "default") else backend
+        )
+        effective_model = model or get_default_model()
+
+        self.question = question.strip()
         self.options = dict(options)
-        self.backend = resolve_logit_backend(backend, model=model)
-        self.model = model
+        self.backend = resolve_logit_backend(effective_backend, model=effective_model)
+        self.model = effective_model
         self.symmetric_debiasing = symmetric_debiasing
         self.query_first = query_first
-        self.logit_temperature = logit_temperature
+        self.logit_temperature = effective_temp
         self.name = name
+
+    def __repr__(self) -> str:
+        q_repr = repr(self.question[:40] + "..." if len(self.question) > 40 else self.question)
+        return f"ChoiceGate(question={q_repr}, options={list(self.options.keys())!r}, backend={self.backend!r})"
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
@@ -524,10 +620,30 @@ class ChoiceGate(BaseGate):
 
 
 class ScoreGate(BaseGate):
-    """
-    Evaluates rubric score on integer scale min_score..max_score by computing
-    probability-weighted expected value: E[S] = sum(s * P(s)) from first-token logits.
-    Supports temperature scaling and optional symmetric debiasing via inverted scale passes.
+    """Continuous probability-weighted rubric scoring gate.
+
+    Computes expected continuous quality score:
+        E[S] = sum_{s=min_score}^{max_score} s * P(s)
+    from first-token logits as formalized by Liu et al. (2023, G-Eval).
+    Supports temperature scaling and optional symmetric scale reversal debiasing
+    (evaluating both standard 1..5 and inverted 5..1 scale mappings).
+
+    Args:
+        rubric: Evaluation rubric describing scoring expectations.
+        min_score: Minimum integer score rating (default: 1).
+        max_score: Maximum integer score rating (default: 5).
+        threshold: Score threshold required for a PASSED verdict (default: 3.5).
+        backend: Backend instance or specifier URI.
+        model: Optional model identifier string for the backend.
+        symmetric_debiasing: When True, queries both normal and inverted scale prompts
+            and averages logprobs to eliminate scale-end anchoring bias.
+        query_first: When True, compiles prompt with rubric and candidate first.
+        logit_temperature: Temperature scaling factor for softmax normalization (default: 1.0).
+        name: Identifier for this gate instance.
+
+    Raises:
+        ValueError: If rubric is empty, min_score >= max_score, threshold is out of bounds,
+            or logit_temperature <= 0.
     """
 
     def __init__(
@@ -536,23 +652,51 @@ class ScoreGate(BaseGate):
         min_score: int = 1,
         max_score: int = 5,
         threshold: float = 3.5,
-        backend: str | LogitBackend = "stub://default",
+        backend: Optional[str | LogitBackend] = None,
         model: Optional[str] = None,
         symmetric_debiasing: bool = False,
         query_first: bool = True,
-        logit_temperature: float = 1.0,
+        logit_temperature: Optional[float] = None,
         name: str = "ScoreGate",
     ) -> None:
-        self.rubric = rubric
+        effective_temp = (
+            LogitGateDefaults.logit_temperature if logit_temperature is None else logit_temperature
+        )
+        if not rubric or not rubric.strip():
+            raise ValueError("rubric cannot be empty or whitespace")
+        if min_score >= max_score:
+            raise ValueError(f"min_score ({min_score}) must be strictly less than max_score ({max_score})")
+        if threshold < min_score or threshold > max_score:
+            raise ValueError(
+                f"threshold ({threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
+            )
+        if effective_temp <= 0.0:
+            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+
+        effective_backend = (
+            get_default_backend() if (backend is None or backend == "default") else backend
+        )
+        effective_model = model or get_default_model()
+
+        self.rubric = rubric.strip()
         self.min_score = min_score
         self.max_score = max_score
         self.threshold = threshold
-        self.backend = resolve_logit_backend(backend, model=model)
-        self.model = model
+        self.backend = resolve_logit_backend(effective_backend, model=effective_model)
+        self.model = effective_model
         self.symmetric_debiasing = symmetric_debiasing
         self.query_first = query_first
-        self.logit_temperature = logit_temperature
+        self.logit_temperature = effective_temp
         self.name = name
+
+    def __repr__(self) -> str:
+        rubric_repr = repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
+        return (
+            f"ScoreGate(rubric={rubric_repr}, "
+            f"range=[{self.min_score}..{self.max_score}], "
+            f"threshold={self.threshold}, "
+            f"backend={self.backend!r})"
+        )
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()

@@ -1,0 +1,366 @@
+from __future__ import annotations
+
+import pytest
+
+from logitgate import (
+    ASTGate,
+    Cascade,
+    ChoiceGate,
+    DecisionStatus,
+    JudgeGate,
+    LayerTrace,
+    LlamaCppBackend,
+    LogitGate,
+    OllamaBackend,
+    OpenAICompatBackend,
+    ScoreGate,
+    StubBackend,
+    Verdict,
+)
+
+
+# ==============================================================================
+# 1. Usability & REPL __repr__ Tests
+# ==============================================================================
+
+def test_verdict_repr():
+    """Verdict.__repr__ displays concise, informative attributes for debugging."""
+    v_pass = Verdict(
+        passed=True,
+        status=DecisionStatus.PASSED,
+        probability=0.9234,
+        triggered_layer="LogitGate",
+        total_latency_ms=48.25,
+        total_tokens_generated=0,
+    )
+    r = repr(v_pass)
+    assert "status='passed'" in r
+    assert "prob=0.9234" in r
+    assert "layer='LogitGate'" in r
+    assert "latency=48.25ms" in r
+    assert "tokens=0" in r
+
+    v_choice = Verdict(
+        passed=True,
+        status=DecisionStatus.PASSED,
+        choice="B",
+        probability=0.8800,
+        triggered_layer="ChoiceGate",
+        total_latency_ms=12.50,
+    )
+    r_c = repr(v_choice)
+    assert "choice='B'" in r_c
+    assert "layer='ChoiceGate'" in r_c
+
+    v_score = Verdict(
+        passed=True,
+        status=DecisionStatus.PASSED,
+        score=4.50,
+        triggered_layer="ScoreGate",
+        total_latency_ms=15.10,
+    )
+    r_s = repr(v_score)
+    assert "score=4.50" in r_s
+    assert "layer='ScoreGate'" in r_s
+
+
+def test_layer_trace_repr():
+    """LayerTrace.__repr__ displays layer name, status, and latency."""
+    trace = LayerTrace(
+        layer_name="ASTGate",
+        status=DecisionStatus.PASSED,
+        latency_ms=0.04,
+        tokens_generated=0,
+    )
+    r = repr(trace)
+    assert "layer='ASTGate'" in r
+    assert "status=passed" in r
+    assert "latency=0.04ms" in r
+
+
+def test_ast_gate_repr():
+    """ASTGate.__repr__ lists configured checks."""
+    gate = ASTGate(syntax=True, forbidden_imports=["os", "sys"], acyclic_dag=True)
+    r = repr(gate)
+    assert "ASTGate" in r
+    assert "syntax=True" in r
+    assert "forbidden_imports=['os', 'sys']" in r
+    assert "acyclic_dag=True" in r
+
+
+def test_logit_gate_repr():
+    """LogitGate.__repr__ displays truncated rubric, thresholds, and backend."""
+    backend = StubBackend(default_prob=0.95)
+    gate = LogitGate(
+        rubric="Candidate code must be strictly typed and contain docstrings.",
+        backend=backend,
+        pass_threshold=0.88,
+        fail_threshold=0.15,
+    )
+    r = repr(gate)
+    assert "LogitGate" in r
+    assert "pass_threshold=0.88" in r
+    assert "fail_threshold=0.15" in r
+    assert "StubBackend" in r
+
+
+def test_choice_gate_repr():
+    """ChoiceGate.__repr__ displays question, option keys, and backend."""
+    gate = ChoiceGate(
+        question="Select the optimal cache strategy:",
+        options={"A": "LRU cache", "B": "LFU cache", "C": "No cache"},
+    )
+    r = repr(gate)
+    assert "ChoiceGate" in r
+    assert "options=['A', 'B', 'C']" in r
+
+
+def test_score_gate_repr():
+    """ScoreGate.__repr__ displays scale range, threshold, and backend."""
+    gate = ScoreGate(
+        rubric="Score code clarity from 1 to 5.",
+        min_score=1,
+        max_score=5,
+        threshold=4.0,
+    )
+    r = repr(gate)
+    assert "ScoreGate" in r
+    assert "range=[1..5]" in r
+    assert "threshold=4.0" in r
+
+
+def test_judge_gate_repr():
+    """JudgeGate.__repr__ displays trigger policy and backend."""
+    gate = JudgeGate(rubric="Critique edge cases", trigger="on_ambiguous_only")
+    r = repr(gate)
+    assert "JudgeGate" in r
+    assert "trigger='on_ambiguous_only'" in r
+
+
+def test_cascade_repr():
+    """Cascade.__repr__ shows operator-chained gate pipeline representation."""
+    pipeline = (
+        ASTGate(syntax=True)
+        >> LogitGate(rubric="Must be safe")
+        >> JudgeGate(trigger="on_ambiguous_or_fail")
+    )
+    r = repr(pipeline)
+    assert "Cascade([" in r
+    assert "ASTGate" in r
+    assert ">> LogitGate" in r
+    assert ">> JudgeGate" in r
+
+
+def test_backends_repr():
+    """Backend classes display clean representations."""
+    stub = StubBackend(default_prob=0.90)
+    assert repr(stub) == "StubBackend(default_prob=0.9)"
+
+    ollama = OllamaBackend(model="qwen2.5-coder:14b", base_url="http://localhost:11434")
+    assert "OllamaBackend(model='qwen2.5-coder:14b'" in repr(ollama)
+
+    openai = OpenAICompatBackend(model="gpt-4o-mini", base_url="https://api.openai.com/v1")
+    assert "OpenAICompatBackend(model='gpt-4o-mini'" in repr(openai)
+
+    llamacpp = LlamaCppBackend(model="meta-llama-3.1-8b", base_url="http://localhost:8080")
+    assert "LlamaCppBackend(model='meta-llama-3.1-8b'" in repr(llamacpp)
+
+
+# ==============================================================================
+# 2. Input Validation Tests
+# ==============================================================================
+
+def test_logit_gate_validation():
+    """LogitGate validates rubric, thresholds, and temperature."""
+    # Empty rubric
+    with pytest.raises(ValueError, match="rubric cannot be empty"):
+        LogitGate(rubric="")
+    with pytest.raises(ValueError, match="rubric cannot be empty"):
+        LogitGate(rubric="   ")
+
+    # Invalid thresholds range
+    with pytest.raises(ValueError, match="pass_threshold must be between 0.0 and 1.0"):
+        LogitGate(rubric="Valid", pass_threshold=1.5)
+    with pytest.raises(ValueError, match="pass_threshold must be between 0.0 and 1.0"):
+        LogitGate(rubric="Valid", pass_threshold=-0.1)
+    with pytest.raises(ValueError, match="fail_threshold must be between 0.0 and 1.0"):
+        LogitGate(rubric="Valid", fail_threshold=-0.05)
+    with pytest.raises(ValueError, match="fail_threshold must be between 0.0 and 1.0"):
+        LogitGate(rubric="Valid", fail_threshold=1.05)
+
+    # pass_threshold <= fail_threshold
+    with pytest.raises(ValueError, match="must be strictly greater than fail_threshold"):
+        LogitGate(rubric="Valid", pass_threshold=0.50, fail_threshold=0.50)
+    with pytest.raises(ValueError, match="must be strictly greater than fail_threshold"):
+        LogitGate(rubric="Valid", pass_threshold=0.40, fail_threshold=0.60)
+
+    # Invalid temperature
+    with pytest.raises(ValueError, match="logit_temperature must be positive"):
+        LogitGate(rubric="Valid", logit_temperature=0.0)
+    with pytest.raises(ValueError, match="logit_temperature must be positive"):
+        LogitGate(rubric="Valid", logit_temperature=-1.5)
+
+
+def test_choice_gate_validation():
+    """ChoiceGate validates question, options count, and temperature."""
+    # Empty question
+    with pytest.raises(ValueError, match="question cannot be empty"):
+        ChoiceGate(question="", options={"A": "opt A", "B": "opt B"})
+    with pytest.raises(ValueError, match="question cannot be empty"):
+        ChoiceGate(question="   \t", options={"A": "opt A", "B": "opt B"})
+
+    # Fewer than 2 options
+    with pytest.raises(ValueError, match="ChoiceGate requires at least 2 options"):
+        ChoiceGate(question="Valid?", options={})
+    with pytest.raises(ValueError, match="ChoiceGate requires at least 2 options"):
+        ChoiceGate(question="Valid?", options={"A": "Solo option"})
+
+    # Invalid temperature
+    with pytest.raises(ValueError, match="logit_temperature must be positive"):
+        ChoiceGate(
+            question="Valid?",
+            options={"A": "opt A", "B": "opt B"},
+            logit_temperature=0.0,
+        )
+
+
+def test_score_gate_validation():
+    """ScoreGate validates rubric, min/max score order, and threshold range."""
+    # Empty rubric
+    with pytest.raises(ValueError, match="rubric cannot be empty"):
+        ScoreGate(rubric="")
+
+    # min_score >= max_score
+    with pytest.raises(ValueError, match="min_score .* must be strictly less than max_score"):
+        ScoreGate(rubric="Valid", min_score=5, max_score=5)
+    with pytest.raises(ValueError, match="min_score .* must be strictly less than max_score"):
+        ScoreGate(rubric="Valid", min_score=5, max_score=1)
+
+    # Threshold out of range
+    with pytest.raises(ValueError, match="threshold .* must be between min_score"):
+        ScoreGate(rubric="Valid", min_score=1, max_score=5, threshold=0.5)
+    with pytest.raises(ValueError, match="threshold .* must be between min_score"):
+        ScoreGate(rubric="Valid", min_score=1, max_score=5, threshold=5.5)
+
+    # Invalid temperature
+    with pytest.raises(ValueError, match="logit_temperature must be positive"):
+        ScoreGate(rubric="Valid", logit_temperature=-0.5)
+
+
+def test_judge_gate_validation():
+    """JudgeGate validates trigger modes and rubric."""
+    # Invalid trigger mode
+    with pytest.raises(ValueError, match="Invalid trigger 'unsupported_mode'"):
+        JudgeGate(trigger="unsupported_mode")  # type: ignore
+
+    # Whitespace-only rubric
+    with pytest.raises(ValueError, match="rubric cannot be empty or whitespace"):
+        JudgeGate(rubric="   ")
+
+    # None rubric is allowed (inherited from cascade)
+    gate = JudgeGate(rubric=None)
+    assert gate.rubric is None
+
+
+def test_cascade_validation():
+    """Cascade validates that at least one gate is provided."""
+    with pytest.raises(ValueError, match="Cascade requires at least one gate"):
+        Cascade(gates=[])
+
+
+# ==============================================================================
+# 3. Configurability & Hardware Options Tests
+# ==============================================================================
+
+def test_global_configure_and_reset():
+    """logitgate.configure updates global defaults and reset_config restores them."""
+    import logitgate
+    from logitgate import LogitGateDefaults, configure, reset_config
+
+    reset_config()
+    assert LogitGateDefaults.backend == "stub://default"
+    assert LogitGateDefaults.pass_threshold == 0.85
+    assert LogitGateDefaults.fail_threshold == 0.20
+    assert LogitGateDefaults.logit_temperature == 1.0
+
+    configure(
+        backend="stub://0.77",
+        pass_threshold=0.92,
+        fail_threshold=0.15,
+        logit_temperature=0.5,
+    )
+    assert LogitGateDefaults.backend == "stub://0.77"
+    assert LogitGateDefaults.pass_threshold == 0.92
+    assert LogitGateDefaults.fail_threshold == 0.15
+    assert LogitGateDefaults.logit_temperature == 0.5
+
+    # Gate created without explicit params inherits configured defaults
+    gate = LogitGate(rubric="Test rubric")
+    assert gate.pass_threshold == 0.92
+    assert gate.fail_threshold == 0.15
+    assert gate.logit_temperature == 0.5
+    assert isinstance(gate.backend, StubBackend)
+    assert gate.backend.default_prob == 0.77
+
+    reset_config()
+    assert LogitGateDefaults.backend == "stub://default"
+    assert LogitGateDefaults.pass_threshold == 0.85
+
+
+def test_env_var_resolution(monkeypatch):
+    """LOGITGATE_* environment variables resolve dynamically."""
+    import logitgate
+    from logitgate import LogitGateDefaults, reset_config
+
+    reset_config()
+    monkeypatch.setenv("LOGITGATE_BACKEND", "stub://0.88")
+    monkeypatch.setenv("LOGITGATE_PASS_THRESHOLD", "0.90")
+    monkeypatch.setenv("LOGITGATE_FAIL_THRESHOLD", "0.10")
+    monkeypatch.setenv("LOGITGATE_TEMPERATURE", "1.5")
+
+    assert LogitGateDefaults.backend == "stub://0.88"
+    assert LogitGateDefaults.pass_threshold == 0.90
+    assert LogitGateDefaults.fail_threshold == 0.10
+    assert LogitGateDefaults.logit_temperature == 1.5
+
+    gate = LogitGate(rubric="Env test")
+    assert gate.pass_threshold == 0.90
+    assert gate.fail_threshold == 0.10
+    assert gate.logit_temperature == 1.5
+    assert gate.backend.default_prob == 0.88
+
+    judge = JudgeGate(rubric="Judge env test")
+    assert isinstance(judge.backend, StubBackend)
+    assert judge.backend.default_prob == 0.88
+
+    reset_config()
+
+
+def test_ollama_backend_options():
+    """OllamaBackend accepts and merges custom options and keep_alive."""
+    backend = OllamaBackend(
+        base_url="http://localhost:11434",
+        model="gemma4:e4b",
+        options={"num_gpu": 0, "num_thread": 8},
+        keep_alive="5m",
+    )
+    assert backend.options == {"num_gpu": 0, "num_thread": 8}
+    assert backend.keep_alive == "5m"
+
+    payload = backend.build_query_payload("Evaluate code", top_k=5)
+    assert payload["keep_alive"] == "5m"
+    assert payload["options"]["num_gpu"] == 0
+    assert payload["options"]["num_thread"] == 8
+    assert payload["options"]["num_predict"] == 1
+    assert payload["options"]["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_aevaluate_batch_stampede_prevention():
+    """aevaluate_batch warms KV-cache with first prompt before gathering rest."""
+    backend = StubBackend(default_prob=0.95)
+    gate = LogitGate(rubric="Base rubric", backend=backend)
+    rubrics = ["Rubric 1", "Rubric 2", "Rubric 3"]
+    verdicts = await gate.aevaluate_batch("Candidate artifact", rubrics)
+    assert len(verdicts) == 3
+    assert all(v.passed for v in verdicts)

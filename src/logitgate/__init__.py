@@ -1,3 +1,9 @@
+from logitgate.config import (
+    LogitGateDefaults,
+    configure,
+    reset_config,
+    get_default_backend,
+)
 from logitgate.models import (
     Verdict,
     LayerTrace,
@@ -67,4 +73,8 @@ __all__ = [
     "resolve_logit_backend",
     "resolve_generative_backend",
     "BaseGate",
+    "LogitGateDefaults",
+    "configure",
+    "reset_config",
+    "get_default_backend",
 ]

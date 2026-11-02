@@ -53,10 +53,21 @@ def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> Optional[str]:
 
 
 class ASTGate(BaseGate):
-    """
-    Deterministic zero-token Gate (Layer 0).
-    Performs Python AST validation, forbidden import analysis, regex pattern matching,
-    acyclic DAG dependency verification, and custom validator execution in ~0ms.
+    """Deterministic zero-token verification gate (Layer 0).
+
+    Executes in under 0.1ms using native CPU parsing without invoking any LLM.
+    Supports Python AST syntax validation, forbidden import analysis, regex pattern
+    matching, acyclic DAG dependency verification, and custom callable validators.
+
+    Args:
+        syntax: When True, parses the candidate as Python code via `ast.parse`.
+        forbidden_imports: Sequence of module names prohibited from being imported.
+        forbidden_patterns: Sequence of regular expressions prohibited in the artifact.
+        required_sections: Sequence of string headers or regex patterns required to be present.
+        acyclic_dag: When True, interprets candidate as a list/dict of task nodes and ensures
+            all dependencies exist and form an acyclic directed graph (DAG).
+        validators: Sequence of custom callables `fn(candidate) -> bool | (bool, str)`.
+        name: Identifier for this gate instance.
     """
 
     def __init__(
@@ -76,6 +87,23 @@ class ASTGate(BaseGate):
         self.acyclic_dag = acyclic_dag
         self.validators = list(validators) if validators else None
         self.name = name
+
+    def __repr__(self) -> str:
+        features = []
+        if self.syntax:
+            features.append("syntax=True")
+        if self.forbidden_imports:
+            features.append(f"forbidden_imports={self.forbidden_imports!r}")
+        if self.forbidden_patterns:
+            features.append(f"forbidden_patterns={self.forbidden_patterns!r}")
+        if self.required_sections:
+            features.append(f"required_sections={self.required_sections!r}")
+        if self.acyclic_dag:
+            features.append("acyclic_dag=True")
+        if self.validators:
+            features.append(f"validators=[{len(self.validators)} callables]")
+        feat_str = f", {', '.join(features)}" if features else ""
+        return f"ASTGate(name='{self.name}'{feat_str})"
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()

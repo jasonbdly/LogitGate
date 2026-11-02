@@ -97,7 +97,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                 for qid in q_ids
             ]
             gate = LogitGate(
-                rubric=statements[0] if statements else "",
+                rubric=statements[0] if (statements and statements[0].strip()) else "Evaluate candidate against rubric.",
                 backend=self.backend,
                 symmetric_debiasing=self.symmetric,
                 logit_temperature=self.logit_temperature,
@@ -135,7 +135,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                 for qid in q_ids
             ]
             gate = LogitGate(
-                rubric=statements[0] if statements else "",
+                rubric=statements[0] if (statements and statements[0].strip()) else "Evaluate candidate against rubric.",
                 backend=self.backend,
                 symmetric_debiasing=self.symmetric,
                 logit_temperature=self.logit_temperature,

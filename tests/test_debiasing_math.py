@@ -157,7 +157,7 @@ def test_batch_evaluate_prompts_byte_identical_prefix_math():
     with exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
     """
     backend = StubBackend(default_prob=0.90)
-    gate = LogitGate(rubric="", backend=backend)
+    gate = LogitGate(rubric="Batch evaluation", backend=backend)
     rubrics = [
         "Rubric 1: Documentation complete.",
         "Rubric 2: No side effects.",
@@ -184,7 +184,7 @@ async def test_batch_aevaluate_prompts_byte_identical_prefix_math():
     with exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
     """
     backend = StubBackend(default_prob=0.90)
-    gate = LogitGate(rubric="", backend=backend)
+    gate = LogitGate(rubric="Batch evaluation", backend=backend)
     rubrics = [
         "Rubric 1: Documentation complete.",
         "Rubric 2: No side effects.",

@@ -136,7 +136,7 @@ def test_logit_gate_batch_evaluate_prefix_cache_sharing():
     all sharing the exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
     """
     stub = StubBackend(default_prob=0.92)
-    gate = LogitGate(rubric="", backend=stub)
+    gate = LogitGate(rubric="Batch evaluation", backend=stub)
     rubrics = [
         "1. Docstrings required.",
         "2. Strict typing required.",
@@ -167,7 +167,7 @@ async def test_logit_gate_batch_aevaluate_prefix_cache_sharing():
     all sharing the exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
     """
     stub = StubBackend(default_prob=0.88)
-    gate = LogitGate(rubric="", backend=stub)
+    gate = LogitGate(rubric="Batch evaluation", backend=stub)
     rubrics = [
         "Rubric A: Clean architecture.",
         "Rubric B: Explicit contracts.",

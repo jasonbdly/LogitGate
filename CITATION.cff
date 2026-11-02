@@ -1,0 +1,124 @@
+cff-version: 1.2.0
+message: "If you use LogitGate in your research or production systems, please cite it as below."
+title: "LogitGate: Zero-Token Mathematically Debiased LLM Evaluation and Cascaded Routing"
+version: 0.1.0
+date-released: "2026-11-02"
+license: Apache-2.0
+repository-code: "https://github.com/jasonbdly/logitgate"
+url: "https://github.com/jasonbdly/logitgate"
+abstract: >-
+  LogitGate is a lightweight, zero-extra-VRAM, 3-layer cascaded LLM evaluation
+  and routing engine. It eliminates autoregressive judge tokens and position/prior
+  biases through symmetric first-token log-odds calibration, prefix-preserving
+  KV-cache compilation, and deterministic AST verification.
+authors:
+  - family-names: "Bradley"
+    given-names: "Jason"
+    email: "jasonbdly@gmail.com"
+keywords:
+  - "large-language-models"
+  - "llm-as-a-judge"
+  - "logprobs"
+  - "logit-calibration"
+  - "cascaded-routing"
+  - "prefix-caching"
+  - "system-1-evaluation"
+references:
+  - type: conference-paper
+    title: "Calibrate Before Use: Improving Few-Shot Performance of Language Models"
+    authors:
+      - family-names: Zhao
+        given-names: Zihao
+      - family-names: Wallace
+        given-names: Eric
+      - family-names: Feng
+        given-names: Shi
+      - family-names: Klein
+        given-names: Dan
+      - family-names: Singh
+        given-names: Sameer
+    collection-title: "Proceedings of the 38th International Conference on Machine Learning (ICML)"
+    year: 2021
+    identifiers:
+      - type: arxiv
+        value: "2102.09690"
+  - type: conference-paper
+    title: "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena"
+    authors:
+      - family-names: Zheng
+        given-names: Lianmin
+      - family-names: Chiang
+        given-names: Wei-Lin
+      - family-names: Sheng
+        given-names: Ying
+      - family-names: Zhuang
+        given-names: Siyuan
+      - family-names: Wu
+        given-names: Zhanghao
+      - family-names: Zhuang
+        given-names: Yonghao
+      - family-names: Lin
+        given-names: Zi
+      - family-names: Li
+        given-names: Zhuohan
+      - family-names: Li
+        given-names: Dacheng
+      - family-names: Xing
+        given-names: Eric P.
+      - family-names: Zhang
+        given-names: Hao
+      - family-names: Gonzalez
+        given-names: Joseph E.
+      - family-names: Stoica
+        given-names: Ion
+    collection-title: "Advances in Neural Information Processing Systems (NeurIPS 36)"
+    year: 2023
+    identifiers:
+      - type: arxiv
+        value: "2306.05685"
+  - type: conference-paper
+    title: "G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment"
+    authors:
+      - family-names: Liu
+        given-names: Yang
+      - family-names: Iter
+        given-names: Dan
+      - family-names: Xu
+        given-names: Yichong
+      - family-names: Wang
+        given-names: Shuohang
+      - family-names: Xu
+        given-names: Ruochen
+      - family-names: Zhu
+        given-names: Chenguang
+    collection-title: "Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP)"
+    year: 2023
+    identifiers:
+      - type: arxiv
+        value: "2303.16634"
+  - type: conference-paper
+    title: "On Calibration of Modern Neural Networks"
+    authors:
+      - family-names: Guo
+        given-names: Chuan
+      - family-names: Pleiss
+        given-names: Geoff
+      - family-names: Sun
+        given-names: Yu
+      - family-names: Weinberger
+        given-names: Kilian Q.
+    collection-title: "Proceedings of the 34th International Conference on Machine Learning (ICML)"
+    year: 2017
+    identifiers:
+      - type: arxiv
+        value: "1706.04599"
+  - type: article
+    title: "Evaluating and Benchmarking the System One Model Jev"
+    authors:
+      - family-names: Deußer
+        given-names: Carl
+      - family-names: et al.
+    year: 2026
+    identifiers:
+      - type: arxiv
+        value: "2609.37647"

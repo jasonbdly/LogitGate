@@ -78,6 +78,9 @@ class StubBackend(LogitBackend, GenerativeBackend):
         self.prompt_log: list[str] = []
         self._response_idx = 0
 
+    def __repr__(self) -> str:
+        return f"StubBackend(default_prob={self.default_prob})"
+
     def query_top_logprobs(
         self,
         prompt: str,
@@ -133,12 +136,21 @@ class StubBackend(LogitBackend, GenerativeBackend):
 
 
 def resolve_logit_backend(
-    backend_spec: str | LogitBackend,
+    backend_spec: Optional[str | LogitBackend] = None,
     model: Optional[str] = None,
     **kwargs: Any,
 ) -> LogitBackend:
     if isinstance(backend_spec, LogitBackend):
         return backend_spec
+
+    from logitgate.config import get_default_backend, get_default_model
+
+    if backend_spec is None or backend_spec == "default":
+        backend_spec = get_default_backend()
+        if model is None:
+            model = get_default_model()
+    elif model is None:
+        model = get_default_model()
 
     spec = str(backend_spec).strip()
     if spec.startswith("stub://") or spec == "stub" or spec == "stub://default":
@@ -191,7 +203,7 @@ def resolve_logit_backend(
 
 
 def resolve_generative_backend(
-    backend_spec: str | GenerativeBackend,
+    backend_spec: Optional[str | GenerativeBackend] = None,
     model: Optional[str] = None,
     **kwargs: Any,
 ) -> GenerativeBackend:

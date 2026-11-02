@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [
-    { name = "LogitGate Authors" }
+    { name = "Jason Bradley", email = "jasonbdly@gmail.com" }
 ]
 keywords = ["llm", "evaluation", "logprobs", "logits", "calibration", "cascaded-routing"]
 classifiers = [
@@ -27,6 +27,11 @@ dependencies = [
     "pydantic>=2.0.0",
     "httpx>=0.23.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jasonbdly/logitgate"
+Repository = "https://github.com/jasonbdly/logitgate"
+Mirror = "https://gitlab.com/jasonbdly/logitgate"
 
 [project.scripts]
 logitgate = "logitgate.cli:main"

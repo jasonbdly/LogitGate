@@ -19,6 +19,8 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         model: str = "qwen2.5-coder:14b",
         timeout: float = 30.0,
         num_ctx: int = 16384,
+        options: Optional[dict[str, Any]] = None,
+        keep_alive: Optional[str | int] = None,
         client: Optional[httpx.Client] = None,
         async_client: Optional[httpx.AsyncClient] = None,
     ) -> None:
@@ -26,8 +28,13 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         self.model = model
         self.timeout = timeout
         self.num_ctx = num_ctx
+        self.options = dict(options) if options else {}
+        self.keep_alive = keep_alive
         self._client = client
         self._async_client = async_client
+
+    def __repr__(self) -> str:
+        return f"OllamaBackend(model='{self.model}', base_url='{self.base_url}')"
 
     @property
     def client(self) -> httpx.Client:
@@ -78,6 +85,13 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             },
             {"role": "user", "content": prompt},
         ]
+        opts: dict[str, Any] = {
+            "num_predict": 1,
+            "temperature": 0.0,
+            "num_ctx": self.num_ctx,
+        }
+        if self.options:
+            opts.update(self.options)
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -85,14 +99,14 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             "think": False,
             "logprobs": True,
             "top_logprobs": top_k,
-            "options": {
-                "num_predict": 1,
-                "temperature": 0.0,
-                "num_ctx": self.num_ctx,
-            },
+            "options": opts,
         }
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
         for k, v in kwargs.items():
-            if k not in payload:
+            if k == "options" and isinstance(v, dict):
+                payload["options"].update(v)
+            elif k not in payload:
                 payload[k] = v
         return payload
 
@@ -139,16 +153,25 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         return self._extract_top_logprobs_from_response(data)
 
     def generate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+        opts: dict[str, Any] = {
+            "temperature": 0.0,
+            "num_ctx": self.num_ctx,
+        }
+        if self.options:
+            opts.update(self.options)
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "options": {
-                "temperature": 0.0,
-                "num_ctx": self.num_ctx,
-            },
+            "options": opts,
         }
-        payload.update(kwargs)
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
+        for k, v in kwargs.items():
+            if k == "options" and isinstance(v, dict):
+                payload["options"].update(v)
+            else:
+                payload[k] = v
         resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
@@ -157,16 +180,25 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         return strip_reasoning_blocks(content), tokens
 
     async def agenerate(self, prompt: str, **kwargs: Any) -> tuple[str, int]:
+        opts: dict[str, Any] = {
+            "temperature": 0.0,
+            "num_ctx": self.num_ctx,
+        }
+        if self.options:
+            opts.update(self.options)
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "options": {
-                "temperature": 0.0,
-                "num_ctx": self.num_ctx,
-            },
+            "options": opts,
         }
-        payload.update(kwargs)
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
+        for k, v in kwargs.items():
+            if k == "options" and isinstance(v, dict):
+                payload["options"].update(v)
+            else:
+                payload[k] = v
         resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()

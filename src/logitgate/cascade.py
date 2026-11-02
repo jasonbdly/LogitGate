@@ -11,16 +11,33 @@ from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
 
 class Cascade(BaseGate):
-    """
-    3-Layer Cascaded Router chaining:
-    Layer 0 (ASTGate): Sub-millisecond deterministic AST / contract syntax gate.
-    Layer 1 (LogitGate): Sub-50ms first-token debiased confidence gate.
-    Layer 2 (JudgeGate): Diagnostic generative judge on ambiguous or failing artifacts.
+    """3-Layer Cascaded Router pipeline.
+
+    Orchestrates sequential execution of gates:
+    - Layer 0 (ASTGate): Sub-millisecond deterministic syntax, contract, and DAG checks.
+    - Layer 1 (LogitGate): Sub-50ms zero-token debiased confidence gate.
+    - Layer 2 (JudgeGate): Diagnostic generative critique triggered only on ambiguous or failing artifacts.
+
+    Fast-path passes at Layer 1 short-circuit Layer 2 entirely, achieving high accuracy
+    with zero token generation for the vast majority of requests.
+
+    Args:
+        gates: Ordered sequence of gate instances to execute sequentially.
+        name: Identifier for this cascade pipeline.
+
+    Raises:
+        ValueError: If gates sequence is empty.
     """
 
     def __init__(self, gates: Sequence[BaseGate], name: str = "Cascade") -> None:
+        if not gates:
+            raise ValueError("Cascade requires at least one gate")
         self.gates = list(gates)
         self.name = name
+
+    def __repr__(self) -> str:
+        pipeline_repr = " >> ".join(repr(g) for g in self.gates)
+        return f"Cascade([{pipeline_repr}])"
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()

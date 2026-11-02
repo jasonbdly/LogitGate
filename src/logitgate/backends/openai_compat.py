@@ -32,6 +32,9 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         self._client = client
         self._async_client = async_client
 
+    def __repr__(self) -> str:
+        return f"OpenAICompatBackend(model='{self.model}', base_url='{self.base_url}')"
+
     @property
     def client(self) -> httpx.Client:
         if self._client is None or self._client.is_closed:
