@@ -271,6 +271,10 @@ class ASTGate(BaseGate):
             traces=[trace],
         )
 
+    async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        """Asynchronously evaluates candidate artifact (direct sync call for CPU AST validation)."""
+        return self.evaluate(candidate, **kwargs)
+
 
 # Alias
 ContractGate = ASTGate

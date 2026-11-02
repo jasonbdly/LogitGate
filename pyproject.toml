@@ -28,6 +28,9 @@ dependencies = [
     "httpx>=0.23.0",
 ]
 
+[project.scripts]
+logitgate = "logitgate.cli:main"
+
 [project.optional-dependencies]
 openai = ["openai>=1.0.0"]
 deepeval = ["deepeval>=1.0.0"]

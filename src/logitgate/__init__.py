@@ -14,6 +14,7 @@ from logitgate.debiasing.softmax import (
 )
 from logitgate.debiasing.inversion import (
     compile_binary_prompt,
+    compile_batch_binary_prompt,
     compile_choice_prompt,
     compile_score_prompt,
 )
@@ -26,6 +27,7 @@ from logitgate.backends.base import (
 )
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
+from logitgate.backends.llamacpp import LlamaCppBackend
 from logitgate.gates.base import BaseGate
 from logitgate.gates.ast_gate import ASTGate, ContractGate
 from logitgate.gates.logit_gate import LogitGate, ChoiceGate, ScoreGate
@@ -49,6 +51,7 @@ __all__ = [
     "StubBackend",
     "OllamaBackend",
     "OpenAICompatBackend",
+    "LlamaCppBackend",
     "fit_calibration",
     "CalibrationResult",
     "check",
@@ -56,6 +59,7 @@ __all__ = [
     "extract_token_logprob",
     "compute_binary_log_odds",
     "compile_binary_prompt",
+    "compile_batch_binary_prompt",
     "compile_choice_prompt",
     "compile_score_prompt",
     "LogitBackend",

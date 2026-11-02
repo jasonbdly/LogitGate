@@ -3,8 +3,15 @@ from __future__ import annotations
 import abc
 import asyncio
 import math
+import re
 from typing import Any, Optional
 from urllib.parse import urlparse
+
+
+def strip_reasoning_blocks(text: str) -> str:
+    """Strips <think>...</think> reasoning traces from model responses."""
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    return cleaned.strip()
 
 
 class LogitBackend(abc.ABC):
@@ -160,6 +167,20 @@ def resolve_logit_backend(
         base_url = f"{scheme}://{parsed.netloc}{parsed.path}"
         effective_model = model or "gpt-4o-mini"
         return OpenAICompatBackend(base_url=base_url, model=effective_model, **kwargs)
+
+    if spec.startswith("llamacpp://") or spec == "llamacpp":
+        from logitgate.backends.llamacpp import LlamaCppBackend
+        if spec == "llamacpp":
+            return LlamaCppBackend(model=model, **kwargs)
+        parsed = urlparse(spec)
+        if parsed.netloc:
+            base_url = f"http://{parsed.netloc}"
+            parsed_model = parsed.path.lstrip("/") if parsed.path else None
+            effective_model = model or parsed_model or None
+            return LlamaCppBackend(base_url=base_url, model=effective_model, **kwargs)
+        else:
+            effective_model = model or (parsed.path.lstrip("/") if parsed.path else None)
+            return LlamaCppBackend(model=effective_model, **kwargs)
 
     # Fallback to Ollama or Stub
     if "stub" in spec:

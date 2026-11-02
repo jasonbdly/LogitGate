@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import math
 import pytest
+from logitgate.backends.base import StubBackend
 from logitgate.debiasing.permutation import combine_symmetric_log_odds, fit_calibration
 from logitgate.debiasing.softmax import extract_token_logprob, compute_binary_log_odds
-from logitgate.debiasing.inversion import compile_binary_prompt
+from logitgate.debiasing.inversion import (
+    compile_binary_prompt,
+    compile_batch_binary_prompt,
+    compile_score_prompt,
+)
+from logitgate.gates.logit_gate import LogitGate
 
 
 def test_symmetric_log_odds_cancels_extreme_bias():
@@ -104,3 +110,115 @@ def test_compile_binary_prompt_identical_static_prefix():
     assert "[CANDIDATE ARTIFACT]" in prefix1
     assert rubric in prefix1
     assert candidate in prefix1
+
+
+def test_compile_batch_binary_prompt_identical_static_prefix():
+    """
+    Verifies that compile_batch_binary_prompt preserves a 100% byte-identical
+    [EVALUATION RUBRICS] + [CANDIDATE ARTIFACT] prefix across all 2K passes.
+    """
+    rubrics = [
+        "Rubric 1: Functions must have docstrings.",
+        "Rubric 2: Type annotations required.",
+        "Rubric 3: Variable names must be snake_case.",
+    ]
+    candidate = "def my_func(a: int) -> int:\n    '''Doc.'''\n    return a * 2"
+
+    prompts = []
+    for idx in range(len(rubrics)):
+        # Pass 1: A=Pass, B=Fail
+        p1 = compile_batch_binary_prompt(rubrics, candidate, rubric_index=idx, pass_token="A", fail_token="B")
+        # Pass 2: B=Pass, A=Fail
+        p2 = compile_batch_binary_prompt(rubrics, candidate, rubric_index=idx, pass_token="B", fail_token="A")
+        prompts.extend([p1, p2])
+
+    assert len(prompts) == 6
+    marker = "[DECISION MAPPING — RUBRIC #"
+    prefixes = [p.split(marker)[0] for p in prompts]
+
+    # All 6 prefixes across all 3 rubrics and both passes must be 100% byte-identical
+    for pref in prefixes[1:]:
+        assert pref == prefixes[0]
+
+    assert "[EVALUATION RUBRICS]" in prefixes[0]
+    assert "[CANDIDATE ARTIFACT]" in prefixes[0]
+    for r in rubrics:
+        assert r in prefixes[0]
+    assert candidate in prefixes[0]
+
+    # Out-of-bounds raises IndexError
+    with pytest.raises(IndexError):
+        compile_batch_binary_prompt(rubrics, candidate, rubric_index=99)
+
+
+def test_batch_evaluate_prompts_byte_identical_prefix_math():
+    """
+    Verifies that LogitGate.evaluate_batch records 6 prompts in StubBackend
+    with exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
+    """
+    backend = StubBackend(default_prob=0.90)
+    gate = LogitGate(rubric="", backend=backend)
+    rubrics = [
+        "Rubric 1: Documentation complete.",
+        "Rubric 2: No side effects.",
+        "Rubric 3: Bounded memory usage.",
+    ]
+    candidate = "def execute(cmd: str) -> None:\n    pass"
+
+    verdicts = gate.evaluate_batch(candidate, rubrics)
+    assert len(verdicts) == 3
+    assert len(backend.prompt_log) == 6
+
+    marker = "[DECISION MAPPING — RUBRIC #"
+    prefixes = [p.split(marker)[0] for p in backend.prompt_log]
+    for pref in prefixes[1:]:
+        assert pref == prefixes[0]
+    assert "[CANDIDATE ARTIFACT]" in prefixes[0]
+    assert candidate in prefixes[0]
+
+
+@pytest.mark.asyncio
+async def test_batch_aevaluate_prompts_byte_identical_prefix_math():
+    """
+    Verifies that LogitGate.aevaluate_batch records 6 prompts in StubBackend
+    with exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
+    """
+    backend = StubBackend(default_prob=0.90)
+    gate = LogitGate(rubric="", backend=backend)
+    rubrics = [
+        "Rubric 1: Documentation complete.",
+        "Rubric 2: No side effects.",
+        "Rubric 3: Bounded memory usage.",
+    ]
+    candidate = "def execute(cmd: str) -> None:\n    pass"
+
+    verdicts = await gate.aevaluate_batch(candidate, rubrics)
+    assert len(verdicts) == 3
+    assert len(backend.prompt_log) == 6
+
+    marker = "[DECISION MAPPING — RUBRIC #"
+    prefixes = [p.split(marker)[0] for p in backend.prompt_log]
+    for pref in prefixes[1:]:
+        assert pref == prefixes[0]
+    assert "[CANDIDATE ARTIFACT]" in prefixes[0]
+    assert candidate in prefixes[0]
+
+
+def test_compile_score_prompt_identical_static_prefix():
+    """
+    Verifies that compile_score_prompt retains identical prefix between
+    normal and inverted scoring passes for KV-cache reuse.
+    """
+    rubric = "Rate code modularity"
+    candidate = "class Service:\n    pass"
+
+    p_norm = compile_score_prompt(rubric, candidate, min_score=1, max_score=5, inverted=False)
+    p_inv = compile_score_prompt(rubric, candidate, min_score=1, max_score=5, inverted=True)
+
+    marker = "[SCORING SCALE]"
+    pref_norm = p_norm.split(marker)[0]
+    pref_inv = p_inv.split(marker)[0]
+
+    assert pref_norm == pref_inv
+    assert "[EVALUATION RUBRIC]" in pref_norm
+    assert "[CANDIDATE ARTIFACT]" in pref_norm

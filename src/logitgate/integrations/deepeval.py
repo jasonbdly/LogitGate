@@ -88,17 +88,36 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
         questions: Dict[str, Any],
     ) -> Tuple[Any, Optional[float]]:
         nouls: dict[str, Any] = {}
-        for q_id, q in questions.items():
-            statement = getattr(q, "statement", None) or getattr(q, "instructions", None) or str(q)
+        if len(questions) > 1:
+            q_ids = list(questions.keys())
+            statements = [
+                getattr(questions[qid], "statement", None)
+                or getattr(questions[qid], "instructions", None)
+                or str(questions[qid])
+                for qid in q_ids
+            ]
             gate = LogitGate(
-                rubric=statement,
+                rubric=statements[0] if statements else "",
                 backend=self.backend,
                 symmetric_debiasing=self.symmetric,
                 logit_temperature=self.logit_temperature,
             )
-            verdict = gate.evaluate(state)
-            p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
-            nouls[q_id] = NoulAnswer(probability=round(p, 4))
+            verdicts = gate.evaluate_batch(state, statements)
+            for q_id, verdict in zip(q_ids, verdicts):
+                p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
+                nouls[q_id] = NoulAnswer(probability=round(p, 4))
+        else:
+            for q_id, q in questions.items():
+                statement = getattr(q, "statement", None) or getattr(q, "instructions", None) or str(q)
+                gate = LogitGate(
+                    rubric=statement,
+                    backend=self.backend,
+                    symmetric_debiasing=self.symmetric,
+                    logit_temperature=self.logit_temperature,
+                )
+                verdict = gate.evaluate(state)
+                p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
+                nouls[q_id] = NoulAnswer(probability=round(p, 4))
         return SystemOneAnswers(nouls=nouls), 0.0001
 
     async def a_decide(
@@ -107,17 +126,36 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
         questions: Dict[str, Any],
     ) -> Tuple[Any, Optional[float]]:
         nouls: dict[str, Any] = {}
-        for q_id, q in questions.items():
-            statement = getattr(q, "statement", None) or getattr(q, "instructions", None) or str(q)
+        if len(questions) > 1:
+            q_ids = list(questions.keys())
+            statements = [
+                getattr(questions[qid], "statement", None)
+                or getattr(questions[qid], "instructions", None)
+                or str(questions[qid])
+                for qid in q_ids
+            ]
             gate = LogitGate(
-                rubric=statement,
+                rubric=statements[0] if statements else "",
                 backend=self.backend,
                 symmetric_debiasing=self.symmetric,
                 logit_temperature=self.logit_temperature,
             )
-            verdict = await gate.aevaluate(state)
-            p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
-            nouls[q_id] = NoulAnswer(probability=round(p, 4))
+            verdicts = await gate.aevaluate_batch(state, statements)
+            for q_id, verdict in zip(q_ids, verdicts):
+                p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
+                nouls[q_id] = NoulAnswer(probability=round(p, 4))
+        else:
+            for q_id, q in questions.items():
+                statement = getattr(q, "statement", None) or getattr(q, "instructions", None) or str(q)
+                gate = LogitGate(
+                    rubric=statement,
+                    backend=self.backend,
+                    symmetric_debiasing=self.symmetric,
+                    logit_temperature=self.logit_temperature,
+                )
+                verdict = await gate.aevaluate(state)
+                p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
+                nouls[q_id] = NoulAnswer(probability=round(p, 4))
         return SystemOneAnswers(nouls=nouls), 0.0001
 
 
