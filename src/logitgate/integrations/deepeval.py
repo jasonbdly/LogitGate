@@ -41,7 +41,8 @@ except ImportError:
         def __init__(self, nouls: dict[str, Any]) -> None:
             self.nouls = nouls
 
-    SystemOneQuestion = NoulQuestion  # type: ignore[misc]
+    class SystemOneQuestion(NoulQuestion):  # type: ignore[no-redef]
+        pass
 
     class LLMTestCase:  # type: ignore[no-redef]
         def __init__(self, input: str = "", actual_output: str = "") -> None:
