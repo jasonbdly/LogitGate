@@ -4,14 +4,16 @@ import ast
 import json
 import re
 import time
-from typing import Any, Callable, Optional, Sequence, Union
-from pydantic import BaseModel
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
 
-def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> Optional[str]:
+def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
     """
     Validates that task dependencies exist and contain no cycles.
     Returns error message if invalid, None if acyclic and all dependencies exist.
@@ -74,14 +76,14 @@ class ASTGate(BaseGate):
     def __init__(
         self,
         syntax: bool = False,
-        forbidden_imports: Optional[Sequence[str]] = None,
-        forbidden_patterns: Optional[Sequence[str]] = None,
-        required_sections: Optional[Sequence[str]] = None,
+        forbidden_imports: Sequence[str] | None = None,
+        forbidden_patterns: Sequence[str] | None = None,
+        required_sections: Sequence[str] | None = None,
         acyclic_dag: bool = False,
-        json_schema: Optional[dict[str, Any] | type[BaseModel]] = None,
-        min_length: Optional[int] = None,
-        max_length: Optional[int] = None,
-        validators: Optional[Sequence[Callable[[Any], Union[bool, tuple[bool, str]]]]] = None,
+        json_schema: dict[str, Any] | type[BaseModel] | None = None,
+        min_length: int | None = None,
+        max_length: int | None = None,
+        validators: Sequence[Callable[[Any], bool | tuple[bool, str]]] | None = None,
         name: str = "ASTGate",
     ) -> None:
         self.syntax = syntax
@@ -213,7 +215,7 @@ class ASTGate(BaseGate):
                         self.json_schema.model_validate(parsed_json)
                     else:
                         self.json_schema.model_validate_json(candidate_str)
-                except Exception as e:
+                except (ValidationError, ValueError, TypeError) as e:
                     latency = (time.perf_counter() - t0) * 1000.0
                     err = f"JSON validation failed for schema {self.json_schema.__name__}: {e}"
                     trace = LayerTrace(
@@ -345,7 +347,7 @@ class ASTGate(BaseGate):
                             )
 
         # 1. Syntax Check
-        parsed_ast: Optional[ast.AST] = None
+        parsed_ast: ast.AST | None = None
         if self.syntax or self.forbidden_imports:
             try:
                 parsed_ast = ast.parse(candidate_str)
@@ -377,9 +379,8 @@ class ASTGate(BaseGate):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
                             found_imports.add(alias.name)
-                    elif isinstance(node, ast.ImportFrom):
-                        if node.module:
-                            found_imports.add(node.module)
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        found_imports.add(node.module)
             else:
                 # Regex fallback if AST not parsed
                 for match in re.finditer(r"^\s*(?:import|from)\s+([a-zA-Z0-9_\.]+)", candidate_str, re.MULTILINE):
@@ -452,7 +453,7 @@ class ASTGate(BaseGate):
 
         # 5. Acyclic DAG Check
         if self.acyclic_dag:
-            tasks_data: Optional[list[dict[str, Any]]] = None
+            tasks_data: list[dict[str, Any]] | None = None
             if isinstance(candidate, list):
                 tasks_data = candidate
             elif isinstance(candidate, dict):
@@ -496,7 +497,7 @@ class ASTGate(BaseGate):
                         val_ok, val_msg = res
                     else:
                         val_ok, val_msg = bool(res), f"Validator '{getattr(val_fn, '__name__', str(val_fn))}' rejected artifact"
-                except Exception as ex:
+                except (ValueError, TypeError, AssertionError, KeyError, IndexError, AttributeError, RuntimeError, OSError) as ex:
                     val_ok = False
                     val_msg = f"Validator raised exception: {ex}"
 

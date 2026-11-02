@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 
 class _ConfigState:
     def __init__(self) -> None:
-        self.backend: Optional[str] = None
-        self.model: Optional[str] = None
-        self.pass_threshold: Optional[float] = None
-        self.fail_threshold: Optional[float] = None
-        self.logit_temperature: Optional[float] = None
-        self.num_ctx: Optional[int] = None
-        self.save_failures: Optional[bool] = None
-        self.snapshot_dir: Optional[str] = None
+        self.backend: str | None = None
+        self.model: str | None = None
+        self.pass_threshold: float | None = None
+        self.fail_threshold: float | None = None
+        self.logit_temperature: float | None = None
+        self.num_ctx: int | None = None
+        self.save_failures: bool | None = None
+        self.snapshot_dir: str | None = None
 
     def reset(self) -> None:
         self.backend = None
@@ -37,17 +36,17 @@ class _DefaultsMeta(type):
         return os.environ.get("LOGITGATE_BACKEND", "stub://default")
 
     @backend.setter
-    def backend(cls, val: Optional[str]) -> None:
+    def backend(cls, val: str | None) -> None:
         _state.backend = val
 
     @property
-    def model(cls) -> Optional[str]:
+    def model(cls) -> str | None:
         if _state.model is not None:
             return _state.model
         return os.environ.get("LOGITGATE_MODEL", None)
 
     @model.setter
-    def model(cls, val: Optional[str]) -> None:
+    def model(cls, val: str | None) -> None:
         _state.model = val
 
     @property
@@ -58,7 +57,7 @@ class _DefaultsMeta(type):
         return float(val) if val is not None else 0.85
 
     @pass_threshold.setter
-    def pass_threshold(cls, val: Optional[float]) -> None:
+    def pass_threshold(cls, val: float | None) -> None:
         _state.pass_threshold = val
 
     @property
@@ -69,7 +68,7 @@ class _DefaultsMeta(type):
         return float(val) if val is not None else 0.20
 
     @fail_threshold.setter
-    def fail_threshold(cls, val: Optional[float]) -> None:
+    def fail_threshold(cls, val: float | None) -> None:
         _state.fail_threshold = val
 
     @property
@@ -80,18 +79,18 @@ class _DefaultsMeta(type):
         return float(val) if val is not None else 1.0
 
     @logit_temperature.setter
-    def logit_temperature(cls, val: Optional[float]) -> None:
+    def logit_temperature(cls, val: float | None) -> None:
         _state.logit_temperature = val
 
     @property
-    def num_ctx(cls) -> Optional[int]:
+    def num_ctx(cls) -> int | None:
         if _state.num_ctx is not None:
             return _state.num_ctx
         val = os.environ.get("LOGITGATE_NUM_CTX")
         return int(val) if val is not None else None
 
     @num_ctx.setter
-    def num_ctx(cls, val: Optional[int]) -> None:
+    def num_ctx(cls, val: int | None) -> None:
         _state.num_ctx = val
 
     @property
@@ -101,7 +100,7 @@ class _DefaultsMeta(type):
         return os.environ.get("LOGITGATE_SAVE_FAILURES", "0").lower() in ("1", "true", "yes")
 
     @save_failures.setter
-    def save_failures(cls, val: Optional[bool]) -> None:
+    def save_failures(cls, val: bool | None) -> None:
         _state.save_failures = val
 
     @property
@@ -111,24 +110,23 @@ class _DefaultsMeta(type):
         return os.environ.get("LOGITGATE_SNAPSHOT_DIR", ".logitgate/failures")
 
     @snapshot_dir.setter
-    def snapshot_dir(cls, val: Optional[str]) -> None:
+    def snapshot_dir(cls, val: str | None) -> None:
         _state.snapshot_dir = val
 
 
 class LogitGateDefaults(metaclass=_DefaultsMeta):
     """Global configuration defaults for LogitGate."""
-    pass
 
 
 def configure(
-    backend: Optional[str] = None,
-    model: Optional[str] = None,
-    pass_threshold: Optional[float] = None,
-    fail_threshold: Optional[float] = None,
-    logit_temperature: Optional[float] = None,
-    num_ctx: Optional[int] = None,
-    save_failures: Optional[bool] = None,
-    snapshot_dir: Optional[str] = None,
+    backend: str | None = None,
+    model: str | None = None,
+    pass_threshold: float | None = None,
+    fail_threshold: float | None = None,
+    logit_temperature: float | None = None,
+    num_ctx: int | None = None,
+    save_failures: bool | None = None,
+    snapshot_dir: str | None = None,
 ) -> None:
     """Configures global defaults for LogitGate."""
     if backend is not None:
@@ -159,7 +157,7 @@ def get_default_backend() -> str:
     return LogitGateDefaults.backend
 
 
-def get_default_model() -> Optional[str]:
+def get_default_model() -> str | None:
     """Resolves default model string via configure() or LOGITGATE_MODEL."""
     return LogitGateDefaults.model
 

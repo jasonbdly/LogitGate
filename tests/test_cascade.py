@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from logitgate.backends.base import StubBackend
 from logitgate.gates.ast_gate import ASTGate
 from logitgate.gates.judge_gate import JudgeGate

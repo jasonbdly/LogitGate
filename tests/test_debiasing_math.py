@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import math
+
 import pytest
+
 from logitgate.backends.base import StubBackend
-from logitgate.debiasing.permutation import combine_symmetric_log_odds, fit_calibration
-from logitgate.debiasing.softmax import extract_token_logprob
 from logitgate.debiasing.inversion import (
-    compile_binary_prompt,
     compile_batch_binary_prompt,
+    compile_binary_prompt,
     compile_score_prompt,
 )
+from logitgate.debiasing.permutation import combine_symmetric_log_odds, fit_calibration
+from logitgate.debiasing.softmax import extract_token_logprob
 from logitgate.gates.logit_gate import LogitGate
 
 

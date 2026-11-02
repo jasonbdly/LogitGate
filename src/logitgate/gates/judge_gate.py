@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Literal, Optional
+from typing import Any, Literal
+
+import httpx
 
 from logitgate.backends.base import GenerativeBackend, resolve_generative_backend
 from logitgate.config import get_default_backend, get_default_model
@@ -36,12 +38,12 @@ class JudgeGate(BaseGate):
 
     def __init__(
         self,
-        rubric: Optional[str] = None,
-        backend: Optional[str | GenerativeBackend] = None,
-        model: Optional[str] = None,
+        rubric: str | None = None,
+        backend: str | GenerativeBackend | None = None,
+        model: str | None = None,
         trigger: TriggerMode = "on_ambiguous_or_fail",
-        max_tokens: Optional[int] = None,
-        think: Optional[bool] = None,
+        max_tokens: int | None = None,
+        think: bool | None = None,
         name: str = "JudgeGate",
     ) -> None:
         valid_triggers = {"on_ambiguous_or_fail", "on_ambiguous_only", "always"}
@@ -72,7 +74,7 @@ class JudgeGate(BaseGate):
         max_tok_str = f", max_tokens={self.max_tokens}" if self.max_tokens is not None else ""
         return f"JudgeGate(rubric={rubric_repr}, trigger='{self.trigger}'{max_tok_str}, backend={self.backend!r})"
 
-    def _compile_prompt(self, candidate: Any, rubric_override: Optional[str] = None) -> str:
+    def _compile_prompt(self, candidate: Any, rubric_override: str | None = None) -> str:
         effective_rubric = (rubric_override or self.rubric or "Evaluate if the artifact complies with standards.").strip()
         return (
             f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
@@ -82,7 +84,7 @@ class JudgeGate(BaseGate):
             f"Then provide a concise diagnostic critique explaining why the candidate artifact passes or fails the rubric, and end by repeating [VERDICT: PASS] or [VERDICT: FAIL]."
         )
 
-    def _parse_verdict(self, text: str) -> tuple[bool, DecisionStatus, Optional[float]]:
+    def _parse_verdict(self, text: str) -> tuple[bool, DecisionStatus, float | None]:
         # 1. Standard / Markdown tag check (matches [VERDICT: PASS], **[VERDICT: PASS]**, Verdict: PASS, etc.)
         match = re.search(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE)
         if match:
@@ -96,12 +98,13 @@ class JudgeGate(BaseGate):
         if json_match:
             try:
                 data = json.loads(json_match.group(0))
-                verdict_val = str(data.get("verdict", "")).lower()
-                is_pass = data.get("pass", data.get("passed", verdict_val == "pass"))
-                score = float(data.get("score", 1.0 if is_pass else 0.0))
-                return bool(is_pass), DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, score
-            except Exception:
-                pass
+                if isinstance(data, dict):
+                    verdict_val = str(data.get("verdict", "")).lower()
+                    is_pass = data.get("pass", data.get("passed", verdict_val == "pass"))
+                    score = float(data.get("score", 1.0 if is_pass else 0.0))
+                    return bool(is_pass), DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, score
+            except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+                data = None
 
         # 3. Explicit keyword heuristic on candidate lines (first line and last non-empty line)
         lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
@@ -150,8 +153,8 @@ class JudgeGate(BaseGate):
                 if pv.probability is not None:
                     is_pass = (pv.probability >= 0.5)
                     return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
-            except Exception:
-                pass
+            except (ValueError, RuntimeError, OSError, httpx.HTTPError):
+                pv = None
 
         # 5. Full text fallback heuristic
         sanitized_full = sanitize_negations(text)
@@ -164,7 +167,7 @@ class JudgeGate(BaseGate):
 
         return False, DecisionStatus.FAILED, 0.0
 
-    async def _aparse_verdict(self, text: str) -> tuple[bool, DecisionStatus, Optional[float]]:
+    async def _aparse_verdict(self, text: str) -> tuple[bool, DecisionStatus, float | None]:
         # 1. Standard / Markdown tag check
         match = re.search(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE)
         if match:
@@ -178,12 +181,13 @@ class JudgeGate(BaseGate):
         if json_match:
             try:
                 data = json.loads(json_match.group(0))
-                verdict_val = str(data.get("verdict", "")).lower()
-                is_pass = data.get("pass", data.get("passed", verdict_val == "pass"))
-                score = float(data.get("score", 1.0 if is_pass else 0.0))
-                return bool(is_pass), DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, score
-            except Exception:
-                pass
+                if isinstance(data, dict):
+                    verdict_val = str(data.get("verdict", "")).lower()
+                    is_pass = data.get("pass", data.get("passed", verdict_val == "pass"))
+                    score = float(data.get("score", 1.0 if is_pass else 0.0))
+                    return bool(is_pass), DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, score
+            except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+                data = None
 
         # 3. Candidate lines check
         lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
@@ -231,8 +235,8 @@ class JudgeGate(BaseGate):
                 if pv.probability is not None:
                     is_pass = (pv.probability >= 0.5)
                     return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
-            except Exception:
-                pass
+            except (ValueError, RuntimeError, OSError, httpx.HTTPError):
+                pv = None
 
         # 5. Full text fallback heuristic
         sanitized_full = sanitize_negations(text)
@@ -245,7 +249,7 @@ class JudgeGate(BaseGate):
 
         return False, DecisionStatus.FAILED, 0.0
 
-    def evaluate(self, candidate: Any, rubric_override: Optional[str] = None, **kwargs: Any) -> Verdict:
+    def evaluate(self, candidate: Any, rubric_override: str | None = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt = self._compile_prompt(candidate, rubric_override=rubric_override)
         gen_kwargs = dict(kwargs)
@@ -274,7 +278,7 @@ class JudgeGate(BaseGate):
             traces=[trace],
         )
 
-    async def aevaluate(self, candidate: Any, rubric_override: Optional[str] = None, **kwargs: Any) -> Verdict:
+    async def aevaluate(self, candidate: Any, rubric_override: str | None = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt = self._compile_prompt(candidate, rubric_override=rubric_override)
         gen_kwargs = dict(kwargs)

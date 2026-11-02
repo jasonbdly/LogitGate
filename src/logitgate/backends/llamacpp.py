@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import Any, Optional
-import httpx
+from typing import Any
 
-from logitgate.backends.base import LogitBackend, GenerativeBackend, strip_reasoning_blocks
+import httpx
+from typing_extensions import Self
+
+from logitgate.backends.base import (
+    GenerativeBackend,
+    LogitBackend,
+    strip_reasoning_blocks,
+)
 
 
 class LlamaCppBackend(LogitBackend, GenerativeBackend):
@@ -19,10 +25,10 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self,
         llm: Any = None,
         base_url: str = "http://localhost:8080",
-        model: Optional[str] = None,
+        model: str | None = None,
         timeout: float = 30.0,
-        client: Optional[httpx.Client] = None,
-        async_client: Optional[httpx.AsyncClient] = None,
+        client: httpx.Client | None = None,
+        async_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.llm = llm
         self.base_url = base_url.rstrip("/") if base_url else "http://localhost:8080"
@@ -57,16 +63,16 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         if self._async_client is not None and not self._async_client.is_closed:
             await self._async_client.aclose()
 
-    def __enter__(self) -> LlamaCppBackend:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
-    async def __aenter__(self) -> LlamaCppBackend:
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         await self.aclose()
 
     @staticmethod
@@ -120,7 +126,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         messages = [
@@ -140,7 +146,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         )
         return self._extract_chat_top_logprobs(res)
 
-    def _in_process_generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    def _in_process_generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         messages = [{"role": "user", "content": prompt}]
         call_kwargs: dict[str, Any] = {"temperature": 0.0}
         if max_tokens is not None:
@@ -159,7 +165,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -187,7 +193,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -205,7 +211,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         if self.llm is not None:
@@ -238,7 +244,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         if self.llm is not None:
@@ -268,7 +274,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         resp.raise_for_status()
         return self._extract_completion_logprobs(resp.json())
 
-    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         if self.llm is not None:
             return self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs)
 
@@ -306,7 +312,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("tokens_predicted", data.get("tokens_evaluated", 0))
         return strip_reasoning_blocks(content), tokens
 
-    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         if self.llm is not None:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, lambda: self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs))

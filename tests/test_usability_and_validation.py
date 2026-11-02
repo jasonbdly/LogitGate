@@ -18,7 +18,6 @@ from logitgate import (
     Verdict,
 )
 
-
 # ==============================================================================
 # 1. Usability & REPL __repr__ Tests
 # ==============================================================================
@@ -370,7 +369,11 @@ async def test_aevaluate_batch_stampede_prevention():
 
 def test_auto_calibrate_backend(tmp_path):
     """auto_calibrate_backend fits temperature on micro-calibration dataset and caches it."""
-    from logitgate import auto_calibrate_backend, get_model_temperature, KNOWN_MODEL_TEMPERATURES
+    from logitgate import (
+        KNOWN_MODEL_TEMPERATURES,
+        auto_calibrate_backend,
+        get_model_temperature,
+    )
 
     backend = StubBackend(default_prob=0.92)
     cache_file = tmp_path / "calibration.json"
@@ -407,6 +410,7 @@ def test_logit_gate_presets():
 def test_contract_gate_json_schema_and_length():
     """ContractGate validates JSON schema, Pydantic models, and min/max length in 0ms."""
     from pydantic import BaseModel
+
     from logitgate import ContractGate
 
     class UserPayload(BaseModel):
@@ -457,7 +461,7 @@ def test_judge_gate_parse_verdict_robustness():
         "The candidate artifact is well-formed.\n"
         "The candidate does not fail any requirements, and all assertions succeed."
     )
-    passed, status, score = judge._parse_verdict(qwen_sample)
+    passed, _status, score = judge._parse_verdict(qwen_sample)
     assert passed is True
     assert score == 1.0
 
@@ -608,6 +612,7 @@ def test_verdict_snapshot_replay_and_explain():
 
 def test_logit_gate_save_on_fail(tmp_path):
     from pathlib import Path
+
     from logitgate.snapshot import VerdictSnapshot
 
     gate = LogitGate(rubric="Must be safe", backend=StubBackend(default_prob=0.10))

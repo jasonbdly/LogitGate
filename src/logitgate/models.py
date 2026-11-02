@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -39,13 +40,13 @@ class LayerTrace(BaseModel):
     layer_name: str
     status: DecisionStatus
     latency_ms: float
-    calibrated_prob: Optional[float] = None
-    forward_prob: Optional[float] = None
-    reverse_prob: Optional[float] = None
-    forward_log_odds: Optional[float] = None
-    reverse_log_odds: Optional[float] = None
+    calibrated_prob: float | None = None
+    forward_prob: float | None = None
+    reverse_prob: float | None = None
+    forward_log_odds: float | None = None
+    reverse_log_odds: float | None = None
     tokens_generated: int = 0
-    diagnostic_report: Optional[str] = None
+    diagnostic_report: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def __repr__(self) -> str:
@@ -80,14 +81,14 @@ class Verdict(BaseModel):
 
     passed: bool
     status: DecisionStatus
-    probability: Optional[float] = None
-    score: Optional[float] = None
-    choice: Optional[str] = None
-    choice_probabilities: Optional[dict[str, float]] = None
+    probability: float | None = None
+    score: float | None = None
+    choice: str | None = None
+    choice_probabilities: dict[str, float] | None = None
     triggered_layer: str
     total_latency_ms: float
     total_tokens_generated: int = 0
-    reason: Optional[str] = None
+    reason: str | None = None
     traces: list[LayerTrace] = Field(default_factory=list)
 
     def __bool__(self) -> bool:

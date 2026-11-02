@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Optional
-import httpx
+from typing import Any
 
-from logitgate.backends.base import LogitBackend, GenerativeBackend, strip_reasoning_blocks
+import httpx
+from typing_extensions import Self
+
+from logitgate.backends.base import (
+    GenerativeBackend,
+    LogitBackend,
+    strip_reasoning_blocks,
+)
 from logitgate.config import LogitGateDefaults
 
 
@@ -18,11 +24,11 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         base_url: str = "http://localhost:11434",
         model: str = "qwen2.5-coder:14b",
         timeout: float = 30.0,
-        num_ctx: Optional[int] = None,
-        options: Optional[dict[str, Any]] = None,
-        keep_alive: Optional[str | int] = None,
-        client: Optional[httpx.Client] = None,
-        async_client: Optional[httpx.AsyncClient] = None,
+        num_ctx: int | None = None,
+        options: dict[str, Any] | None = None,
+        keep_alive: str | int | None = None,
+        client: httpx.Client | None = None,
+        async_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -59,23 +65,23 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         if self._async_client is not None and not self._async_client.is_closed:
             await self._async_client.aclose()
 
-    def __enter__(self) -> OllamaBackend:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
-    async def __aenter__(self) -> OllamaBackend:
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         await self.aclose()
 
     def build_query_payload(
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Constructs the chat completion payload ensuring think: False."""
@@ -127,7 +133,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         payload = self.build_query_payload(
@@ -142,7 +148,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         payload = self.build_query_payload(
@@ -153,7 +159,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
-    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         opts: dict[str, Any] = {
             "temperature": 0.0,
             "num_ctx": self.num_ctx,
@@ -162,7 +168,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
-        think_default = True if max_tokens is None else False
+        think_default = max_tokens is None
         think_val = kwargs.pop("think", think_default)
         if think_val is None:
             think_val = think_default
@@ -213,7 +219,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
 
         return visible_text, tokens
 
-    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         opts: dict[str, Any] = {
             "temperature": 0.0,
             "num_ctx": self.num_ctx,
@@ -222,7 +228,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
-        think_default = True if max_tokens is None else False
+        think_default = max_tokens is None
         think_val = kwargs.pop("think", think_default)
         if think_val is None:
             think_val = think_default

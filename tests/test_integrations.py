@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import pytest
+
 from logitgate.backends.base import StubBackend
 from logitgate.gates.logit_gate import LogitGate
-from logitgate.integrations.langgraph import as_conditional_edge
-from logitgate.integrations.pytest_plugin import check
 from logitgate.integrations.deepeval import (
     LLMTestCase,
     LogitGateMetric,
     LogitGateSystemOneModel,
     NoulQuestion,
 )
+from logitgate.integrations.langgraph import as_conditional_edge
+from logitgate.integrations.pytest_plugin import check
 
 
 def test_pytest_plugin_check_sync():
@@ -59,7 +60,7 @@ def test_deepeval_system_one_model():
     questions = {
         "q1": NoulQuestion(instructions="Is artifact compliant?", statement="Is artifact compliant?"),
     }
-    answers, latency = model.decide("Candidate artifact", questions)
+    answers, _latency = model.decide("Candidate artifact", questions)
     assert "q1" in answers.nouls
     assert answers.nouls["q1"].probability == 0.92
 

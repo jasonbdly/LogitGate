@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from logitgate.backends.base import LogitBackend
 from logitgate.gates.logit_gate import LogitGate
@@ -59,7 +59,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
         self,
         model_name: str = "qwen2.5-coder:14b",
         api_base: str = "http://localhost:11434",
-        backend: Optional[LogitBackend] = None,
+        backend: LogitBackend | None = None,
         symmetric: bool = True,
         logit_temperature: float = 1.0,
     ) -> None:
@@ -84,8 +84,8 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
     def decide(
         self,
         state: Any,
-        questions: Dict[str, Any],
-    ) -> Tuple[Any, Optional[float]]:
+        questions: dict[str, Any],
+    ) -> tuple[Any, float | None]:
         nouls: dict[str, Any] = {}
         if len(questions) > 1:
             q_ids = list(questions.keys())
@@ -122,8 +122,8 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
     async def a_decide(
         self,
         state: Any,
-        questions: Dict[str, Any],
-    ) -> Tuple[Any, Optional[float]]:
+        questions: dict[str, Any],
+    ) -> tuple[Any, float | None]:
         nouls: dict[str, Any] = {}
         if len(questions) > 1:
             q_ids = list(questions.keys())
@@ -181,9 +181,9 @@ class LogitGateMetric(BaseMetric):
             backend=backend,
         )
         self.async_mode = async_mode
-        self.score: Optional[float] = None
-        self.reason: Optional[str] = None
-        self.success: Optional[bool] = None
+        self.score: float | None = None
+        self.reason: str | None = None
+        self.success: bool | None = None
 
     @property
     def __name__(self) -> str:

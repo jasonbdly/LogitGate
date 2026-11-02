@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -84,8 +86,8 @@ def get_calibration_cache_path() -> Path:
 
 
 def get_model_temperature(
-    model_name: Optional[str],
-    cache_path: Optional[Path] = None,
+    model_name: str | None,
+    cache_path: Path | None = None,
 ) -> float:
     """Retrieves calibrated temperature for a model checking cache, known models, then default 1.0."""
     if not model_name:
@@ -103,8 +105,8 @@ def get_model_temperature(
                 for k, v in cached.items():
                     if k.lower() == m_lower or k.lower() in m_lower or m_lower in k.lower():
                         return float(v)
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError):
+            cached = None
 
     # 2. KNOWN_MODEL_TEMPERATURES
     for k, v in KNOWN_MODEL_TEMPERATURES.items():
@@ -117,16 +119,16 @@ def get_model_temperature(
 
 def auto_calibrate_backend(
     backend: Any,
-    model_key: Optional[str] = None,
+    model_key: str | None = None,
     save_cache: bool = True,
-    cache_path: Optional[Path] = None,
+    cache_path: Path | None = None,
 ) -> CalibrationResult:
     """Runs built-in 8-item micro-calibration dataset, fits optimal temperature, and caches it."""
     from logitgate.debiasing.inversion import compile_binary_prompt
     from logitgate.debiasing.softmax import compute_binary_log_odds
 
     effective_model = model_key or getattr(backend, "model", None) or "default"
-    samples: list[Tuple[float, float, int]] = []
+    samples: list[tuple[float, float, int]] = []
 
     for rubric, candidate, y in UNIVERSAL_CALIBRATION_DATASET:
         p1 = compile_binary_prompt(
@@ -163,7 +165,7 @@ def auto_calibrate_backend(
                     loaded = json.load(f)
                 if isinstance(loaded, dict):
                     cache_data = loaded
-            except Exception:
+            except (OSError, ValueError, TypeError):
                 cache_data = {}
         cache_data[effective_model] = result.optimal_temperature
         with open(target_path, "w", encoding="utf-8") as f:
@@ -193,7 +195,7 @@ def combine_symmetric_log_odds(
 
 
 def fit_calibration(
-    samples: Sequence[Tuple[float, float, int]],
+    samples: Sequence[tuple[float, float, int]],
     min_temp: float = 0.1,
     max_temp: float = 10.0,
     num_bins: int = 10,
@@ -220,7 +222,7 @@ def fit_calibration(
 
     def compute_ece(temp: float) -> float:
         n = len(samples)
-        bins: list[list[Tuple[float, float]]] = [[] for _ in range(num_bins)]
+        bins: list[list[tuple[float, float]]] = [[] for _ in range(num_bins)]
         for f, r, y in samples:
             p = calc_prob(f, r, temp)
             idx = min(int(p * num_bins), num_bins - 1)

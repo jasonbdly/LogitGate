@@ -1,19 +1,19 @@
 from logitgate.backends.base import (
-    LogitBackend,
     GenerativeBackend,
+    LogitBackend,
     StubBackend,
-    resolve_logit_backend,
     resolve_generative_backend,
+    resolve_logit_backend,
 )
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
 
 __all__ = [
-    "LogitBackend",
     "GenerativeBackend",
-    "StubBackend",
+    "LogitBackend",
     "OllamaBackend",
     "OpenAICompatBackend",
-    "resolve_logit_backend",
+    "StubBackend",
     "resolve_generative_backend",
+    "resolve_logit_backend",
 ]

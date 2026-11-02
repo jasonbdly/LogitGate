@@ -4,7 +4,7 @@ import abc
 import asyncio
 import math
 import re
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 
@@ -24,16 +24,15 @@ class LogitBackend(abc.ABC):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Returns top_k token logprobs: [{'token': str, 'logprob': float}, ...]"""
-        pass
 
     async def aquery_top_logprobs(
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Async variant of query_top_logprobs."""
         loop = asyncio.get_running_loop()
@@ -46,11 +45,10 @@ class GenerativeBackend(abc.ABC):
     """Abstract base class for generative reasoning & diagnostics."""
 
     @abc.abstractmethod
-    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         """Returns (generated_text, tokens_generated)."""
-        pass
 
-    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         """Async variant of generate."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.generate(prompt, max_tokens=max_tokens, **kwargs))
@@ -65,9 +63,9 @@ class StubBackend(LogitBackend, GenerativeBackend):
     def __init__(
         self,
         default_prob: float = 0.95,
-        forward_top_logprobs: Optional[list[dict[str, Any]]] = None,
-        reverse_top_logprobs: Optional[list[dict[str, Any]]] = None,
-        logprob_responses: Optional[list[list[dict[str, Any]]]] = None,
+        forward_top_logprobs: list[dict[str, Any]] | None = None,
+        reverse_top_logprobs: list[dict[str, Any]] | None = None,
+        logprob_responses: list[list[dict[str, Any]]] | None = None,
         diagnostic_text: str = "[VERDICT: PASS] All criteria met.",
         tokens_generated: int = 0,
     ) -> None:
@@ -87,7 +85,7 @@ class StubBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         self.prompt_log.append(prompt)
 
@@ -125,21 +123,21 @@ class StubBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         return self.query_top_logprobs(prompt, top_k, allowed_tokens)
 
-    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         self.prompt_log.append(prompt)
         return self.diagnostic_text, self.tokens_generated
 
-    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         return self.generate(prompt, max_tokens=max_tokens, **kwargs)
 
 
 def resolve_logit_backend(
-    backend_spec: Optional[str | LogitBackend] = None,
-    model: Optional[str] = None,
+    backend_spec: str | LogitBackend | None = None,
+    model: str | None = None,
     **kwargs: Any,
 ) -> LogitBackend:
     if isinstance(backend_spec, LogitBackend):
@@ -174,7 +172,7 @@ def resolve_logit_backend(
         effective_model = model or parsed_model or "qwen2.5-coder:14b"
         return OllamaBackend(base_url=base_url, model=effective_model, **kwargs)
 
-    if spec.startswith("openai://") or spec.startswith("vllm://"):
+    if spec.startswith(("openai://", "vllm://")):
         from logitgate.backends.openai_compat import OpenAICompatBackend
         parsed = urlparse(spec)
         scheme = "https" if spec.startswith("openai://") else "http"
@@ -190,7 +188,7 @@ def resolve_logit_backend(
         if parsed.netloc:
             base_url = f"http://{parsed.netloc}"
             parsed_model = parsed.path.lstrip("/") if parsed.path else None
-            effective_model_opt: Optional[str] = model or parsed_model or None
+            effective_model_opt: str | None = model or parsed_model or None
             return LlamaCppBackend(base_url=base_url, model=effective_model_opt, **kwargs)
         else:
             effective_model_opt = model or (parsed.path.lstrip("/") if parsed.path else None)
@@ -205,8 +203,8 @@ def resolve_logit_backend(
 
 
 def resolve_generative_backend(
-    backend_spec: Optional[str | GenerativeBackend] = None,
-    model: Optional[str] = None,
+    backend_spec: str | GenerativeBackend | None = None,
+    model: str | None = None,
     **kwargs: Any,
 ) -> GenerativeBackend:
     if isinstance(backend_spec, GenerativeBackend):

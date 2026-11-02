@@ -30,7 +30,6 @@ class BaseGate(abc.ABC):
         Returns:
             Verdict containing decision status, latency, tokens, and telemetry traces.
         """
-        pass
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         """Evaluates the candidate artifact asynchronously.

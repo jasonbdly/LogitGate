@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import math
+
 import pytest
+
 from logitgate.backends.base import StubBackend
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.gates.ast_gate import ASTGate
-from logitgate.gates.logit_gate import LogitGate, ChoiceGate, ScoreGate
+from logitgate.gates.logit_gate import ChoiceGate, LogitGate, ScoreGate
 from logitgate.integrations.deepeval import LogitGateSystemOneModel, NoulQuestion
 from logitgate.models import DecisionStatus
 
@@ -377,7 +379,7 @@ async def test_deepeval_system_one_multi_question_batching():
         "q2": NoulQuestion(instructions="Rubric 2: Typed code."),
     }
     # Sync decide
-    answers, cost = model.decide("def foo(): pass", questions)
+    answers, _cost = model.decide("def foo(): pass", questions)
     assert len(answers.nouls) == 2
     assert "q1" in answers.nouls
     assert "q2" in answers.nouls
@@ -389,7 +391,7 @@ async def test_deepeval_system_one_multi_question_batching():
 
     # Async a_decide
     backend.prompt_log.clear()
-    async_answers, async_cost = await model.a_decide("def foo(): pass", questions)
+    async_answers, _async_cost = await model.a_decide("def foo(): pass", questions)
     assert len(async_answers.nouls) == 2
     assert len(backend.prompt_log) == 4
     prefixes = [p.split(marker)[0] for p in backend.prompt_log]

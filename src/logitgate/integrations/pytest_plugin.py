@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from logitgate.backends.base import LogitBackend
 from logitgate.config import LogitGateDefaults, get_default_backend
@@ -12,10 +13,10 @@ from logitgate.gates.logit_gate import LogitGate
 
 def check(
     rubric: str,
-    threshold: Optional[float] = None,
-    backend: Optional[str | LogitBackend] = None,
+    threshold: float | None = None,
+    backend: str | LogitBackend | None = None,
     ast_check: bool = False,
-    save_snapshot: Optional[bool] = None,
+    save_snapshot: bool | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Pytest decorator to evaluate function output against an LLM rubric

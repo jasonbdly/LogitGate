@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from logitgate.cascade import Cascade
 from logitgate.gates.ast_gate import ASTGate
@@ -137,12 +137,13 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = create_parser()
     args = parser.parse_args(argv)
 
     if args.command == "calibrate":
         from pathlib import Path
+
         from logitgate.backends.base import resolve_logit_backend
         from logitgate.debiasing.permutation import auto_calibrate_backend
 
@@ -167,11 +168,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from logitgate.snapshot import VerdictSnapshot
         try:
             snapshot = VerdictSnapshot.load(args.snapshot_path)
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             sys.stderr.write(f"Error loading snapshot from '{args.snapshot_path}': {e}\n")
             return 1
 
-        think = False if args.no_think else True
+        think = not args.no_think
         verdict = snapshot.explain(
             backend=args.backend,
             model=args.model,
@@ -208,7 +209,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.print_help()
         return 1
 
-    candidate: Optional[str] = None
+    candidate: str | None = None
     if args.file:
         try:
             with open(args.file, "r", encoding="utf-8") as f:

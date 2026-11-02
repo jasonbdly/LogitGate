@@ -1,14 +1,14 @@
-from logitgate.gates.base import BaseGate
 from logitgate.gates.ast_gate import ASTGate, ContractGate
-from logitgate.gates.logit_gate import LogitGate, ChoiceGate, ScoreGate
+from logitgate.gates.base import BaseGate
 from logitgate.gates.judge_gate import JudgeGate
+from logitgate.gates.logit_gate import ChoiceGate, LogitGate, ScoreGate
 
 __all__ = [
-    "BaseGate",
     "ASTGate",
-    "ContractGate",
-    "LogitGate",
+    "BaseGate",
     "ChoiceGate",
-    "ScoreGate",
+    "ContractGate",
     "JudgeGate",
+    "LogitGate",
+    "ScoreGate",
 ]

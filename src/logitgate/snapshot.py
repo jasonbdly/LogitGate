@@ -1,21 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
-from typing import Any, Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
 from pydantic import BaseModel, Field, model_validator
 
-from logitgate.backends.base import LogitBackend, GenerativeBackend
+from logitgate.backends.base import GenerativeBackend, LogitBackend
 from logitgate.config import get_default_snapshot_dir
 from logitgate.models import Verdict
 
 
 def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
-    raw = f"{timestamp}:{rubric}:{str(candidate)}".encode("utf-8")
+    raw = f"{timestamp}:{rubric}:{candidate!s}".encode()
     return hashlib.sha256(raw).hexdigest()[:8]
 
 
@@ -28,7 +29,7 @@ class VerdictSnapshot(BaseModel):
 
     snapshot_id: str = ""
     timestamp: str = ""
-    test_name: Optional[str] = None
+    test_name: str | None = None
     rubric: str
     candidate: Any
     verdict: Verdict
@@ -49,7 +50,7 @@ class VerdictSnapshot(BaseModel):
                 data["snapshot_id"] = _compute_snapshot_id(ts, rub, cand)
         return data
 
-    def save(self, directory: Optional[str | Path] = None) -> Path:
+    def save(self, directory: str | Path | None = None) -> Path:
         """
         Saves this snapshot as JSON to directory (defaulting to LOGITGATE_SNAPSHOT_DIR or .logitgate/failures),
         named fail_{timestamp_compact}_{test_slug}_{snapshot_id}.json, and updates latest.json in that directory.
@@ -62,7 +63,7 @@ class VerdictSnapshot(BaseModel):
         try:
             dt = datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
             ts_compact = dt.strftime("%Y%m%d_%H%M%S")
-        except Exception:
+        except (ValueError, TypeError):
             ts_compact = re.sub(r"[^0-9]", "", self.timestamp)[:15] or "snapshot"
 
         if self.test_name:
@@ -111,8 +112,8 @@ class VerdictSnapshot(BaseModel):
 
     def replay(
         self,
-        backend: Optional[str | LogitBackend] = None,
-        model: Optional[str] = None,
+        backend: str | LogitBackend | None = None,
+        model: str | None = None,
     ) -> Verdict:
         """
         Re-runs Layer 1 LogitGate using self.rubric, self.candidate, and self.gate_config
@@ -144,10 +145,10 @@ class VerdictSnapshot(BaseModel):
 
     def explain(
         self,
-        backend: Optional[str | GenerativeBackend] = None,
-        model: Optional[str] = None,
-        max_tokens: Optional[int] = None,
-        think: Optional[bool] = True,
+        backend: str | GenerativeBackend | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        think: bool | None = True,
     ) -> Verdict:
         """
         Runs JudgeGate on the exact frozen self.candidate from the snapshot with trigger='always',

@@ -4,6 +4,7 @@ import json
 import math
 from typing import Any
 from unittest.mock import MagicMock
+
 import httpx
 import pytest
 
@@ -12,7 +13,6 @@ from logitgate.backends.llamacpp import LlamaCppBackend
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
 from logitgate.cli import main
-
 
 # ---------------------------------------------------------------------------
 # Helpers & Mocks
@@ -673,7 +673,7 @@ def test_cli_eval_human_output_and_file(
 
 
 def test_cli_explain_json_and_human(tmp_path: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    from logitgate.models import Verdict, DecisionStatus, LayerTrace
+    from logitgate.models import DecisionStatus, LayerTrace, Verdict
     from logitgate.snapshot import VerdictSnapshot
 
     v = Verdict(

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from logitgate.gates.ast_gate import ASTGate, ContractGate
 from logitgate.gates.base import BaseGate
@@ -40,7 +41,7 @@ class Cascade(BaseGate):
         return f"Cascade([{pipeline_repr}])"
 
     def _handle_failure_snapshot(
-        self, candidate: Any, verdict: Verdict, current_rubric: Optional[str] = None, **kwargs: Any
+        self, candidate: Any, verdict: Verdict, current_rubric: str | None = None, **kwargs: Any
     ) -> Verdict:
         if verdict.passed:
             return verdict

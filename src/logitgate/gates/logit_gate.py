@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from typing import Any, Literal, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
 from logitgate.backends.base import LogitBackend, resolve_logit_backend
 from logitgate.config import LogitGateDefaults, get_default_backend, get_default_model
@@ -51,15 +52,15 @@ class LogitGate(BaseGate):
     def __init__(
         self,
         rubric: str,
-        backend: Optional[str | LogitBackend] = None,
-        model: Optional[str] = None,
-        pass_threshold: Optional[float] = None,
-        fail_threshold: Optional[float] = None,
-        symmetric_debiasing: Optional[bool] = None,
+        backend: str | LogitBackend | None = None,
+        model: str | None = None,
+        pass_threshold: float | None = None,
+        fail_threshold: float | None = None,
+        symmetric_debiasing: bool | None = None,
         query_first: bool = True,
-        logit_temperature: Optional[float | Literal["auto"]] = None,
-        preset: Optional[Literal["strict", "balanced", "fast_ci"]] = None,
-        save_on_fail: Optional[bool] = None,
+        logit_temperature: float | Literal["auto"] | None = None,
+        preset: Literal["strict", "balanced", "fast_ci"] | None = None,
+        save_on_fail: bool | None = None,
         name: str = "LogitGate",
     ) -> None:
         if preset is not None:
@@ -111,7 +112,10 @@ class LogitGate(BaseGate):
         self.model = effective_model
 
         if logit_temperature == "auto":
-            from logitgate.debiasing.permutation import auto_calibrate_backend, get_model_temperature
+            from logitgate.debiasing.permutation import (
+                auto_calibrate_backend,
+                get_model_temperature,
+            )
             temp = get_model_temperature(effective_model)
             if temp == 1.0 and effective_model not in ("default", "stub", None):
                 cal_res = auto_calibrate_backend(self.backend, model_key=effective_model)
@@ -525,11 +529,11 @@ class ChoiceGate(BaseGate):
         self,
         question: str,
         options: Mapping[str, str],
-        backend: Optional[str | LogitBackend] = None,
-        model: Optional[str] = None,
+        backend: str | LogitBackend | None = None,
+        model: str | None = None,
         symmetric_debiasing: bool = True,
         query_first: bool = True,
-        logit_temperature: Optional[float] = None,
+        logit_temperature: float | None = None,
         name: str = "ChoiceGate",
     ) -> None:
         effective_temp = (
@@ -735,11 +739,11 @@ class ScoreGate(BaseGate):
         min_score: int = 1,
         max_score: int = 5,
         threshold: float = 3.5,
-        backend: Optional[str | LogitBackend] = None,
-        model: Optional[str] = None,
+        backend: str | LogitBackend | None = None,
+        model: str | None = None,
         symmetric_debiasing: bool = False,
         query_first: bool = True,
-        logit_temperature: Optional[float] = None,
+        logit_temperature: float | None = None,
         name: str = "ScoreGate",
     ) -> None:
         effective_temp = (

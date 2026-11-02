@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
-import httpx
+from typing import Any
 
-from logitgate.backends.base import LogitBackend, GenerativeBackend, strip_reasoning_blocks
+import httpx
+from typing_extensions import Self
+
+from logitgate.backends.base import (
+    GenerativeBackend,
+    LogitBackend,
+    strip_reasoning_blocks,
+)
 
 
 class OpenAICompatBackend(LogitBackend, GenerativeBackend):
@@ -18,11 +24,11 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         self,
         base_url: str = "https://api.openai.com/v1",
         model: str = "gpt-4o-mini",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         timeout: float = 30.0,
-        logit_bias: Optional[dict[str, int | float]] = None,
-        client: Optional[httpx.Client] = None,
-        async_client: Optional[httpx.AsyncClient] = None,
+        logit_bias: dict[str, int | float] | None = None,
+        client: httpx.Client | None = None,
+        async_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -57,16 +63,16 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         if self._async_client is not None and not self._async_client.is_closed:
             await self._async_client.aclose()
 
-    def __enter__(self) -> OpenAICompatBackend:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
-    async def __aenter__(self) -> OpenAICompatBackend:
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         await self.aclose()
 
     def _headers(self) -> dict[str, str]:
@@ -79,7 +85,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -124,7 +130,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
@@ -140,7 +146,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
@@ -152,7 +158,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
-    def generate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
@@ -170,7 +176,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("usage", {}).get("completion_tokens", 0)
         return strip_reasoning_blocks(content), tokens
 
-    async def agenerate(self, prompt: str, max_tokens: Optional[int] = None, **kwargs: Any) -> tuple[str, int]:
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
