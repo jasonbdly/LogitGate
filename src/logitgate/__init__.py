@@ -1,0 +1,66 @@
+from logitgate.models import (
+    Verdict,
+    LayerTrace,
+    DecisionStatus,
+)
+from logitgate.debiasing.permutation import (
+    fit_calibration,
+    CalibrationResult,
+    combine_symmetric_log_odds,
+)
+from logitgate.debiasing.softmax import (
+    extract_token_logprob,
+    compute_binary_log_odds,
+)
+from logitgate.debiasing.inversion import (
+    compile_binary_prompt,
+    compile_choice_prompt,
+    compile_score_prompt,
+)
+from logitgate.backends.base import (
+    LogitBackend,
+    GenerativeBackend,
+    StubBackend,
+    resolve_logit_backend,
+    resolve_generative_backend,
+)
+from logitgate.backends.ollama import OllamaBackend
+from logitgate.backends.openai_compat import OpenAICompatBackend
+from logitgate.gates.base import BaseGate
+from logitgate.gates.ast_gate import ASTGate, ContractGate
+from logitgate.gates.logit_gate import LogitGate, ChoiceGate, ScoreGate
+from logitgate.gates.judge_gate import JudgeGate
+from logitgate.cascade import Cascade
+from logitgate.integrations.pytest_plugin import check
+
+__version__ = "0.1.0"
+
+__all__ = [
+    "ASTGate",
+    "ContractGate",
+    "LogitGate",
+    "ChoiceGate",
+    "ScoreGate",
+    "JudgeGate",
+    "Cascade",
+    "Verdict",
+    "LayerTrace",
+    "DecisionStatus",
+    "StubBackend",
+    "OllamaBackend",
+    "OpenAICompatBackend",
+    "fit_calibration",
+    "CalibrationResult",
+    "check",
+    "combine_symmetric_log_odds",
+    "extract_token_logprob",
+    "compute_binary_log_odds",
+    "compile_binary_prompt",
+    "compile_choice_prompt",
+    "compile_score_prompt",
+    "LogitBackend",
+    "GenerativeBackend",
+    "resolve_logit_backend",
+    "resolve_generative_backend",
+    "BaseGate",
+]
