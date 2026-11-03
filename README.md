@@ -52,7 +52,12 @@ Traditional LLM evaluation relies on generative judges (prompting an LLM to gene
 
 ## Real Multi-Model Live Benchmarks
 
-Empirical measurements gathered on local inference across 4 distinct model configurations running under Ollama:
+Empirical measurements gathered on local inference across 4 distinct model configurations running under Ollama (`v0.35.0`, `Q4_K_M` 4-bit GGUF quantization, `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`):
+
+- **Testbed Hardware**:
+  - **CPU & System Memory**: AMD Ryzen 7 5800X3D (8-Core / 16-Thread), 64 GB DDR4 System RAM (used for all `Pure CPU-Only` benchmarks with `options={"num_gpu": 0}`).
+  - **GPU 1 (12 GB Sidecar Tier)**: NVIDIA GeForce RTX 4070 (12 GB GDDR6X VRAM) — used for `4B` (`gemma4:e4b`) and `14B` (`qwen2.5:14b`, `qwen2.5-coder:14b`) benchmarks.
+  - **GPU 0 (32 GB Primary Tier)**: NVIDIA GeForce RTX 5090 (32 GB GDDR7 VRAM) — used for `26B MoE` (`gemma4:26b`) and `31B Dense` (`gemma4:31b`) falsification and long-context benchmarks below.
 
 | Model Configuration | Model Family / Specialization | Compute Device | Warm Single-Pass Latency | Warm 2-Pass Symmetric Latency | 4-Rubric Batch Total | Per-Rubric Batch Latency | Classification Accuracy (4 Cases) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -174,11 +179,11 @@ Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.config
 
 | Model & Hardware Configuration | `num_ctx=512` | `num_ctx=4,096` | `num_ctx=16,384` | `num_ctx=32,768` | `num_ctx=65,536+` | Spillover Boundary |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)\*** | 9.41 GB (92.7 ms) | 9.41 GB (94.5 ms) | 9.45 GB (101.9 ms) | 9.54 GB (94.4 ms) | 10.04 GB (95.9 ms) *(128k!)* | **100% GPU up to 131,072 tokens** |
-| **`gemma4:e4b` (Pure CPU)\*** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | N/A | **Zero VRAM footprint** |
-| **`qwen2.5:14b` (GPU)** | 8.71 GB (94.4 ms) | 9.09 GB (93.4 ms) | 10.39 GB (99.7 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.5 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.3 ms) | **Spills to CPU at $\ge$ 32,768** |
-| **`gemma4:26b` (MoE GPU)** | 17.42 GB (92.4 ms) | 17.69 GB (89.9 ms) | 17.72 GB (86.4 ms) | 17.84 GB (90.3 ms) | 18.18 GB (87.9 ms) | **100% GPU up to 65,536 tokens** |
-| **`gemma4:31b` (Dense GPU)** | 20.97 GB (194.8 ms) | 21.50 GB (184.3 ms) | 21.71 GB (177.4 ms) | 21.46 GB (175.1 ms) | 22.00 GB (182.1 ms) | **100% GPU up to 65,536 tokens** |
+| **`gemma4:e4b` (RTX 4070 12 GB)\*** | 9.41 GB (92.7 ms) | 9.41 GB (94.5 ms) | 9.45 GB (101.9 ms) | 9.54 GB (94.4 ms) | 10.04 GB (95.9 ms) *(128k!)* | **100% GPU up to 131,072 tokens** |
+| **`gemma4:e4b` (Ryzen 7 5800X3D CPU)\*** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | N/A | **Zero VRAM footprint** |
+| **`qwen2.5:14b` (RTX 4070 12 GB)** | 8.71 GB (94.4 ms) | 9.09 GB (93.4 ms) | 10.39 GB (99.7 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.5 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.3 ms) | **Spills to CPU at $\ge$ 32,768 (>12 GB)** |
+| **`gemma4:26b` (MoE, RTX 5090 32 GB)** | 17.42 GB (92.4 ms) | 17.69 GB (89.9 ms) | 17.72 GB (86.4 ms) | 17.84 GB (90.3 ms) | 18.18 GB (87.9 ms) | **100% GPU up to 65,536 tokens** |
+| **`gemma4:31b` (Dense, RTX 5090 32 GB)** | 20.97 GB (194.8 ms) | 21.50 GB (184.3 ms) | 21.71 GB (177.4 ms) | 21.46 GB (175.1 ms) | 22.00 GB (182.1 ms) | **100% GPU up to 65,536 tokens** |
 
 *\*Note on `gemma4:e4b` memory footprint: Google's Gemma 4 `e4b` ("Effective 4B") packs `8.0B` total parameters (`8.95 GB` Q4_K_M GGUF weights, including 42-layer Per-Layer Embeddings plus 16-layer Vision and 12-layer Audio encoders, with ~4B active text parameters). Text-only 3B–4B Q4 models (`qwen2.5:3b`, `llama3.2:3b`) require only `~2.5–3.2 GB` VRAM/RAM.*
 
