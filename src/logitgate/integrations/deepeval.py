@@ -53,7 +53,7 @@ except ImportError:
 class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
     """
     DeepEval System-1 model powered by LogitGate debiased first-token logits.
-    Drop-in replacement for DeepEval JevEval System-1 models.
+    Drop-in System-1 judge model for DeepEval JevEval metrics.
     """
 
     def __init__(

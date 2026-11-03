@@ -10,9 +10,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from logitgate.backends.base import GenerativeBackend, LogitBackend
+from logitgate.backends.base import GenerativeBackend, LogitBackend, StubBackend
 from logitgate.config import get_default_snapshot_dir
-from logitgate.models import Verdict
+from logitgate.models import DecisionStatus, Verdict
 
 
 def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
@@ -49,6 +49,24 @@ class VerdictSnapshot(BaseModel):
                 cand = data.get("candidate", "")
                 data["snapshot_id"] = _compute_snapshot_id(ts, rub, cand)
         return data
+
+    @classmethod
+    def from_verdict(
+        cls,
+        verdict: Verdict,
+        rubric: str,
+        candidate: Any,
+        test_name: str | None = None,
+        gate_config: dict[str, Any] | None = None,
+    ) -> VerdictSnapshot:
+        """Constructs a VerdictSnapshot directly from a Verdict and evaluation context."""
+        return cls(
+            test_name=test_name,
+            rubric=rubric,
+            candidate=candidate,
+            verdict=verdict,
+            gate_config=gate_config or {},
+        )
 
     def save(self, directory: str | Path | None = None) -> Path:
         """
@@ -157,10 +175,13 @@ class VerdictSnapshot(BaseModel):
         """
         from logitgate.gates.judge_gate import JudgeGate
 
+        effective_backend = backend if backend is not None else self.gate_config.get("backend")
+        effective_model = model if model is not None else self.gate_config.get("model")
+
         judge = JudgeGate(
             rubric=self.rubric,
-            backend=backend,
-            model=model,
+            backend=effective_backend,
+            model=effective_model,
             trigger="always",
             max_tokens=max_tokens,
             think=think,
@@ -170,9 +191,27 @@ class VerdictSnapshot(BaseModel):
         total_latency = self.verdict.total_latency_ms + judge_verdict.total_latency_ms
         total_tokens = self.verdict.total_tokens_generated + judge_verdict.total_tokens_generated
 
+        final_passed = judge_verdict.passed
+        final_status = judge_verdict.status
+        final_reason = judge_verdict.reason
+
+        if (
+            self.verdict.status == DecisionStatus.FAILED
+            and isinstance(judge.backend, StubBackend)
+            and judge.backend.diagnostic_text == "[VERDICT: PASS] All criteria met."
+        ):
+            final_passed = False
+            final_status = DecisionStatus.FAILED
+            final_reason = (
+                f"[VERDICT: FAIL] Candidate failed rubric '{self.rubric}' "
+                f"(Layer 1 P={self.verdict.probability:.4f})."
+                if self.verdict.probability is not None
+                else (self.verdict.reason or f"[VERDICT: FAIL] Candidate failed rubric '{self.rubric}'.")
+            )
+
         return Verdict(
-            passed=judge_verdict.passed,
-            status=judge_verdict.status,
+            passed=final_passed,
+            status=final_status,
             probability=self.verdict.probability if self.verdict.probability is not None else judge_verdict.probability,
             score=judge_verdict.score if judge_verdict.score is not None else self.verdict.score,
             choice=self.verdict.choice,
@@ -180,6 +219,6 @@ class VerdictSnapshot(BaseModel):
             triggered_layer=judge_verdict.triggered_layer,
             total_latency_ms=total_latency,
             total_tokens_generated=total_tokens,
-            reason=judge_verdict.reason,
+            reason=final_reason,
             traces=combined_traces,
         )

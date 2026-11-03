@@ -168,7 +168,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
-        think_default = max_tokens is None
+        think_default = max_tokens is None or max_tokens >= 256
         think_val = kwargs.pop("think", think_default)
         if think_val is None:
             think_val = think_default
@@ -228,7 +228,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
-        think_default = max_tokens is None
+        think_default = max_tokens is None or max_tokens >= 256
         think_val = kwargs.pop("think", think_default)
         if think_val is None:
             think_val = think_default

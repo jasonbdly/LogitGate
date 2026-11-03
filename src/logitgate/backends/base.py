@@ -135,6 +135,30 @@ class StubBackend(LogitBackend, GenerativeBackend):
         return self.generate(prompt, max_tokens=max_tokens, **kwargs)
 
 
+def infer_backend_spec(backend: Any) -> str:
+    """Infers a canonical URI specifier string from a resolved backend instance."""
+    if isinstance(backend, str):
+        return backend
+    if isinstance(backend, StubBackend):
+        return f"stub://{backend.default_prob}" if backend.default_prob != 0.95 else "stub://default"
+    cls_name = backend.__class__.__name__
+    base_url = getattr(backend, "base_url", None) or ""
+    model = getattr(backend, "model", None) or ""
+    if cls_name == "OllamaBackend":
+        host = base_url.replace("http://", "").replace("https://", "").rstrip("/") or "localhost:11434"
+        return f"ollama://{host}/{model}" if model else f"ollama://{host}"
+    if cls_name == "OpenAICompatBackend":
+        host = base_url.replace("https://", "").replace("http://", "").rstrip("/")
+        scheme = "openai" if base_url.startswith("https://") else "vllm"
+        return f"{scheme}://{host}"
+    if cls_name == "LlamaCppBackend":
+        if base_url:
+            host = base_url.replace("http://", "").replace("https://", "").rstrip("/")
+            return f"llamacpp://{host}/{model}" if model else f"llamacpp://{host}"
+        return f"llamacpp:///{model}" if model else "llamacpp"
+    return "stub://default"
+
+
 def resolve_logit_backend(
     backend_spec: str | LogitBackend | None = None,
     model: str | None = None,
@@ -145,10 +169,20 @@ def resolve_logit_backend(
 
     from logitgate.config import get_default_backend, get_default_model
 
+    explicit_model = model
     if backend_spec is None or backend_spec == "default":
-        backend_spec = get_default_backend()
+        default_spec = get_default_backend()
         if model is None:
             model = get_default_model()
+        if (
+            default_spec == "stub://default"
+            and explicit_model is not None
+            and explicit_model not in ("default", "stub")
+            and not explicit_model.startswith("stub")
+        ):
+            backend_spec = f"ollama://localhost:11434/{explicit_model}"
+        else:
+            backend_spec = default_spec
     elif model is None:
         model = get_default_model()
 

@@ -40,8 +40,8 @@ def create_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument(
         "--backend",
         type=str,
-        default="stub://default",
-        help="Backend specifier (e.g. stub://default, ollama://..., llamacpp://...)",
+        default=None,
+        help="Backend specifier (defaults to LOGITGATE_BACKEND or stub://default)",
     )
     eval_parser.add_argument(
         "--model",
@@ -52,14 +52,14 @@ def create_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument(
         "--threshold",
         type=float,
-        default=0.85,
-        help="Pass probability threshold (default: 0.85)",
+        default=None,
+        help="Pass probability threshold (defaults to LOGITGATE_PASS_THRESHOLD or 0.85)",
     )
     eval_parser.add_argument(
         "--fail-threshold",
         type=float,
-        default=0.20,
-        help="Fail probability threshold (default: 0.20)",
+        default=None,
+        help="Fail probability threshold (defaults to LOGITGATE_FAIL_THRESHOLD or 0.20)",
     )
     eval_parser.add_argument(
         "--ast-syntax",
@@ -79,8 +79,8 @@ def create_parser() -> argparse.ArgumentParser:
     cal_parser.add_argument(
         "--backend",
         type=str,
-        default="stub://default",
-        help="Backend specifier (e.g. stub://default, ollama://..., llamacpp://...)",
+        default=None,
+        help="Backend specifier (defaults to LOGITGATE_BACKEND or stub://default)",
     )
     cal_parser.add_argument(
         "--model",

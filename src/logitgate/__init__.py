@@ -2,6 +2,7 @@ from logitgate.backends.base import (
     GenerativeBackend,
     LogitBackend,
     StubBackend,
+    infer_backend_spec,
     resolve_generative_backend,
     resolve_logit_backend,
 )
@@ -33,12 +34,15 @@ from logitgate.debiasing.permutation import (
 )
 from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
+    compute_normalized_probabilities,
     extract_token_logprob,
 )
 from logitgate.gates.ast_gate import ASTGate, ContractGate
 from logitgate.gates.base import BaseGate
 from logitgate.gates.judge_gate import JudgeGate
 from logitgate.gates.logit_gate import ChoiceGate, LogitGate, ScoreGate
+from logitgate.integrations.deepeval import LogitGateMetric, LogitGateSystemOneModel
+from logitgate.integrations.langgraph import as_conditional_edge
 from logitgate.integrations.pytest_plugin import check
 from logitgate.models import (
     DecisionStatus,
@@ -65,12 +69,15 @@ __all__ = [
     "LogitBackend",
     "LogitGate",
     "LogitGateDefaults",
+    "LogitGateMetric",
+    "LogitGateSystemOneModel",
     "OllamaBackend",
     "OpenAICompatBackend",
     "ScoreGate",
     "StubBackend",
     "Verdict",
     "VerdictSnapshot",
+    "as_conditional_edge",
     "auto_calibrate_backend",
     "check",
     "combine_symmetric_log_odds",
@@ -79,6 +86,7 @@ __all__ = [
     "compile_choice_prompt",
     "compile_score_prompt",
     "compute_binary_log_odds",
+    "compute_normalized_probabilities",
     "configure",
     "extract_token_logprob",
     "fit_calibration",
@@ -86,6 +94,7 @@ __all__ = [
     "get_default_save_failures",
     "get_default_snapshot_dir",
     "get_model_temperature",
+    "infer_backend_spec",
     "reset_config",
     "resolve_generative_backend",
     "resolve_logit_backend",

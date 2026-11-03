@@ -45,7 +45,7 @@ def test_symmetric_log_odds_cancels_extreme_bias():
 
 def test_bounded_floor_missing_token():
     """
-    Tests When target token is absent from top_logprobs,
+    When target token is absent from top_logprobs,
     extract_token_logprob returns a bounded floor based on residual probability
     instead of an arbitrary -99.0 cliff.
     """
@@ -70,7 +70,7 @@ def test_bounded_floor_missing_token():
 
 def test_fit_calibration_lowers_brier_score():
     """
-    Tests fit_calibration optimizes temperature scaling, lowering
+    fit_calibration optimizes temperature scaling, lowering
     Brier score on synthetic overconfident predictions.
     """
     # Create synthetic overconfident logits where logits are too large (+- 6.0)
@@ -90,7 +90,7 @@ def test_fit_calibration_lowers_brier_score():
 
 def test_compile_binary_prompt_identical_static_prefix():
     """
-    Tests compile_binary_prompt keeps the [EVALUATION RUBRIC] + [CANDIDATE ARTIFACT]
+    compile_binary_prompt keeps the [EVALUATION RUBRIC] + [CANDIDATE ARTIFACT]
     prefix 100% byte-identical between Pass 1 and Pass 2 for KV-cache reuse.
     """
     rubric = "Functions must have docstrings and type annotations."

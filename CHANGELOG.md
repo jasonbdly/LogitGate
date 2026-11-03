@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Layer 1 First-Token Debiased Logit Gate (`LogitGate`)
 - 40–120ms GPU latency (~170ms on pure CPU) with 0 generated autoregressive tokens.
-- Built-in threshold presets: `preset="strict"` (`0.90 / 0.25`), `preset="balanced"` (`0.85 / 0.20`), and `preset="fast_ci"` (`0.80 / 0.20`, single-pass).
+- Built-in threshold presets: `preset="strict"` (`0.90 / 0.25`, symmetric 2-pass), `preset="balanced"` (`0.85 / 0.20`, symmetric 2-pass), and `preset="fast_triage"` (`0.80 / 0.20`, single-pass for local CPU iteration & high-throughput triage).
 - Symmetric log-odds debiasing ($\bar{L} = \frac{L_1 + L_2}{2T}$) cancelling pretraining token priors and positional bias.
 - Prefix-preserving KV-cache prompt compilation (`compile_binary_prompt`), placing rubric and candidate first to maximize GPU KV-cache hit rate (>99%).
 - Multi-rubric batch evaluation (`evaluate_batch`, `aevaluate_batch`) sharing a byte-identical static prefix across all rubrics with KV-cache stampede prevention.

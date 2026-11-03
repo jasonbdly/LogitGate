@@ -46,7 +46,7 @@ def extract_token_logprob(top_logprobs: list[dict[str, Any]], target_token: str)
     if matching_logprobs:
         return logsumexp(matching_logprobs)
 
-    # Missing-token floor
+    # Bounded missing-token floor based on residual probability mass
     if not observed_logprobs:
         return -10.0
 

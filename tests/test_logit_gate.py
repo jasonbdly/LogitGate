@@ -114,7 +114,7 @@ def test_score_gate_expected_value():
 
 def test_ollama_backend_payload_think_suppression():
     """
-    Tests Verifies OllamaBackend constructs query payloads with
+    Verifies OllamaBackend constructs query payloads with
     think=False to suppress reasoning tokens on classification calls.
     """
     backend = OllamaBackend(

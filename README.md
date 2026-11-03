@@ -22,7 +22,7 @@ When evaluating whether an LLM output meets a rubric, traditional LLM-as-a-judge
 2. **Layer 1 (`LogitGate`)**: If Layer 0 passes, we present the rubric and candidate to the model and inspect its **first-token log-probabilities (logits)** directly. In a single forward pass (**~40–50 ms on GPU**, **~170 ms on CPU**), we extract the model's exact mathematical confidence without generating any output tokens. To eliminate prior token bias (e.g. models favoring 'A' over 'B'), we run a symmetric pass with inverted choices and combine them in log-odds space (**~85–120 ms**).
 3. **Layer 2 (`JudgeGate`)**: Only if Layer 1 confidence falls into an ambiguous range (e.g., between 20% and 85%) or decisively fails does the system escalate to generating an essay critique with diagnostic rationale.
 
-In empirical multi-domain benchmarks across 4B and 14B models, Layer 0 or Layer 1 resolved **100% of test suite requests** decisively (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 43–124ms) with **zero generated tokens** and **zero additional VRAM**.
+In empirical multi-domain benchmarks across 4B and 14B models on single-hop and structural rubrics (with `trigger="on_ambiguous_only"`), Layer 0 or Layer 1 resolved **100% of the 16-item single-hop test suite** decisively (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 43–124ms) with **zero generated tokens** and **zero additional VRAM**—while complex multi-hop or adversarial cases automatically escalate to Layer 2 (`JudgeGate`), as detailed in [Falsification Benchmarks](#falsification-benchmarks-where-does-layer-1-break-down--how-to-mitigate-it).
 
 ---
 
@@ -69,7 +69,7 @@ Empirical measurements gathered on local inference across 4 distinct model confi
 3. **Multi-Rubric Batching (~109–171 ms per rubric)**:
    - `evaluate_batch` reuses the candidate prefix across all rubrics, avoiding redundant prompt re-evaluations and preventing KV-cache stampedes on the inference server.
 4. **Pure CPU-Only Operation (Zero GPU)**:
-   - On a machine with **0 GPUs** (`options={"num_gpu": 0}`), single-pass logit evaluation completes in **~172 ms** on a 4B model—fast enough for local laptop test suites and lightweight CI runners without expensive cloud GPUs.
+   - On a machine with **0 GPUs** (`options={"num_gpu": 0}`), single-pass logit evaluation (`preset="fast_triage"`) completes in **~172 ms** on a 4B model for rapid local developer iteration, while full 2-pass symmetric debiasing (`preset="balanced"`) takes `2.1s–4.3s` per item (`~21s–33s` for a 10–12 item CI suite vs. `6+ minutes` for uncapped generative judges).
 
 ---
 
@@ -97,9 +97,9 @@ Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`n
 | **Baseline A: Uncapped CPU Judge (`think=True`, ~430 tok/item)** | ~363,000 ms (~6.1 min) | ~4,360 tokens | ✅ Full CoT + verdict tag, but takes 6+ minutes on CPU | **10/10 (100%)** | Baseline (0%) | 1.0x |
 | **Baseline B: Naive Capped CPU Judge (`think=True`, `max_tokens=150`)** | 143,452 ms (~143.5s) | 1,500 tokens | ❌ Spends all 150 tokens inside `<think>` block; `0` visible chars! | 2/10 (20%) | 65.6% | 2.53x |
 | **Baseline C: Verdict-First CPU Judge (`think=False`, `max_tokens=60` on all 10)** | ~59,000 ms (~59.0s) | 600 tokens | ✅ Emits `[VERDICT: PASS/FAIL]` on token #1 + 60-tok critique on all 10 | **10/10 (100%)** | 86.2% | 6.15x |
-| **`LogitGate(preset="fast_ci") >> JudgeGate(max_tokens=60)`** | **22,020 ms (~22.0s)** | **60 tokens** | ✅ Crisp 60-token failure reason on the 1 semantic failure only | **10/10 (100%)** | **90.0% (vs. C) / 98.6% (vs. A)** | **16.5x vs. A / 2.68x vs. C** |
+| **`LogitGate(preset="fast_triage") >> JudgeGate(max_tokens=60)`** | **22,020 ms (~22.0s)** | **60 tokens** | ✅ Crisp 60-token failure reason on the 1 semantic failure only | **10/10 (100%)** | **90.0% (vs. C) / 98.6% (vs. A)** | **16.5x vs. A / 2.68x vs. C** |
 
-*Key finding*: Why did naive token-capping (`Baseline B`, `max_tokens=150`) fail with 20% accuracy? Because modern reasoning models (`gemma4`, `deepseek-r1`, `qwen3`) emit 300+ hidden `<think>` tokens before writing a single visible character! By suppressing `<think>` in `OllamaBackend.generate` AND using Verdict-First prompting (`[VERDICT: PASS/FAIL]` on Line 1), `JudgeGate` produces a complete 60-token diagnostic in ~6s on CPU—and by placing `ASTGate >> LogitGate(preset="fast_ci")` in front of it, the 10-item suite drops from **6.1 minutes (Baseline A)** or **59.0s (Baseline C)** down to **22.0 seconds (16.5x faster than uncapped, 2.68x faster than concise generative)** with **10/10 (100%) accuracy**!
+*Key finding*: Why did naive token-capping (`Baseline B`, `max_tokens=150`) fail with 20% accuracy? Because modern reasoning models (`gemma4`, `deepseek-r1`, `qwen3`) emit 300+ hidden `<think>` tokens before writing a single visible character! By suppressing `<think>` in `OllamaBackend.generate` AND using Verdict-First prompting (`[VERDICT: PASS/FAIL]` on Line 1), `JudgeGate` produces a complete 60-token diagnostic in ~6s on CPU—and by placing `ASTGate >> LogitGate` in front of it, the 10-item suite drops from **6.1 minutes (Baseline A)** or **59.0s (Baseline C)** down to **22.0 seconds (16.5x faster than uncapped, 2.68x faster than concise generative)** with **10/10 (100%) accuracy**!
 
 ---
 
@@ -174,11 +174,13 @@ Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.config
 
 | Model & Hardware Configuration | `num_ctx=512` | `num_ctx=4,096` | `num_ctx=16,384` | `num_ctx=32,768` | `num_ctx=65,536+` | Spillover Boundary |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 3.21 GB (92.7 ms) | 3.21 GB (94.5 ms) | 3.25 GB (101.9 ms) | 3.34 GB (94.4 ms) | 3.84 GB (95.9 ms) *(128k!)* | **100% GPU up to 131,072 tokens** |
-| **`gemma4:e4b` (Pure CPU)** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | N/A | **Zero VRAM footprint** |
+| **`gemma4:e4b` (GPU)\*** | 9.41 GB (92.7 ms) | 9.41 GB (94.5 ms) | 9.45 GB (101.9 ms) | 9.54 GB (94.4 ms) | 10.04 GB (95.9 ms) *(128k!)* | **100% GPU up to 131,072 tokens** |
+| **`gemma4:e4b` (Pure CPU)\*** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | N/A | **Zero VRAM footprint** |
 | **`qwen2.5:14b` (GPU)** | 8.71 GB (94.4 ms) | 9.09 GB (93.4 ms) | 10.39 GB (99.7 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.5 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.3 ms) | **Spills to CPU at $\ge$ 32,768** |
 | **`gemma4:26b` (MoE GPU)** | 17.42 GB (92.4 ms) | 17.69 GB (89.9 ms) | 17.72 GB (86.4 ms) | 17.84 GB (90.3 ms) | 18.18 GB (87.9 ms) | **100% GPU up to 65,536 tokens** |
-| **`gemma4:31b` (Dense GPU)** | 2.12 GB (180.7 ms) | 2.70 GB (177.9 ms) | 2.93 GB (177.8 ms) | 2.66 GB (180.3 ms) | 3.23 GB (174.9 ms) | **100% GPU up to 65,536 tokens** |
+| **`gemma4:31b` (Dense GPU)** | 20.97 GB (194.8 ms) | 21.50 GB (184.3 ms) | 21.71 GB (177.4 ms) | 21.46 GB (175.1 ms) | 22.00 GB (182.1 ms) | **100% GPU up to 65,536 tokens** |
+
+*\*Note on `gemma4:e4b` memory footprint: Google's Gemma 4 `e4b` ("Effective 4B") packs `8.0B` total parameters (`8.95 GB` Q4_K_M GGUF weights, including 42-layer Per-Layer Embeddings plus 16-layer Vision and 12-layer Audio encoders, with ~4B active text parameters). Text-only 3B–4B Q4 models (`qwen2.5:3b`, `llama3.2:3b`) require only `~2.5–3.2 GB` VRAM/RAM.*
 
 > [!TIP]
 > **Why `LogitGate` Survives GPU-to-CPU RAM Spillover (~314 ms vs. 80+ Seconds)**:
@@ -229,7 +231,7 @@ This completely eliminates regex brittleness and guarantees robust verdict extra
 | :--- | :--- | :--- | :--- | :--- |
 | **0-GPU CI Runners / Air-Gapped** | Offline Deterministic Stub | `stub://default` | **< 0.05 ms** | Unit tests, mock suites, CI smoke tests |
 | **CPU-Only Laptops / Edge** | `gemma4:e4b` / `llama3.2:3b` | `ollama://localhost:11434/gemma4:e4b` (`options={"num_gpu": 0}`) | **~170 ms** | Local developer testing without discrete GPU |
-| **8 GB VRAM Consumer GPU** | `gemma4:e4b` / `qwen2.5:7b` | `ollama://localhost:11434/gemma4:e4b` | **~40–45 ms** | Desktop development, real-time agent loops |
+| **8–12 GB VRAM Consumer GPU** | `qwen2.5:7b` / `gemma4:e4b` | `ollama://localhost:11434/gemma4:e4b` | **~40–45 ms** | Desktop development, real-time agent loops |
 | **16–24 GB VRAM Workstation** | `qwen2.5-coder:14b` / `qwen2.5:14b` | `ollama://localhost:11434/qwen2.5-coder:14b` | **~40–50 ms** | Production evaluation suites, coding agents |
 | **Cloud Inference / Hosted APIs** | `gpt-4o-mini` / `vLLM` | `openai://api.openai.com/v1` or `vllm://localhost:8000/v1` | **~60–120 ms** (network bounded) | High-concurrency enterprise pipelines |
 
@@ -244,11 +246,11 @@ When deploying LLM evaluation pipelines, a common production failure mode is **K
    - Using `evaluate_batch(candidate, rubrics)`, the candidate tokens are evaluated once. All subsequent rubric logit probes share **100% of the candidate prefix KV-cache** without evicting the context, reducing per-rubric latency to ~110ms.
 2. **Topology 2: Heterogeneous Dual-GPU Sidecar (High-Throughput Production)**
    - **GPU 0**: Pinned exclusively to the primary generator model (e.g., `gemma4:26b` MoE or `gemma4:31b` Dense) with 16k–32k context. Its generation KV-cache is **never evicted**.
-   - **GPU 1**: Dedicated to a lightweight `LogitGate` sidecar (`gemma4:e4b` or `qwen2.5:14b` in ~3.2–8.7 GB VRAM).
+   - **GPU 1**: Dedicated to a lightweight `LogitGate` sidecar (`qwen2.5:14b` or `gemma4:e4b` in ~8.7–9.4 GB VRAM, or `llama3.2:3b` in ~3.2 GB VRAM).
    - Real-time gating queries complete in sub-50ms over local IPC (`http://localhost:11435`) without contending for GPU 0's memory bandwidth.
 3. **Topology 3: Single-GPU Workstation + Pure-CPU `LogitGate` Sidecar (Memory-Constrained)**
    - 100% of GPU VRAM is preserved for the primary generator model.
-   - Layer 1 `LogitGate` runs on host CPU with `options={"num_gpu": 0, "num_ctx": 2048}` in ~170ms using standard System RAM (~3.2 GB).
+   - Layer 1 `LogitGate` runs on host CPU with `options={"num_gpu": 0, "num_ctx": 2048}` in ~170ms using standard System RAM (~3.2 GB for 3B Q4 models like `qwen2.5:3b` / `llama3.2:3b`, or ~9.4 GB for `gemma4:e4b`).
    - Clear passes (85%+ of requests) short-circuit immediately with **zero GPU VRAM interference**. Only ambiguous items or decisive failures escalate to the GPU-backed `JudgeGate`.
 
 ---
@@ -257,42 +259,58 @@ When deploying LLM evaluation pipelines, a common production failure mode is **K
 
 LogitGate is designed to fit directly into diverse software engineering and AI workflows across general and non-SDLC domains:
 
-### 1. CI/CD & DevOps Engineers (Free CPU-Only GitHub Actions / GitLab CI Runners)
-Run fast regression suites on free 0-GPU CI runners (standard 2–4 vCPU GitHub Actions runners) without paying for cloud GPU instances:
-```python
-from logitgate import ASTGate, LogitGate, JudgeGate, Cascade, OllamaBackend
+### 1. CI/CD Final Merge Gate vs. Local Developer Inner Loop (Speed vs. Correctness)
 
-# Pure CPU CI Runner configuration (0 GPU, ~3.2 GB RAM for 3B models / ~8.9 GB RAM for gemma4:e4b)
+In production engineering, **local iteration** and **CI/CD merge gates** have fundamentally different priorities:
+- **CI/CD is your final quality gate**: Correctness and zero false passes are paramount. However, you should **not** wait 5–20 seconds per test to generate a 400-token LLM essay when Layer 1 already reached a decisive, non-ambiguous conclusion (`P >= 0.85` pass or `P <= 0.20` fail)!
+- **Local execution is your fast inner loop**: Developers iterating on code or live agent routers want instant sub-100ms feedback (or ~170ms 1-pass triage on CPU-only laptops).
+
+| Dimension | Local Inner-Loop / Live Agent Triage | CI/CD Final Merge Gate (Recommended) |
+| :--- | :--- | :--- |
+| **Primary Goal** | Sub-100ms developer feedback / live routing | **Maximum correctness & zero false passes** without waiting for LLM essays on clear verdicts |
+| **Preset & Debiasing** | `preset="balanced"` on GPU (`~86ms`), or `preset="fast_triage"` (`1-pass`, `~170ms`) on CPU-only laptops | **`preset="balanced"` or `"strict"` (`symmetric_debiasing=True`)** — always cancel prior token bias |
+| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `evaluate_batch(candidate, rubrics)`** (100% KV-cache sharing, 0% compound dilution) |
+| **Layer 2 (`JudgeGate`) Trigger** | Omit `JudgeGate`, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 tokens on decisive pass *or* decisive fail; only invokes `JudgeGate` to adjudicate ambiguous borderline cases!) |
+
+```python
+from logitgate import ASTGate, LogitGate, JudgeGate, OllamaBackend
+
+# Pure CPU CI Runner configuration (0 GPU, ~3.2 GB RAM for 3B models / ~9.4 GB RAM for gemma4:e4b)
 backend = OllamaBackend(
     model="gemma4:e4b",
     options={"num_gpu": 0, "num_thread": 4},
     keep_alive="5m",
 )
 
-# 1-pass fast triage for passes (0 tokens, ~170ms) + concise 60-token diagnostic on failure
+# Correctness-first CI Merge Gate:
+# - Layer 0 catches syntax/import errors in <0.1ms (0 tokens)
+# - Layer 1 runs full 2-pass symmetric debiasing (0 tokens on clear pass OR clear fail)
+# - Layer 2 ONLY fires when Layer 1 is genuinely ambiguous (0.20 < P < 0.85)
 ci_pipeline = (
     ASTGate(syntax=True, forbidden_imports=["pickle", "subprocess"])
     >> LogitGate(
         rubric="Candidate code must be clean, secure, and handle edge cases.",
-        preset="fast_ci",  # Single-pass 80% pass threshold, debiasing disabled for max speed
+        preset="balanced",  # Full 2-pass symmetric log-odds debiasing for CI correctness
+        save_on_fail=True,  # Saves .logitgate/failures/*.json on fail for local `logitgate explain`
         backend=backend,
     )
     >> JudgeGate(
-        max_tokens=60,  # 1-2 sentence concise diagnostic for failed CI logs
-        trigger="on_ambiguous_or_fail",
+        max_tokens=80,
+        trigger="on_ambiguous_only",  # Never waste CI time generating essays on non-ambiguous verdicts!
         backend=backend,
     )
 )
 
+candidate_code = "def add_numbers(a: int, b: int) -> int:\n    return a + b\n"
 verdict = ci_pipeline.evaluate(candidate_code)
 assert verdict.passed, f"CI Gate Failed at {verdict.triggered_layer}: {verdict.reason}"
 ```
-- **Resource Footprint**: Runs in ~2.2–3.2 GB System RAM (`qwen2.5:3b` / `llama3.2:3b`) or ~8.9 GB System RAM (`gemma4:e4b`) with 0 VRAM overhead—fitting comfortably inside a standard 16 GB GitHub Actions (`ubuntu-latest`) VM.
+- **Resource Footprint**: Runs in ~2.2–3.2 GB System RAM (`qwen2.5:3b` / `llama3.2:3b`) or ~9.4 GB System RAM (`gemma4:e4b`) with 0 VRAM overhead—fitting comfortably inside a standard 16 GB GitHub Actions (`ubuntu-latest`) VM.
 - **Cost Savings**: 100% free runner tier without provisioning \$0.50–\$2.00/hr GPU runners.
 
 #### Reproducing Non-Deterministic App Failures Locally (`VerdictSnapshot` & `logitgate explain`)
 
-When testing non-deterministic LLM applications in CI using fast zero-token gating (`LogitGate(preset="fast_ci")` or `@check`), failures are caught in ~50ms without burning tokens. However, if a developer re-runs their non-deterministic application locally to debug, the LLM will generate a different output, making reproduction tricky.
+When testing non-deterministic LLM applications in CI using zero-token gating (`trigger="on_ambiguous_only"` or `@check`), clear failures fail immediately in 0 tokens without slowing down the CI pipeline. However, if a developer re-runs their non-deterministic application locally to debug, the LLM will generate a different output, making reproduction tricky.
 
 LogitGate solves this with deterministic **Verdict Snapshots**:
 1. When a test fails in CI (with `LOGITGATE_SAVE_FAILURES=1` or `@check(save_snapshot=True)`), LogitGate freezes the exact candidate output, rubric, and telemetry to `.logitgate/failures/fail_<timestamp>_<test>_<id>.json` (and updates `.logitgate/failures/latest.json`).
@@ -327,6 +345,9 @@ print(explanation.reason)
 Detect hallucinations and verify factual groundedness before streaming an answer to the end user:
 ```python
 from logitgate import ContractGate, LogitGate
+
+retrieved_docs = "LogitGate v0.1.0 requires Python 3.10 or higher and supports Ollama, vLLM, and OpenAI."
+generated_response = "LogitGate v0.1.0 supports Python 3.10+ and runs on Ollama, vLLM, and OpenAI."
 
 # Layer 0 ensures reasonable length bounds in 0ms; Layer 1 verifies grounding in ~45ms
 rag_gate = (
@@ -371,6 +392,7 @@ agent_router = (
     )
 )
 
+agent_raw_json = '{"tool_name": "run_sql", "arguments": {"query": "SELECT count(*) FROM users"}, "confirm_action": false}'
 verdict = agent_router.evaluate(agent_raw_json)
 next_node = {"A": "db_node", "B": "auth_node", "C": "qa_node"}[verdict.choice]
 ```
@@ -398,6 +420,13 @@ rubrics = [
     "Does the response adhere to the company return and refund policy?",
 ]
 
+support_transcript = (
+    "Customer: Please update my account email and process a refund for order #402.\n"
+    "Agent: I would be happy to help! Before I can update your email, please complete "
+    "the 2FA verification sent to your phone. Your refund for order #402 has been initiated "
+    "per our 30-day return policy."
+)
+
 # Evaluates all 3 rubrics in a single batch reusing 100% of candidate KV-cache
 verdicts = evaluator.evaluate_batch(support_transcript, rubrics)
 for r, v in zip(rubrics, verdicts):
@@ -408,13 +437,14 @@ for r, v in zip(rubrics, verdicts):
 
 ## Best Practices: Prompting, Context Length, & Model Sizing
 
-### 1. Optimal Candidate Length & Chunking (500–4,000 Tokens)
-- **Attention Density**: First-token logit gates perform optimally on artifacts between **500 and 4,000 tokens**. In causal transformers, very long contexts (>16k tokens) can suffer from attention dilution on subtle constraints.
-- **Document Chunking**: For evaluating long documents (e.g. 50-page contracts or huge codebases), break the document into semantic sections or functions and evaluate them individually with `evaluate_batch`.
+### 1. Document Context Length & When to Chunk
+- **Zero-Chunking Sweet Spot (Up to 16,000–32,000 Tokens)**: As shown in our [Needle-in-a-Haystack benchmarks](#2-context-length-scaling--needle-in-a-haystack-boundary-200-to-16000-tokens), modern causal transformers (`gemma4`, `qwen2.5`) maintain near-perfect probability separation ($\Delta P > 0.993$) up to **16,000+ tokens** without manual chunking, and sliding-window/MoE architectures scale cleanly to **32k–64k tokens** in VRAM.
+- **When to Chunk (50,000+ Token Codebases or Books)**: If a document exceeds your model's configured context window (`num_ctx`) or exceeds 32k–50k tokens on a dense attention model, split the document into logical sections or files and call `gate.evaluate(chunk)` on each section independently.
+- **Multi-Rubric KV Sharing (`evaluate_batch`)**: Note that `gate.evaluate_batch(candidate, rubrics)` is designed for evaluating **multiple atomic rubrics against a single candidate artifact** (sharing 100% of the candidate KV-cache across all $K$ rubrics), rather than evaluating multiple documents against one rubric.
 
 ### 2. Writing Atomic, Observable Rubrics vs. Giant Compound Prompts
 - **Single Observable Property**: Write rubrics that test exactly one clear, falsifiable property (e.g. *"Does the reply refuse to reset passwords without 2FA?"* rather than *"Is the reply polite, compliant with 2FA, formatted as markdown, and under 200 words?"*).
-- **Prefix-Shared Batching**: Instead of one monolithic prompt, pass a list of atomic rubrics to `evaluate_batch(candidate, rubrics)`. Because all rubrics share the candidate prefix, running 5 atomic rubrics takes only ~110ms per rubric while giving per-criterion visibility.
+- **Prefix-Shared Batching**: Instead of one monolithic prompt, pass a list of atomic rubrics to `evaluate_batch(candidate, rubrics)`. Because all rubrics share the candidate prefix, running 4–5 atomic rubrics takes only ~110ms per rubric while eliminating compound attention dilution and giving per-criterion observability.
 
 ### 3. Escalation Mechanics: How Symmetric Log-Odds Handle Model Uncertainty
 - **Decisive Signal**: When a model is confident that an artifact passes, both forward ($L_1 = s + b$) and reverse ($L_2 = s - b$) log-odds are positive, yielding calibrated probability $P \ge 0.85$ (fast-path pass, 0 tokens).
@@ -436,7 +466,7 @@ LogitGate synthesizes and builds upon foundational breakthroughs in calibration,
 ### Foundational Literature Credited
 
 1. **Pretraining Token Prior Bias & Calibration**:
-   - Zhao, Z., Wallace, E., Feng, S., Klein, D., & Singh, S. (2021). *"Calibrate Before Use: Improving Few-Shot Performance of Language Models"*. **ICML 2021**. [arXiv:2102.09690](https://arxiv.org/abs/2102.09690).
+   - Zhao, T. Z., Wallace, E., Feng, S., Klein, D., & Singh, S. (2021). *"Calibrate Before Use: Improving Few-Shot Performance of Language Models"*. **ICML 2021**. [arXiv:2102.09690](https://arxiv.org/abs/2102.09690).
    - *Contribution to LogitGate*: Demonstrates that large language models suffer from severe majority-label, recency, and surface-form token priors (such as inherently favoring token `'A'` over `'B'`).
 
 2. **Positional & Label Permutation Bias in LLM Judges**:
@@ -452,7 +482,7 @@ LogitGate synthesizes and builds upon foundational breakthroughs in calibration,
    - *Contribution to LogitGate*: Forms the theoretical basis of `fit_calibration()`, using temperature scaling to align logit confidence with true empirical accuracy and minimize Brier score.
 
 5. **System-1 Single-Token Decision Benchmarking**:
-   - Deußer, C., et al. (2026). *"Evaluating and Benchmarking the System One Model Jev"*. [arXiv:2609.37647](https://arxiv.org/abs/2609.37647).
+   - Deußer, T., Sparrenberg, L., & Sifa, R. (2026). *"Evaluating and Benchmarking the System One Model Jev"*. [arXiv:2609.37647](https://arxiv.org/abs/2609.37647).
    - *Contribution to LogitGate*: Benchmarks fast, single-token System-1 evaluation pipelines against heavy System-2 generative reasoning judges.
 
 ### BibTeX Citation
@@ -509,8 +539,8 @@ Causal transformer attention requires the candidate artifact to attend to the ev
 {candidate}
 
 [DECISION MAPPING]
-A: Complies fully with the rubric.
-B: Violates the rubric or has defects.
+A: The candidate artifact complies fully with the rubric.
+B: The candidate artifact violates the rubric or has defects.
 Respond with a single character (A or B).
 Verdict:
 ```
@@ -706,6 +736,13 @@ scorer = ScoreGate(
     backend="ollama://localhost:11434/qwen2.5-coder:14b",
 )
 
+candidate_documentation = """
+# Authentication API (v2)
+- **Endpoint**: `POST /v2/auth/token`
+- **Request Body**: `{"client_id": "string", "client_secret": "string"}`
+- **Responses**: `200 OK` (returns JWT + expiry), `401 Unauthorized`, `429 Too Many Requests`.
+"""
+
 verdict = scorer.evaluate(candidate_documentation)
 print(f"Continuous Expected Score: {verdict.score:.2f} / 5.0 (Passed: {verdict.passed})")
 ```
@@ -798,16 +835,20 @@ fast_metric = LogitGateMetric(
 
 #### LangGraph Integration (`as_conditional_edge`)
 ```python
-from langgraph.graph import StateGraph, END
+from typing import TypedDict
+from langgraph.graph import StateGraph
 from logitgate import LogitGate
 from logitgate.integrations.langgraph import as_conditional_edge
+
+class AgentState(TypedDict):
+    content: str
 
 gate = LogitGate(rubric="Is the generated response safe and helpful?")
 
 # Creates a fast routing function extracting 'content' from graph state
 route_verdict = as_conditional_edge(gate, pass_node="publish_response", fail_node="human_escalation")
 
-workflow = StateGraph(...)
+workflow = StateGraph(AgentState)
 workflow.add_conditional_edges("generator", route_verdict)
 ```
 

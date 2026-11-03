@@ -55,6 +55,7 @@ class Cascade(BaseGate):
         if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
             return verdict
 
+        from logitgate.backends.base import infer_backend_spec
         from logitgate.snapshot import VerdictSnapshot
         rubric = current_rubric or getattr(self.gates[0], "rubric", None) or "Cascade evaluation"
         gate_config: dict[str, Any] = {"cascade_gates": [g.name for g in self.gates]}
@@ -62,6 +63,7 @@ class Cascade(BaseGate):
             if isinstance(g, LogitGate):
                 gate_config.update({
                     "rubric": g.rubric,
+                    "backend": infer_backend_spec(g.backend),
                     "pass_threshold": g.pass_threshold,
                     "fail_threshold": g.fail_threshold,
                     "symmetric_debiasing": g.symmetric_debiasing,
@@ -72,11 +74,11 @@ class Cascade(BaseGate):
                 break
 
         test_name = kwargs.get("test_name")
-        snapshot = VerdictSnapshot(
-            test_name=test_name,
+        snapshot = VerdictSnapshot.from_verdict(
+            verdict=verdict,
             rubric=rubric,
             candidate=candidate,
-            verdict=verdict,
+            test_name=test_name,
             gate_config=gate_config,
         )
         saved_path = snapshot.save(directory=kwargs.get("snapshot_dir"))

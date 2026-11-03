@@ -28,7 +28,7 @@ references:
     title: "Calibrate Before Use: Improving Few-Shot Performance of Language Models"
     authors:
       - family-names: Zhao
-        given-names: Zihao
+        given-names: Tony Z.
       - family-names: Wallace
         given-names: Eric
       - family-names: Feng
@@ -116,8 +116,11 @@ references:
     title: "Evaluating and Benchmarking the System One Model Jev"
     authors:
       - family-names: Deußer
-        given-names: Carl
-      - family-names: et al.
+        given-names: Tobias
+      - family-names: Sparrenberg
+        given-names: Lorenz
+      - family-names: Sifa
+        given-names: Rafet
     year: 2026
     identifiers:
       - type: arxiv

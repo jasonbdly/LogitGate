@@ -44,6 +44,10 @@ class BaseGate(abc.ABC):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.evaluate(candidate, **kwargs))
 
+    def __call__(self, candidate: Any, **kwargs: Any) -> Verdict:
+        """Evaluates the candidate artifact synchronously (callable shorthand for `evaluate`)."""
+        return self.evaluate(candidate, **kwargs)
+
     def __rshift__(self, other: BaseGate) -> Cascade:
         """Chains this gate with another gate into a cascaded routing pipeline.
 

@@ -4,7 +4,11 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .deepeval/
+.logitgate/
+release_notes.md
 *.pyc
 .coverage
 htmlcov/

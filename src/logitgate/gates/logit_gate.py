@@ -59,7 +59,7 @@ class LogitGate(BaseGate):
         symmetric_debiasing: bool | None = None,
         query_first: bool = True,
         logit_temperature: float | Literal["auto"] | None = None,
-        preset: Literal["strict", "balanced", "fast_ci"] | None = None,
+        preset: Literal["strict", "balanced", "fast_triage"] | None = None,
         save_on_fail: bool | None = None,
         name: str = "LogitGate",
     ) -> None:
@@ -72,12 +72,14 @@ class LogitGate(BaseGate):
                 default_pass = 0.85
                 default_fail = 0.20
                 default_sym = True
-            elif preset == "fast_ci":
+            elif preset == "fast_triage":
                 default_pass = 0.80
                 default_fail = 0.20
                 default_sym = False
             else:
-                raise ValueError(f"Invalid preset '{preset}'. Must be one of ['strict', 'balanced', 'fast_ci']")
+                raise ValueError(
+                    f"Invalid preset '{preset}'. Must be one of ['strict', 'balanced', 'fast_triage']"
+                )
         else:
             default_pass = LogitGateDefaults.pass_threshold
             default_fail = LogitGateDefaults.fail_threshold
@@ -157,9 +159,11 @@ class LogitGate(BaseGate):
         if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
             return verdict
 
+        from logitgate.backends.base import infer_backend_spec
         from logitgate.snapshot import VerdictSnapshot
-        gate_config = {
+        gate_config: dict[str, Any] = {
             "rubric": self.rubric,
+            "backend": infer_backend_spec(self.backend),
             "pass_threshold": self.pass_threshold,
             "fail_threshold": self.fail_threshold,
             "symmetric_debiasing": self.symmetric_debiasing,
@@ -172,11 +176,11 @@ class LogitGate(BaseGate):
             gate_config["model"] = self.model
 
         test_name = kwargs.get("test_name")
-        snapshot = VerdictSnapshot(
-            test_name=test_name,
+        snapshot = VerdictSnapshot.from_verdict(
+            verdict=verdict,
             rubric=self.rubric,
             candidate=candidate,
-            verdict=verdict,
+            test_name=test_name,
             gate_config=gate_config,
         )
         saved_path = snapshot.save(directory=kwargs.get("snapshot_dir"))

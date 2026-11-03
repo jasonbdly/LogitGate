@@ -388,10 +388,10 @@ def test_auto_calibrate_backend(tmp_path):
 
 def test_logit_gate_presets():
     """LogitGate initializes with threshold & debiasing presets."""
-    gate_ci = LogitGate(rubric="Test rubric", preset="fast_ci")
-    assert gate_ci.pass_threshold == 0.80
-    assert gate_ci.fail_threshold == 0.20
-    assert gate_ci.symmetric_debiasing is False
+    gate_triage = LogitGate(rubric="Test rubric", preset="fast_triage")
+    assert gate_triage.pass_threshold == 0.80
+    assert gate_triage.fail_threshold == 0.20
+    assert gate_triage.symmetric_debiasing is False
 
     gate_strict = LogitGate(rubric="Test rubric", preset="strict")
     assert gate_strict.pass_threshold == 0.90
@@ -686,3 +686,39 @@ def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
     snap = VerdictSnapshot.load(tmp_path / "check_fails")
     assert snap.test_name == "my_flaky_test"
     assert snap.candidate == "failing candidate"
+
+
+def test_base_gate_callable_and_from_verdict(tmp_path, monkeypatch):
+    """BaseGate.__call__ delegates to evaluate() and VerdictSnapshot.from_verdict works cleanly."""
+    from logitgate.cli import main
+    from logitgate.snapshot import VerdictSnapshot
+
+    gate = LogitGate(rubric="Must be valid", backend=StubBackend(default_prob=0.95))
+    verdict = gate("valid candidate")
+    assert verdict.passed is True
+    assert verdict.status == DecisionStatus.PASSED
+
+    # VerdictSnapshot.from_verdict factory
+    fail_gate = LogitGate(rubric="Must not fail", backend=StubBackend(default_prob=0.10))
+    fail_verdict = fail_gate("bad candidate")
+    snap = VerdictSnapshot.from_verdict(
+        verdict=fail_verdict,
+        rubric=fail_gate.rubric,
+        candidate="bad candidate",
+        test_name="test_factory",
+        gate_config={"backend": "stub://0.10", "pass_threshold": 0.85, "fail_threshold": 0.20},
+    )
+    assert snap.test_name == "test_factory"
+    assert snap.verdict.passed is False
+
+    # Explain on failed snapshot with default StubBackend preserves FAILED status
+    explained = snap.explain()
+    assert explained.passed is False
+    assert explained.status == DecisionStatus.FAILED
+
+    # CLI eval respects LOGITGATE_BACKEND and LOGITGATE_PASS_THRESHOLD when flags omitted
+    monkeypatch.setenv("LOGITGATE_BACKEND", "stub://0.95")
+    monkeypatch.setenv("LOGITGATE_PASS_THRESHOLD", "0.80")
+    ret = main(["eval", "--rubric", "Check CLI env", "--candidate", "hello world", "--json"])
+    assert ret == 0
+
