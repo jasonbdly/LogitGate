@@ -18,17 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monotonic failure enforcement: when Layer 1 decisively fails (`status == FAILED`) and escalates to Layer 2 for diagnostic explanation, `passed=False` is preserved even if the downstream generative critique phrasing is lenient.
 
 #### Layer 0 Deterministic AST & Contract Gate (`ASTGate` / `ContractGate`)
-- Sub-millisecond (~0.04ms) zero-token evaluation on CPU.
+- Sub-millisecond (~0.04ms) deterministic CPU checks without LLM calls.
 - Python AST syntax validation (`syntax=True`) and forbidden import detection (`forbidden_imports`) via AST walker with regex fallback.
 - General-domain JSON Schema & Pydantic `BaseModel` validation (`json_schema`), character length bounds (`min_length`, `max_length`), forbidden regex patterns (`forbidden_patterns`), and required section verification (`required_sections`).
 - Acyclic directed graph (DAG) cycle detection and missing dependency analysis (`acyclic_dag=True`) for agentic task graphs.
 - Custom callable validator support (`validators`) with informative diagnostic strings.
 
 #### Layer 1 First-Token Debiased Logit Gate (`LogitGate`)
-- 40–120ms GPU latency (~170ms on pure CPU) with 0 generated autoregressive tokens.
+- 40–120ms GPU latency (~170ms single-pass on pure CPU) using first-token log-probabilities (`max_tokens=1`) without multi-token Chain-of-Thought generation.
 - Built-in threshold presets: `preset="strict"` (`0.90 / 0.25`, symmetric 2-pass), `preset="balanced"` (`0.85 / 0.20`, symmetric 2-pass), and `preset="fast_triage"` (`0.80 / 0.20`, single-pass for local CPU iteration & high-throughput triage).
 - Symmetric log-odds debiasing ($\bar{L} = \frac{L_1 + L_2}{2T}$) cancelling pretraining token priors and positional bias.
-- Prefix-preserving KV-cache prompt compilation (`compile_binary_prompt`), placing rubric and candidate first to maximize GPU KV-cache hit rate (>99%).
+- Prefix-preserving KV-cache prompt compilation (`compile_binary_prompt`), placing rubric and candidate first to share the prompt prefix across forward and reverse passes.
 - Multi-rubric batch evaluation (`evaluate_batch`, `aevaluate_batch`) sharing a byte-identical static prefix across all rubrics with KV-cache stampede prevention.
 - Dynamic missing-token bounded floor calculation to prevent arbitrary cliff distortion in log-odds space.
 - Post-hoc temperature calibration (`fit_calibration`), built-in `KNOWN_MODEL_TEMPERATURES` registry, and automatic calibration caching (`logit_temperature="auto"`, `auto_calibrate_backend`) in `~/.cache/logitgate/calibration.json`.

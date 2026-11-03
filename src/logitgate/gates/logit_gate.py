@@ -24,12 +24,13 @@ from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
 
 class LogitGate(BaseGate):
-    """Sub-50ms first-token Logit Gate (Layer 1).
+    """First-token Logit Gate (Layer 1).
 
-    Computes mathematically debiased binary classification confidence scores directly
-    from the language model's first-token logits without generating any output tokens.
-    Uses symmetric log-odds debiasing across forward and reverse label mappings to
-    cancel prior token biases (e.g. Zhao et al., 2021) and positional biases.
+    Computes calibrated binary classification confidence scores directly from the
+    language model's first-token log-probabilities (`max_tokens=1`) without generating
+    multi-token Chain-of-Thought critiques. Uses symmetric log-odds debiasing across
+    forward and reverse label mappings to cancel prior token biases (Zhao et al., 2021)
+    and positional biases.
 
     Args:
         rubric: Clear evaluation criterion or question to test against candidate.

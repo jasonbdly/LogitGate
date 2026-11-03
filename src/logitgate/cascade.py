@@ -16,11 +16,11 @@ class Cascade(BaseGate):
 
     Orchestrates sequential execution of gates:
     - Layer 0 (ASTGate): Sub-millisecond deterministic syntax, contract, and DAG checks.
-    - Layer 1 (LogitGate): Sub-50ms zero-token debiased confidence gate.
+    - Layer 1 (LogitGate): Fast (40–120ms) debiased first-token logit gate (`max_tokens=1`).
     - Layer 2 (JudgeGate): Diagnostic generative critique triggered only on ambiguous or failing artifacts.
 
-    Fast-path passes at Layer 1 short-circuit Layer 2 entirely, achieving high accuracy
-    with zero token generation for the vast majority of requests.
+    Fast-path passes at Layer 1 short-circuit Layer 2 entirely, avoiding multi-token
+    Chain-of-Thought generation for non-ambiguous requests.
 
     Args:
         gates: Ordered sequence of gate instances to execute sequentially.

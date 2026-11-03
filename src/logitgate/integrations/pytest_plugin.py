@@ -20,7 +20,7 @@ def check(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Pytest decorator to evaluate function output against an LLM rubric
-    using a sub-50ms LogitGate.
+    using LogitGate.
     """
     from logitgate.config import get_default_save_failures
 

@@ -12,7 +12,7 @@ from logitgate.gates.logit_gate import LogitGate
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="logitgate",
-        description="LogitGate CLI: Sub-50ms LLM evaluation and decision engine.",
+        description="LogitGate CLI: Calibrated first-token logit evaluation and cascaded routing.",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

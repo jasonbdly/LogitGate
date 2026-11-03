@@ -56,7 +56,7 @@ def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
 
 
 class ASTGate(BaseGate):
-    """Deterministic zero-token verification gate (Layer 0).
+    """Deterministic CPU verification gate (Layer 0).
 
     Executes in under 0.1ms using native CPU parsing without invoking any LLM.
     Supports Python AST syntax validation, forbidden import analysis, regex pattern

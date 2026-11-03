@@ -6,23 +6,23 @@
 [![Offline First](https://img.shields.io/badge/offline--first-local--LLM%20ready-brightgreen.svg)](README.md)
 [![CI](https://github.com/jasonbdly/LogitGate/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
-**The 40–120ms zero-token LLM evaluation and cascaded decision engine.**
+**Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs.**
 
-LogitGate replaces slow, expensive, autoregressive LLM-as-a-judge calls with mathematically debiased first-token logit gates and a 3-layer cascaded routing architecture (`ASTGate >> LogitGate >> JudgeGate`).
+LogitGate replaces slow, multi-token LLM-as-a-judge critiques with calibrated first-token logit gates and a 3-layer cascaded routing pipeline (`ASTGate >> LogitGate >> JudgeGate`).
 
 ---
 
 ## How It Works in Plain English
 
-When evaluating whether an LLM output meets a rubric, traditional LLM-as-a-judge frameworks prompt another LLM to "think step-by-step" and write a 200–500 word critique before finally outputting `PASS` or `FAIL`. This wastes **5 to 20 seconds**, consumes hundreds of unnecessary output tokens, and introduces positional and label bias.
+When evaluating whether an LLM output meets a rubric, standard LLM-as-a-judge frameworks prompt another model to write a 200–500 word critique before outputting `PASS` or `FAIL`. This takes **5 to 20 seconds**, generates hundreds of Chain-of-Thought (CoT) tokens, and suffers from positional and label biases.
 
-`LogitGate` replaces this with an intelligent **3-layer cascade**:
+`LogitGate` uses a **3-layer cascade**:
 
-1. **Layer 0 (`ASTGate`)**: Checks deterministic rules instantly in **<0.1 ms** using native CPU parsers (syntax validation, regex patterns, acyclic DAG topology, forbidden imports). If candidate code has a syntax error or invokes a forbidden import, it fails immediately with zero tokens and zero GPU overhead.
-2. **Layer 1 (`LogitGate`)**: If Layer 0 passes, we present the rubric and candidate to the model and inspect its **first-token log-probabilities (logits)** directly. In a single forward pass (**~40–50 ms on GPU**, **~170 ms on CPU**), we extract the model's exact mathematical confidence without generating any output tokens. To eliminate prior token bias (e.g. models favoring 'A' over 'B'), we run a symmetric pass with inverted choices and combine them in log-odds space (**~85–120 ms**).
-3. **Layer 2 (`JudgeGate`)**: Only if Layer 1 confidence falls into an ambiguous range (e.g., between 20% and 85%) or decisively fails does the system escalate to generating an essay critique with diagnostic rationale.
+1. **Layer 0 (`ASTGate` / `ContractGate`)**: Runs deterministic checks in **<0.1 ms** on the CPU (Python AST syntax, JSON/Pydantic schemas, regex patterns, acyclic DAG topology, forbidden imports). If an artifact fails a deterministic contract, it fails immediately with no LLM call.
+2. **Layer 1 (`LogitGate`)**: If Layer 0 passes, we pass the rubric and candidate to the model and read its **first-token log-probabilities (`max_tokens=1`)**. In a single forward pass (**~40–50 ms on GPU**, **~170 ms on CPU**), we compute the model's classification confidence without generating multi-token CoT text. To cancel pretraining token priors (such as models favoring `'A'` over `'B'`), we run a second pass with swapped labels and average them in log-odds space (**~85–120 ms on GPU**).
+3. **Layer 2 (`JudgeGate`)**: Only when Layer 1 confidence falls into an ambiguous band (e.g., between 20% and 85%) or requires failure diagnostics does the pipeline escalate to generating a full text critique.
 
-In empirical multi-domain benchmarks across 4B and 14B models on single-hop and structural rubrics (with `trigger="on_ambiguous_only"`), Layer 0 or Layer 1 resolved **100% of the 16-item single-hop test suite** decisively (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 43–124ms) with **zero generated tokens** and **zero additional VRAM**—while complex multi-hop or adversarial cases automatically escalate to Layer 2 (`JudgeGate`), as detailed in [Falsification Benchmarks](#falsification-benchmarks-where-does-layer-1-break-down--how-to-mitigate-it).
+In our 16-item single-hop and structural benchmark suite (with `trigger="on_ambiguous_only"`), Layer 0 and Layer 1 resolved **100% of items** (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 43–124ms) without invoking Layer 2 (`0` CoT critique tokens generated) and while reusing the already-loaded model—whereas multi-hop or adversarial cases escalate to Layer 2 (`JudgeGate`), as shown in [Falsification Benchmarks](#falsification-benchmarks-where-does-layer-1-break-down--how-to-mitigate-it).
 
 ---
 
@@ -41,12 +41,12 @@ In empirical multi-domain benchmarks across 4B and 14B models on single-hop and 
 
 Traditional LLM evaluation relies on generative judges (prompting an LLM to generate 100–500 critique tokens). This is **slow (1,500ms–8,000ms)**, **expensive**, and suffers from severe **position and label permutation biases**. Dedicated judge models (like Prometheus or Selene) require gigabytes of extra GPU VRAM and still suffer from high token generation latency.
 
-| Evaluation Approach | Single-Pass Latency | Output Tokens | Extra GPU VRAM | Token & Positional Bias Debiasing | Ambiguity & Failure Diagnostics |
+| Evaluation Approach | Typical Latency | Generated Output Tokens | Extra GPU VRAM | Token & Positional Bias Mitigation | Ambiguity & Failure Diagnostics |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Generative LLM Judge** *(G-Eval, Ragas, MT-Bench)* | 1,500ms – 8,000ms | 100 – 600 tokens | 0 GB (Shared) | ❌ None (or expensive 2x generative re-query) | ✅ Verbose text critique |
-| **Fine-Tuned Judge Models** *(Prometheus 2, Selene)* | 800ms – 3,500ms | 80 – 300 tokens | 14 GB – 48 GB (Dedicated weights) | ❌ Susceptible to length & positional bias | ✅ Fine-tuned score rubric critique |
-| **Naive Raw First-Token Logprobs** | 80ms – 250ms | 0 tokens | 0 GB (Shared) | ❌ Severe pretraining prior bias (Zhao et al., 2021) | ❌ No diagnostic rationale |
-| **`LogitGate` (3-Layer Cascade)** | **0.04ms (L0) / 40–120ms (L1)** | **0 tokens (L0 / L1)** | **0 GB (Reuses your loaded model)** | **✅ Exact mathematical log-odds cancellation** | **✅ Escalates to Layer 2 Judge on failure / ambiguity** |
+| **Generative LLM Judge** *(G-Eval, Ragas, MT-Bench)* | 1,500ms – 8,000ms | 100 – 600 CoT tokens | 0 GB (Shared) | ❌ None (or expensive 2x generative re-query) | ✅ Verbose text critique |
+| **Fine-Tuned Judge Models** *(Prometheus 2, Selene)* | 800ms – 3,500ms | 80 – 300 CoT tokens | 14 GB – 48 GB (Dedicated weights) | ❌ Susceptible to length & positional bias | ✅ Fine-tuned rubric critique |
+| **Naive Raw First-Token Logprobs** | 40ms – 250ms | 1 token (`max_tokens=1`, 0 CoT) | 0 GB (Shared) | ❌ Vulnerable to token prior bias (Zhao et al., 2021) | ❌ No diagnostic rationale |
+| **`LogitGate` (3-Layer Cascade)** | **0.04ms (L0) / 40–120ms (L1)** | **0 (L0) / 1 token prefill probe (L1, 0 CoT)** | **0 GB (Reuses loaded model)** | **✅ Symmetric log-odds debiasing** | **✅ Escalates to Layer 2 Judge on failure / ambiguity** |
 
 ---
 
@@ -79,12 +79,12 @@ Empirical measurements gathered on local inference across 4 distinct model confi
 
 Evaluated across **4 non-SDLC and general domains** (RAG Groundedness, Customer Support Policy Compliance, Structured SQL/JSON Safety, Python Code Security):
 
-| Model Configuration | Baseline Generative Judge | Cascade (`trigger="on_ambiguous_or_fail"`) | Cascade (`trigger="on_ambiguous_only"`) | Speedup (Fast-Fail) | Output Tokens Saved | Classification Accuracy |
+| Model Configuration | Baseline Generative Judge | Cascade (`trigger="on_ambiguous_or_fail"`) | Cascade (`trigger="on_ambiguous_only"`) | Speedup (Fast-Fail) | Judge CoT Tokens Saved | Classification Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 56,002 ms (5,659 tok) | 11,118 ms (1,007 tok) | **1,200 ms (0 tok)** | **46.7x** | **5,659 tokens (100%)** | **12/12 (100%)** |
-| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 436,185 ms (5,234 tok) | 105,877 ms (882 tok) | **33,563 ms (0 tok)** | **13.0x** | **5,234 tokens (100%)** | **12/12 (100%)** |
-| **`qwen2.5:14b` (GPU)** | 29,144 ms (1,362 tok) | 5,449 ms (197 tok) | **982 ms (0 tok)** | **29.7x** | **1,362 tokens (100%)** | **12/12 (100%)** *(vs. 10/12 baseline)* |
-| **`qwen2.5-coder:14b` (GPU)** | 19,642 ms (907 tok) | 4,521 ms (153 tok) | **961 ms (0 tok)** | **20.4x** | **907 tokens (100%)** | **12/12 (100%)** |
+| **`gemma4:e4b` (GPU)** | 56,002 ms (5,659 tok) | 11,118 ms (1,007 tok) | **1,200 ms (0 CoT tok)** | **46.7x** | **5,659 CoT tokens** | **12/12 (100%)** |
+| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 436,185 ms (5,234 tok) | 105,877 ms (882 tok) | **33,563 ms (0 CoT tok)** | **13.0x** | **5,234 CoT tokens** | **12/12 (100%)** |
+| **`qwen2.5:14b` (GPU)** | 29,144 ms (1,362 tok) | 5,449 ms (197 tok) | **982 ms (0 CoT tok)** | **29.7x** | **1,362 CoT tokens** | **12/12 (100%)** *(vs. 10/12 baseline)* |
+| **`qwen2.5-coder:14b` (GPU)** | 19,642 ms (907 tok) | 4,521 ms (153 tok) | **961 ms (0 CoT tok)** | **20.4x** | **907 CoT tokens** | **12/12 (100%)** |
 
 ---
 
@@ -107,7 +107,7 @@ Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`n
 
 Evaluated across clear passes, structural Layer 0 failures, clear semantic failures, and subtle borderline edge cases (subtle omissions, partial compliance, timing side-channels, adversarial overrides):
 
-| Model Configuration | Layer 0 (`ASTGate`) | Layer 1 Decisive (`LogitGate`) | Layer 2 Escalated (`JudgeGate`) | Combined Zero-Token Resolution Rate |
+| Model Configuration | Layer 0 (`ASTGate`) | Layer 1 Decisive (`LogitGate`) | Layer 2 Escalated (`JudgeGate`) | Combined L0 + L1 Resolution Rate (0 CoT Tokens) |
 | :--- | :--- | :--- | :--- | :--- |
 | **`gemma4:e4b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
 | **`gemma4:e4b` (Pure CPU, 0 GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
@@ -118,7 +118,7 @@ Evaluated across clear passes, structural Layer 0 failures, clear semantic failu
 
 ## Falsification Benchmarks: Where Does Layer 1 Break Down & How to Mitigate It?
 
-To establish honest, rigorous scientific boundaries for zero-token first-token logit probing, we subjected `LogitGate` to stress testing across **model sizes** (4B, 14B, 26B MoE, 31B Dense), **reasoning depths** (direct semantic vs. compound rubrics vs. multi-hop math/logic bugs), **document lengths** (200 to 16,000 tokens), and **context window allocations** (`num_ctx` from 512 to 131,072).
+To establish clear empirical boundaries for first-token logit probing, we tested `LogitGate` across **model sizes** (4B, 14B, 26B MoE, 31B Dense), **reasoning depths** (direct semantic vs. compound rubrics vs. multi-hop math/logic bugs), **document lengths** (200 to 16,000 tokens), and **context window allocations** (`num_ctx` from 512 to 131,072).
 
 ### 1. Reasoning Depth & Circuit-Depth Boundary (Where Layer 1 Breaks Down)
 
@@ -142,7 +142,7 @@ A causal transformer evaluates its first token in a single forward pass through 
 | **`gemma4:31b` (31B Dense)** | **100% (4/4)** | **100% (4/4)** | **100% (4/4)** (0% FP) | ⚠️ 75% (3/4) *(25% Esc)* | **75% (3/4)** *(25% FP)* | **90% (18/20)** |
 
 #### Crucial Insights & Mitigation Strategies:
-1. **Atomic Decomposition Rescues Layer 1 Accuracy**: On `qwen2.5:14b`, evaluating 4 simultaneous rules inside a monolithic compound rubric caused a 50% false pass rate. But when split into 4 atomic rubrics evaluated via `evaluate_batch(candidate, rubrics)`, Layer 1 accuracy reached **100% (4/4)** with **0% false passes** across ALL models! Because `evaluate_batch` reuses 100% of the candidate KV-cache prefix, running 4 atomic rubrics takes only ~110ms total while eliminating compound attention dilution.
+1. **Atomic Decomposition Prevents Compound Dilution**: On `qwen2.5:14b`, evaluating 4 simultaneous rules inside a monolithic compound rubric caused a 50% false pass rate. When split into 4 atomic rubrics evaluated via `evaluate_batch(candidate, rubrics)`, Layer 1 accuracy reached **100% (4/4)** with **0% false passes** across all tested models. Because `evaluate_batch` shares the static `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix across all queries, running 4 atomic rubrics takes ~110ms per rubric while avoiding compound rubric dilution.
 2. **Tier C Arithmetic & Tier D Distractors are Inherent $O(1)$ Boundaries**: When presented with plausible mathematical distractors (17 * \$24 + \$19 = \$417 instead of \$427) surrounded by authoritative text ("*All ledger calculations verified*"), **all models awarded $P \ge 0.99$ false passes at Layer 1**. A single first-token forward pass cannot execute arithmetic without autoregressive scratchpads.
    - **Mitigation 1 (Cascade Escalation)**: For subtle logic and self-correcting transcripts, `qwen2.5:14b` and `gemma4:31b` fell into the ambiguous escalation band ($0.20 < P < 0.85$), triggering `JudgeGate` which read the entire context and resolved the verdict accurately.
    - **Mitigation 2 (`preset="strict"`)**: For high-stakes arithmetic or code invariants, configure `preset="strict"` (`pass_threshold=0.90, fail_threshold=0.25`) to widen the escalation band.
@@ -184,19 +184,19 @@ Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.config
 
 > [!TIP]
 > **Why `LogitGate` Survives GPU-to-CPU RAM Spillover (~314 ms vs. 80+ Seconds)**:
-> On `qwen2.5:14b` (which uses full global attention across all 48 layers), raising `num_ctx` to `32,768` spills `2.4 GB` of KV-cache into System RAM over PCIe, increasing 2-pass latency from **99.7 ms to 314.5 ms**. In traditional generative LLM-as-a-Judge, that PCIe transfer penalty is paid **sequentially on every single generated token** ($200\text{ ms} \times 400\text{ tokens} \approx 80\text{ seconds}$). Because `LogitGate` generates **zero output tokens**, the PCIe spillover penalty is paid only during the forward pass—meaning users can evaluate large 16k–32k documents without manual chunking in **~0.31 seconds** even when KV-cache spills into System RAM!
-> Furthermore, hybrid sliding-window architectures like **`gemma4:e4b` and `gemma4:26b` (MoE)** grow their KV-cache by only **`+0.63 GB` to `+0.76 GB` all the way out to `64k–128k` context**, staying 100% in VRAM at **~88–96 ms**.
+> On `qwen2.5:14b` (which uses full global attention across all 48 layers), raising `num_ctx` to `32,768` spills `2.4 GB` of KV-cache into System RAM over PCIe, increasing 2-pass latency from **99.7 ms to 314.5 ms**. In traditional generative LLM-as-a-Judge, that PCIe transfer penalty is paid **sequentially on every generated token** ($200\text{ ms} \times 400\text{ tokens} \approx 80\text{ seconds}$). Because `LogitGate` only evaluates the first-token forward pass (`max_tokens=1`), the PCIe spillover penalty is paid only during prefill—allowing users to evaluate 16k–32k documents in **~0.31 seconds** even when KV-cache spills into System RAM.
+> Furthermore, hybrid sliding-window architectures like **`gemma4:e4b` and `gemma4:26b` (MoE)** grow their KV-cache by only **`+0.63 GB` to `+0.76 GB` up to `64k–128k` context**, staying in VRAM at **~88–96 ms**.
 
 ---
 
-### 4. "Eating Our Own Dogfood": Self-Healing Logit Probe in `JudgeGate`
+### 4. Self-Healing Logit Probe in `JudgeGate`
 
-In traditional LLM-as-a-judge frameworks, evaluators rely on brittle regex parsers (e.g. `re.search(r"VERDICT:\s*PASS")`) or naive substring matching (`if "FAIL" in text.upper()`). If a model writes `"The candidate does not fail any requirements"`, substring matching triggers a catastrophic false failure!
+In traditional LLM-as-a-judge frameworks, evaluators often rely on regex parsers (e.g. `re.search(r"VERDICT:\s*PASS")`) or naive substring matching (`if "FAIL" in text.upper()`). If a model writes `"The candidate does not fail any requirements"`, substring matching triggers a false failure.
 
-`JudgeGate` resolves this by **eating its own dogfood**:
+`JudgeGate` handles verdict extraction in three steps:
 1. It instructs the model to begin on line 1 with `[VERDICT: PASS]` or `[VERDICT: FAIL]`.
 2. It parses markdown bolding, JSON, and negation-safe candidate lines.
-3. If an upstream model generates freeform critique text without any explicit tags or keywords, **`JudgeGate` invokes a 1-token `LogitGate` probe on its own critique text**:
+3. If an upstream model generates freeform critique text without explicit tags or keywords, **`JudgeGate` runs a 1-token `LogitGate` probe on its own critique text**:
    ```python
    # Inside JudgeGate._parse_verdict:
    probe_gate = LogitGate(
@@ -206,7 +206,7 @@ In traditional LLM-as-a-judge frameworks, evaluators rely on brittle regex parse
    )
    is_pass = probe_gate.evaluate(critique_text).probability >= 0.5
    ```
-This completely eliminates regex brittleness and guarantees robust verdict extraction across all model families.
+This provides a fallback when models omit structured verdict tags.
 
 ---
 
@@ -243,15 +243,15 @@ When deploying LLM evaluation pipelines, a common production failure mode is **K
 
 1. **Topology 1: Single-Model Shared KV-Cache (Batch Evaluation Suites)**
    - Used when evaluating multiple criteria on the same candidate artifact.
-   - Using `evaluate_batch(candidate, rubrics)`, the candidate tokens are evaluated once. All subsequent rubric logit probes share **100% of the candidate prefix KV-cache** without evicting the context, reducing per-rubric latency to ~110ms.
+   - Using `evaluate_batch(candidate, rubrics)`, the candidate tokens are evaluated once. Subsequent rubric logit probes reuse the shared `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix in the KV-cache without evicting the context, reducing per-rubric latency to ~110ms.
 2. **Topology 2: Heterogeneous Dual-GPU Sidecar (High-Throughput Production)**
    - **GPU 0**: Pinned exclusively to the primary generator model (e.g., `gemma4:26b` MoE or `gemma4:31b` Dense) with 16k–32k context. Its generation KV-cache is **never evicted**.
    - **GPU 1**: Dedicated to a lightweight `LogitGate` sidecar (`qwen2.5:14b` or `gemma4:e4b` in ~8.7–9.4 GB VRAM, or `llama3.2:3b` in ~3.2 GB VRAM).
-   - Real-time gating queries complete in sub-50ms over local IPC (`http://localhost:11435`) without contending for GPU 0's memory bandwidth.
+   - Real-time gating queries complete in ~40–50ms (single-pass) or ~85–120ms (2-pass symmetric) over local IPC (`http://localhost:11435`) without contending for GPU 0's memory bandwidth.
 3. **Topology 3: Single-GPU Workstation + Pure-CPU `LogitGate` Sidecar (Memory-Constrained)**
    - 100% of GPU VRAM is preserved for the primary generator model.
-   - Layer 1 `LogitGate` runs on host CPU with `options={"num_gpu": 0, "num_ctx": 2048}` in ~170ms using standard System RAM (~3.2 GB for 3B Q4 models like `qwen2.5:3b` / `llama3.2:3b`, or ~9.4 GB for `gemma4:e4b`).
-   - Clear passes (85%+ of requests) short-circuit immediately with **zero GPU VRAM interference**. Only ambiguous items or decisive failures escalate to the GPU-backed `JudgeGate`.
+   - Layer 1 `LogitGate` runs on host CPU with `options={"num_gpu": 0, "num_ctx": 2048}` in ~170ms (single-pass) using standard System RAM (~3.2 GB for 3B Q4 models like `qwen2.5:3b` / `llama3.2:3b`, or ~9.4 GB for `gemma4:e4b`).
+   - Clear passes short-circuit without GPU VRAM interference. Only ambiguous items or failures escalate to the GPU-backed `JudgeGate`.
 
 ---
 
@@ -261,16 +261,16 @@ LogitGate is designed to fit directly into diverse software engineering and AI w
 
 ### 1. CI/CD Final Merge Gate vs. Local Developer Inner Loop (Speed vs. Correctness)
 
-In production engineering, **local iteration** and **CI/CD merge gates** have fundamentally different priorities:
-- **CI/CD is your final quality gate**: Correctness and zero false passes are paramount. However, you should **not** wait 5–20 seconds per test to generate a 400-token LLM essay when Layer 1 already reached a decisive, non-ambiguous conclusion (`P >= 0.85` pass or `P <= 0.20` fail)!
-- **Local execution is your fast inner loop**: Developers iterating on code or live agent routers want instant sub-100ms feedback (or ~170ms 1-pass triage on CPU-only laptops).
+In production engineering, **local iteration** and **CI/CD merge gates** have different priorities:
+- **CI/CD is your final quality gate**: Correctness and minimizing false passes are paramount. However, you do not need to wait 5–20 seconds per test to generate a 400-token LLM essay when Layer 1 already reached a decisive, non-ambiguous conclusion (`P >= 0.85` pass or `P <= 0.20` fail).
+- **Local execution is your fast inner loop**: Developers iterating on code or live agent routers want ~40–90ms GPU feedback (or ~170ms 1-pass triage on CPU-only laptops).
 
 | Dimension | Local Inner-Loop / Live Agent Triage | CI/CD Final Merge Gate (Recommended) |
 | :--- | :--- | :--- |
-| **Primary Goal** | Sub-100ms developer feedback / live routing | **Maximum correctness & zero false passes** without waiting for LLM essays on clear verdicts |
+| **Primary Goal** | Fast developer feedback / low-latency routing | **High correctness & minimal false passes** without waiting for LLM essays on clear verdicts |
 | **Preset & Debiasing** | `preset="balanced"` on GPU (`~86ms`), or `preset="fast_triage"` (`1-pass`, `~170ms`) on CPU-only laptops | **`preset="balanced"` or `"strict"` (`symmetric_debiasing=True`)** — always cancel prior token bias |
-| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `evaluate_batch(candidate, rubrics)`** (100% KV-cache sharing, 0% compound dilution) |
-| **Layer 2 (`JudgeGate`) Trigger** | Omit `JudgeGate`, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 tokens on decisive pass *or* decisive fail; only invokes `JudgeGate` to adjudicate ambiguous borderline cases!) |
+| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `evaluate_batch(candidate, rubrics)`** (shared-prefix KV-cache reuse, avoids compound dilution) |
+| **Layer 2 (`JudgeGate`) Trigger** | Omit `JudgeGate`, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 CoT tokens on decisive pass *or* decisive fail; only invokes `JudgeGate` to adjudicate ambiguous borderline cases) |
 
 ```python
 from logitgate import ASTGate, LogitGate, JudgeGate, OllamaBackend
@@ -283,9 +283,9 @@ backend = OllamaBackend(
 )
 
 # Correctness-first CI Merge Gate:
-# - Layer 0 catches syntax/import errors in <0.1ms (0 tokens)
-# - Layer 1 runs full 2-pass symmetric debiasing (0 tokens on clear pass OR clear fail)
-# - Layer 2 ONLY fires when Layer 1 is genuinely ambiguous (0.20 < P < 0.85)
+# - Layer 0 catches syntax/import errors in <0.1ms (no LLM call)
+# - Layer 1 runs full 2-pass symmetric debiasing (no CoT tokens on clear pass OR clear fail)
+# - Layer 2 ONLY fires when Layer 1 is ambiguous (0.20 < P < 0.85)
 ci_pipeline = (
     ASTGate(syntax=True, forbidden_imports=["pickle", "subprocess"])
     >> LogitGate(
@@ -296,7 +296,7 @@ ci_pipeline = (
     )
     >> JudgeGate(
         max_tokens=80,
-        trigger="on_ambiguous_only",  # Never waste CI time generating essays on non-ambiguous verdicts!
+        trigger="on_ambiguous_only",  # Skip generative essays on non-ambiguous verdicts
         backend=backend,
     )
 )
@@ -306,11 +306,11 @@ verdict = ci_pipeline.evaluate(candidate_code)
 assert verdict.passed, f"CI Gate Failed at {verdict.triggered_layer}: {verdict.reason}"
 ```
 - **Resource Footprint**: Runs in ~2.2–3.2 GB System RAM (`qwen2.5:3b` / `llama3.2:3b`) or ~9.4 GB System RAM (`gemma4:e4b`) with 0 VRAM overhead—fitting comfortably inside a standard 16 GB GitHub Actions (`ubuntu-latest`) VM.
-- **Cost Savings**: 100% free runner tier without provisioning \$0.50–\$2.00/hr GPU runners.
+- **Cost Savings**: Runs on standard CPU CI runners without requiring \$0.50–\$2.00/hr GPU instances.
 
 #### Reproducing Non-Deterministic App Failures Locally (`VerdictSnapshot` & `logitgate explain`)
 
-When testing non-deterministic LLM applications in CI using zero-token gating (`trigger="on_ambiguous_only"` or `@check`), clear failures fail immediately in 0 tokens without slowing down the CI pipeline. However, if a developer re-runs their non-deterministic application locally to debug, the LLM will generate a different output, making reproduction tricky.
+When testing non-deterministic LLM applications in CI using `trigger="on_ambiguous_only"` or `@check`, clear failures fail immediately at Layer 1 without generating a long critique in CI. However, if a developer re-runs their non-deterministic application locally to debug, the LLM may generate a different output, making reproduction difficult.
 
 LogitGate solves this with deterministic **Verdict Snapshots**:
 1. When a test fails in CI (with `LOGITGATE_SAVE_FAILURES=1` or `@check(save_snapshot=True)`), LogitGate freezes the exact candidate output, rubric, and telemetry to `.logitgate/failures/fail_<timestamp>_<test>_<id>.json` (and updates `.logitgate/failures/latest.json`).
@@ -369,7 +369,7 @@ if not verdict.passed:
 ---
 
 ### 3. AI Agent & LangGraph Builders (Fast Guardrails & Routing)
-Enforce structured JSON output contracts in **<0.1ms** and perform sub-50ms conditional routing:
+Enforce structured JSON output contracts in **<0.1ms** and perform ~40–90ms conditional routing:
 ```python
 from pydantic import BaseModel
 from logitgate import ContractGate, ChoiceGate
@@ -379,7 +379,7 @@ class ToolCallPayload(BaseModel):
     arguments: dict
     confirm_action: bool
 
-# Layer 0 validates JSON schema instantly; Layer 1 routes intent in ~40ms
+# Layer 0 validates JSON schema in <0.1ms; Layer 1 routes intent in ~40-90ms
 agent_router = (
     ContractGate(json_schema=ToolCallPayload)
     >> ChoiceGate(
@@ -427,7 +427,7 @@ support_transcript = (
     "per our 30-day return policy."
 )
 
-# Evaluates all 3 rubrics in a single batch reusing 100% of candidate KV-cache
+# Evaluates all 3 rubrics in a single batch reusing the shared prompt prefix in KV-cache
 verdicts = evaluator.evaluate_batch(support_transcript, rubrics)
 for r, v in zip(rubrics, verdicts):
     print(f"[{'PASS' if v.passed else 'FAIL'}] P={v.probability:.2f} | {r}")
@@ -438,30 +438,30 @@ for r, v in zip(rubrics, verdicts):
 ## Best Practices: Prompting, Context Length, & Model Sizing
 
 ### 1. Document Context Length & When to Chunk
-- **Zero-Chunking Sweet Spot (Up to 16,000–32,000 Tokens)**: As shown in our [Needle-in-a-Haystack benchmarks](#2-context-length-scaling--needle-in-a-haystack-boundary-200-to-16000-tokens), modern causal transformers (`gemma4`, `qwen2.5`) maintain near-perfect probability separation ($\Delta P > 0.993$) up to **16,000+ tokens** without manual chunking, and sliding-window/MoE architectures scale cleanly to **32k–64k tokens** in VRAM.
+- **Zero-Chunking Sweet Spot (Up to 16,000–32,000 Tokens)**: As shown in our [Needle-in-a-Haystack benchmarks](#2-context-length-scaling--needle-in-a-haystack-boundary-200-to-16000-tokens), modern causal transformers (`gemma4`, `qwen2.5`) maintain strong probability separation ($\Delta P > 0.993$) up to **16,000+ tokens** without manual chunking, and sliding-window/MoE architectures scale cleanly to **32k–64k tokens** in VRAM.
 - **When to Chunk (50,000+ Token Codebases or Books)**: If a document exceeds your model's configured context window (`num_ctx`) or exceeds 32k–50k tokens on a dense attention model, split the document into logical sections or files and call `gate.evaluate(chunk)` on each section independently.
-- **Multi-Rubric KV Sharing (`evaluate_batch`)**: Note that `gate.evaluate_batch(candidate, rubrics)` is designed for evaluating **multiple atomic rubrics against a single candidate artifact** (sharing 100% of the candidate KV-cache across all $K$ rubrics), rather than evaluating multiple documents against one rubric.
+- **Multi-Rubric KV Sharing (`evaluate_batch`)**: Note that `gate.evaluate_batch(candidate, rubrics)` is designed for evaluating **multiple atomic rubrics against a single candidate artifact** (sharing the `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prefix across all $K$ rubrics), rather than evaluating multiple documents against one rubric.
 
 ### 2. Writing Atomic, Observable Rubrics vs. Giant Compound Prompts
-- **Single Observable Property**: Write rubrics that test exactly one clear, falsifiable property (e.g. *"Does the reply refuse to reset passwords without 2FA?"* rather than *"Is the reply polite, compliant with 2FA, formatted as markdown, and under 200 words?"*).
-- **Prefix-Shared Batching**: Instead of one monolithic prompt, pass a list of atomic rubrics to `evaluate_batch(candidate, rubrics)`. Because all rubrics share the candidate prefix, running 4–5 atomic rubrics takes only ~110ms per rubric while eliminating compound attention dilution and giving per-criterion observability.
+- **Single Observable Property**: Write rubrics that test one clear, falsifiable property (e.g. *"Does the reply refuse to reset passwords without 2FA?"* rather than *"Is the reply polite, compliant with 2FA, formatted as markdown, and under 200 words?"*).
+- **Prefix-Shared Batching**: Instead of one monolithic prompt, pass a list of atomic rubrics to `evaluate_batch(candidate, rubrics)`. Because all rubrics share the candidate prefix, running 4–5 atomic rubrics takes ~110ms per rubric while avoiding compound rubric dilution and giving per-criterion observability.
 
 ### 3. Escalation Mechanics: How Symmetric Log-Odds Handle Model Uncertainty
-- **Decisive Signal**: When a model is confident that an artifact passes, both forward ($L_1 = s + b$) and reverse ($L_2 = s - b$) log-odds are positive, yielding calibrated probability $P \ge 0.85$ (fast-path pass, 0 tokens).
-- **Decisive Failure**: When an artifact clearly violates the rubric, both forward and reverse log-odds are negative, yielding $P \le 0.20$ (decisive failure, 0 tokens).
-- **Ambiguity & Escalation**: When small models (e.g. 3B–4B) or complex edge cases yield borderline log-odds (between 0.20 and 0.85), LogitGate flags the item as `AMBIGUOUS` and seamlessly triggers Layer 2 (`JudgeGate`) to perform full chain-of-thought autoregressive critique.
+- **Decisive Signal**: When a model is confident that an artifact passes, both forward ($L_1 = s + b$) and reverse ($L_2 = s - b$) log-odds are positive, yielding calibrated probability $P \ge 0.85$ (fast-path pass, no Layer 2 critique).
+- **Decisive Failure**: When an artifact clearly violates the rubric, both forward and reverse log-odds are negative, yielding $P \le 0.20$ (decisive failure).
+- **Ambiguity & Escalation**: When small models (e.g. 3B–4B) or complex edge cases yield borderline log-odds (between 0.20 and 0.85), LogitGate flags the item as `AMBIGUOUS` and triggers Layer 2 (`JudgeGate`) to generate an autoregressive critique.
 
 ---
 
 ## Research Foundations & Academic Citations
 
-LogitGate synthesizes and builds upon foundational breakthroughs in calibration, logit debiasing, and LLM evaluation:
+LogitGate builds upon established methods in calibration, logit debiasing, and LLM evaluation:
 
-### What is Unique to `LogitGate`
-1. **Zero-Extra-VRAM 3-Layer Cascade**: Uses the existing generator model instance for both gating and diagnostics without loading a dedicated secondary judge model into VRAM.
-2. **Prefix-Preserving KV Compilation (`compile_batch_binary_prompt`)**: Arranges prompts so the candidate artifact and evaluation rubrics form an identical static prefix across forward and reverse debiasing passes, retaining the entire KV-cache across queries.
-3. **Log-Odds Space Symmetric Inversion**: Cancels prior token bias in log-odds space ($\bar{L} = \frac{L_1 + L_2}{2T}$) rather than naive probability averaging, preserving exact ground-truth signal even under extreme pretraining token skew.
-4. **Missing-Token Dynamic Floor**: Bounds unobserved token logprobs using residual probability mass $\min(\min_i \text{logprob}_i, \ln(1 - \sum P_i))$, eliminating distortion from arbitrary $-99.0$ constants.
+### Key Design Decisions in `LogitGate`
+1. **Shared-Model 3-Layer Cascade**: Uses the existing generator model instance for both gating and diagnostics without loading a dedicated secondary judge model into VRAM.
+2. **Prefix-Preserving KV Compilation (`compile_batch_binary_prompt`)**: Arranges prompts so the candidate artifact and evaluation rubrics form an identical static prefix across forward and reverse debiasing passes, retaining the prefix in the KV-cache across queries.
+3. **Log-Odds Space Symmetric Inversion**: Cancels additive prior token bias in log-odds space ($\bar{L} = \frac{L_1 + L_2}{2T}$) rather than probability averaging.
+4. **Missing-Token Dynamic Floor**: Bounds unobserved token logprobs using residual probability mass $\min(\min_i \text{logprob}_i, \ln(1 - \sum P_i))$, avoiding distortion from arbitrary $-99.0$ constants.
 
 ### Foundational Literature Credited
 
@@ -490,7 +490,7 @@ LogitGate synthesizes and builds upon foundational breakthroughs in calibration,
 ```bibtex
 @software{logitgate2026,
   author = {Jason Bradley},
-  title = {LogitGate: Zero-Token Mathematically Debiased LLM Evaluation and Cascaded Routing},
+  title = {LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
   version = {0.1.0},
   url = {https://github.com/jasonbdly/LogitGate},
@@ -545,7 +545,7 @@ Respond with a single character (A or B).
 Verdict:
 ```
 
-Because Pass 1 and Pass 2 share an identical prefix up to `[DECISION MAPPING]`, the entire rubric and candidate context are retained in GPU KV-cache, making Pass 2 near-instantaneous.
+Because Pass 1 and Pass 2 share an identical prefix up to `[DECISION MAPPING]`, the rubric and candidate context remain in the GPU KV-cache so Pass 2 only evaluates the short `[DECISION MAPPING]` suffix.
 
 ---
 
@@ -567,15 +567,15 @@ This bounds missing tokens strictly to the residual unobserved probability mass.
                          ▼
 ┌──────────────────────────────────────────────────┐
 │                   Layer 0:                       │   Syntax / DAG Cycle / Forbidden Import
-│                   ASTGate                        ├─────────────────────────────────────────► [FAIL: 0 tokens, ~0.04ms]
+│                   ASTGate                        ├─────────────────────────────────────────► [FAIL: no LLM call, ~0.04ms]
 └────────────────────────┬─────────────────────────┘
                          │ Passed
                          ▼
 ┌──────────────────────────────────────────────────┐   P >= pass_threshold (>= 0.85)
-│                   Layer 1:                       ├─────────────────────────────────────────► [PASS: 0 tokens, ~40–120ms]
+│                   Layer 1:                       ├─────────────────────────────────────────► [PASS: 0 CoT tokens, ~40–120ms]
 │                  LogitGate                       │
 └────────────────────────┬─────────────────────────┘   P <= fail_threshold (<= 0.20)
-                         │ Ambiguous                   └─────────────────────────────────────► [FAIL: 0 tokens, ~40–120ms]
+                         │ Ambiguous                   └─────────────────────────────────────► [FAIL: 0 CoT tokens, ~40–120ms]
                          ▼
 ┌──────────────────────────────────────────────────┐
 │                   Layer 2:                       │   Escalated Generative Critique
@@ -664,9 +664,9 @@ else:
 
 ---
 
-### 3. Multi-Rubric Batch Evaluation with 100% KV-Cache Sharing
+### 3. Multi-Rubric Batch Evaluation with Shared-Prefix KV Caching
 
-Evaluate multiple rubrics concurrently against the same candidate artifact while preserving 100% of the KV-cache prefix:
+Evaluate multiple rubrics against the same candidate artifact while sharing the `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prefix in the KV-cache:
 
 ```python
 from logitgate import LogitGate

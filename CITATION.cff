@@ -1,16 +1,16 @@
 cff-version: 1.2.0
 message: "If you use LogitGate in your research or production systems, please cite it as below."
-title: "LogitGate: Zero-Token Mathematically Debiased LLM Evaluation and Cascaded Routing"
+title: "LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs"
 version: 0.1.0
 date-released: "2026-11-02"
 license: Apache-2.0
 repository-code: "https://github.com/jasonbdly/LogitGate"
 url: "https://github.com/jasonbdly/LogitGate"
 abstract: >-
-  LogitGate is a lightweight, zero-extra-VRAM, 3-layer cascaded LLM evaluation
-  and routing engine. It eliminates autoregressive judge tokens and position/prior
-  biases through symmetric first-token log-odds calibration, prefix-preserving
-  KV-cache compilation, and deterministic AST verification.
+  LogitGate is a lightweight, 3-layer cascaded LLM evaluation and routing
+  library. It reduces autoregressive judge latency and mitigates token prior
+  and positional biases through symmetric first-token log-odds calibration,
+  shared-prefix KV-cache prompt compilation, and deterministic AST/contract checks.
 authors:
   - family-names: "Bradley"
     given-names: "Jason"

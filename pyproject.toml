@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "logitgate"
 version = "0.1.0"
-description = "The 40-120ms zero-token LLM evaluation and cascaded decision engine. Mathematically debiased first-token logit gates and 3-layer cascaded routing."
+description = "Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
