@@ -1,6 +1,7 @@
 stages:
   - test
   - lint
+  - release
 
 default:
   image: python:3.11-slim
@@ -12,7 +13,7 @@ pytest:
   stage: test
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.10-slim", "3.11-slim", "3.12-slim"]
+      - PYTHON_VERSION: ["3.10-slim", "3.15-slim"]
   image: python:$PYTHON_VERSION
   script:
     - pip install -e ".[test]"
@@ -26,3 +27,110 @@ lint:
     - pip install ruff mypy
     - ruff check src/logitgate tests
     - mypy src/logitgate
+
+release:
+  stage: release
+  image: python:3.11-slim
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  script:
+    - pip install build twine
+    - python -m build
+    - twine check dist/*
+    - |
+      python - <<'EOF'
+      import json
+      import os
+      import re
+      import urllib.error
+      import urllib.request
+      from pathlib import Path
+
+      tag = os.environ["CI_COMMIT_TAG"]
+      version = tag.lstrip("v")
+      api_v4 = os.environ["CI_API_V4_URL"]
+      project_id = os.environ["CI_PROJECT_ID"]
+      job_token = os.environ["CI_JOB_TOKEN"]
+
+      changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+      pattern = rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
+      match = re.search(pattern, changelog, flags=re.DOTALL)
+      notes = match.group(1).strip() if match else f"Release {tag}"
+
+      # 1. Upload built wheel & sdist to GitLab Generic Package Registry
+      asset_links = []
+      for dist_file in sorted(Path("dist").iterdir()):
+          if not dist_file.is_file():
+              continue
+          pkg_url = f"{api_v4}/projects/{project_id}/packages/generic/logitgate/{version}/{dist_file.name}"
+          upload_req = urllib.request.Request(
+              pkg_url,
+              data=dist_file.read_bytes(),
+              headers={
+                  "Content-Type": "application/octet-stream",
+                  "JOB-TOKEN": job_token,
+              },
+              method="PUT",
+          )
+          with urllib.request.urlopen(upload_req) as resp:
+              print(f"Uploaded {dist_file.name} to GitLab Package Registry (HTTP {resp.status})")
+          asset_links.append({
+              "name": dist_file.name,
+              "url": pkg_url,
+              "direct_asset_path": f"/{dist_file.name}",
+              "link_type": "package",
+          })
+
+      # 2. Create or update the GitLab Release with package assets attached
+      releases_url = f"{api_v4}/projects/{project_id}/releases"
+      payload = json.dumps({
+          "name": f"LogitGate {tag}",
+          "tag_name": tag,
+          "description": notes,
+          "assets": {"links": asset_links},
+      }).encode("utf-8")
+      req = urllib.request.Request(
+          releases_url,
+          data=payload,
+          headers={
+              "Content-Type": "application/json",
+              "JOB-TOKEN": job_token,
+          },
+          method="POST",
+      )
+      try:
+          with urllib.request.urlopen(req) as resp:
+              print(f"Created GitLab release for {tag} with {len(asset_links)} package assets (HTTP {resp.status})")
+      except urllib.error.HTTPError as exc:
+          if exc.code == 409:
+              # Release already exists: update description and attach any missing asset links
+              update_url = f"{releases_url}/{tag}"
+              update_req = urllib.request.Request(
+                  update_url,
+                  data=json.dumps({"name": f"LogitGate {tag}", "description": notes}).encode("utf-8"),
+                  headers={"Content-Type": "application/json", "JOB-TOKEN": job_token},
+                  method="PUT",
+              )
+              with urllib.request.urlopen(update_req):
+                  print(f"Updated GitLab release notes for {tag}")
+              links_url = f"{update_url}/assets/links"
+              for link in asset_links:
+                  try:
+                      link_req = urllib.request.Request(
+                          links_url,
+                          data=json.dumps(link).encode("utf-8"),
+                          headers={"Content-Type": "application/json", "JOB-TOKEN": job_token},
+                          method="POST",
+                      )
+                      with urllib.request.urlopen(link_req):
+                          print(f"Attached asset link {link['name']} to existing release {tag}")
+                  except urllib.error.HTTPError as link_exc:
+                      if link_exc.code != 409:
+                          print(f"Asset link {link['name']} status: {link_exc.code}")
+          else:
+              raise
+      EOF
+  artifacts:
+    name: "logitgate-$CI_COMMIT_TAG"
+    paths:
+      - dist/*

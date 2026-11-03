@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PEP 561 Typed](https://img.shields.io/badge/typing-PEP%20561-blueviolet.svg)](src/logitgate/py.typed)
 [![Offline First](https://img.shields.io/badge/offline--first-local--LLM%20ready-brightgreen.svg)](README.md)
-[![CI](https://github.com/jasonbdly/logitgate/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
+[![CI](https://github.com/jasonbdly/LogitGate/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
 **The 40–120ms zero-token LLM evaluation and cascaded decision engine.**
 
@@ -208,10 +208,16 @@ This completely eliminates regex brittleness and guarantees robust verdict extra
 
 ---
 
+### 5. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+
+- **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
+  - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.
+  - **Discrete Routing & Classification (`ChoiceGate`)**: Selecting downstream agent tools, intent buckets, or workflow branches in ~40–90 ms.
+  - **Continuous Rubric Scoring (`ScoreGate`)**: Probability-weighted expected value scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with symmetric scale reversal.
 - **Escalate to Layer 2 (`JudgeGate`) — Autoregressive Generation**:
   - **Multi-Step Deductive Reasoning**: Proof verification or multi-hop logic where conclusions depend on intermediate reasoning steps.
-  - **Complex Symbolic Arithmetic**: Calculations requiring scratchpad calculation or token-by-token recurrence.
-  - **Diagnostic Reporting**: When a human developer or logging pipeline needs an actionable explanation of *why* an artifact failed.
+  - **Complex Symbolic Arithmetic**: Calculations requiring scratchpad calculation or token-by-token recurrence (or route deterministic math checks to Layer 0 `ASTGate` / `ContractGate`).
+  - **Diagnostic Reporting**: When a human developer or logging pipeline needs an actionable explanation of *why* an artifact failed (or replay a CI failure locally via `logitgate explain`).
 
 ---
 
@@ -457,7 +463,7 @@ LogitGate synthesizes and builds upon foundational breakthroughs in calibration,
   title = {LogitGate: Zero-Token Mathematically Debiased LLM Evaluation and Cascaded Routing},
   year = {2026},
   version = {0.1.0},
-  url = {https://github.com/jasonbdly/logitgate},
+  url = {https://github.com/jasonbdly/LogitGate},
   license = {Apache-2.0}
 }
 ```

@@ -4,8 +4,8 @@ title: "LogitGate: Zero-Token Mathematically Debiased LLM Evaluation and Cascade
 version: 0.1.0
 date-released: "2026-11-02"
 license: Apache-2.0
-repository-code: "https://github.com/jasonbdly/logitgate"
-url: "https://github.com/jasonbdly/logitgate"
+repository-code: "https://github.com/jasonbdly/LogitGate"
+url: "https://github.com/jasonbdly/LogitGate"
 abstract: >-
   LogitGate is a lightweight, zero-extra-VRAM, 3-layer cascaded LLM evaluation
   and routing engine. It eliminates autoregressive judge tokens and position/prior

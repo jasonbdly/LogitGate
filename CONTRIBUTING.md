@@ -20,16 +20,16 @@ LogitGate requires **Python 3.10+**.
 ### Clone and Environment Creation
 
 ```bash
-git clone https://github.com/logitgate/logitgate.git
-cd logitgate
+git clone https://github.com/jasonbdly/LogitGate.git
+cd LogitGate
 
 # Create and activate virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install in editable mode with development dependencies
+# Install in editable mode with test dependencies
 pip install --upgrade pip
-pip install -e ".[all]"
+pip install -e ".[test]"
 ```
 
 ---
@@ -44,7 +44,7 @@ Run the full test suite with `pytest`:
 pytest tests -q
 ```
 
-All 60+ unit tests execute in ~0.1s. If your changes introduce new gates or debiasing math, ensure they include comprehensive offline tests using `StubBackend`.
+All 81 unit tests execute in ~0.3s. If your changes introduce new gates or debiasing math, ensure they include comprehensive offline tests using `StubBackend`.
 
 ### Type Checking & Linting
 
@@ -52,9 +52,8 @@ All 60+ unit tests execute in ~0.1s. If your changes introduce new gates or debi
 # Type check with mypy
 mypy src/logitgate
 
-# Lint and format checks
+# Lint checks
 ruff check src/logitgate tests
-ruff format --check src/logitgate tests
 ```
 
 ---
@@ -66,11 +65,11 @@ ruff format --check src/logitgate tests
 All inference backends must inherit from `LogitBackend` (for first-token logits) and optionally `GenerativeBackend` (if supporting Layer 2 generative critique):
 
 ```python
-from logitgate.backends.base import LogitBackend, GenerativeBackend
-from typing import Any, Optional
+from typing import Any
+from logitgate.backends.base import GenerativeBackend, LogitBackend
 
 class MyCustomBackend(LogitBackend, GenerativeBackend):
-    def __init__(self, base_url: str, model: str):
+    def __init__(self, base_url: str, model: str) -> None:
         self.base_url = base_url
         self.model = model
 
@@ -78,12 +77,17 @@ class MyCustomBackend(LogitBackend, GenerativeBackend):
         self,
         prompt: str,
         top_k: int = 10,
-        allowed_tokens: Optional[list[str]] = None,
+        allowed_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         # Return [{'token': 'A', 'logprob': -0.15}, ...]
         ...
 
-    def generate(self, prompt: str) -> tuple[str, int]:
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> tuple[str, int]:
         # Return (critique_text, tokens_generated)
         ...
 
