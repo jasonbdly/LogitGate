@@ -103,30 +103,48 @@ release:
               print(f"Created GitLab release for {tag} with {len(asset_links)} package assets (HTTP {resp.status})")
       except urllib.error.HTTPError as exc:
           if exc.code == 409:
-              # Release already exists: update description and attach any missing asset links
-              update_url = f"{releases_url}/{tag}"
-              update_req = urllib.request.Request(
-                  update_url,
-                  data=json.dumps({"name": f"LogitGate {tag}", "description": notes}).encode("utf-8"),
-                  headers={"Content-Type": "application/json", "JOB-TOKEN": job_token},
-                  method="PUT",
+              # Release already exists: delete and recreate so commit SHA and released_at update cleanly
+              delete_url = f"{releases_url}/{tag}"
+              del_req = urllib.request.Request(
+                  delete_url,
+                  headers={"JOB-TOKEN": job_token},
+                  method="DELETE",
               )
-              with urllib.request.urlopen(update_req):
-                  print(f"Updated GitLab release notes for {tag}")
-              links_url = f"{update_url}/assets/links"
-              for link in asset_links:
-                  try:
-                      link_req = urllib.request.Request(
-                          links_url,
-                          data=json.dumps(link).encode("utf-8"),
-                          headers={"Content-Type": "application/json", "JOB-TOKEN": job_token},
-                          method="POST",
-                      )
-                      with urllib.request.urlopen(link_req):
-                          print(f"Attached asset link {link['name']} to existing release {tag}")
-                  except urllib.error.HTTPError as link_exc:
-                      if link_exc.code != 409:
-                          print(f"Asset link {link['name']} status: {link_exc.code}")
+              try:
+                  with urllib.request.urlopen(del_req):
+                      print(f"Deleted stale GitLab release {tag} to recreate cleanly")
+                  with urllib.request.urlopen(req) as resp:
+                      print(f"Recreated GitLab release for {tag} (HTTP {resp.status})")
+              except urllib.error.HTTPError:
+                  # Fallback if CI_JOB_TOKEN lacks DELETE permission: update description, released_at, and links
+                  from datetime import datetime, timezone
+                  now_iso = datetime.now(timezone.utc).isoformat()
+                  update_req = urllib.request.Request(
+                      delete_url,
+                      data=json.dumps({
+                          "name": f"LogitGate {tag}",
+                          "description": notes,
+                          "released_at": now_iso,
+                      }).encode("utf-8"),
+                      headers={"Content-Type": "application/json", "JOB-TOKEN": job_token},
+                      method="PUT",
+                  )
+                  with urllib.request.urlopen(update_req):
+                      print(f"Updated GitLab release notes and released_at for {tag}")
+                  links_url = f"{delete_url}/assets/links"
+                  for link in asset_links:
+                      try:
+                          link_req = urllib.request.Request(
+                              links_url,
+                              data=json.dumps(link).encode("utf-8"),
+                              headers={"Content-Type": "application/json", "JOB-TOKEN": job_token},
+                              method="POST",
+                          )
+                          with urllib.request.urlopen(link_req):
+                              print(f"Attached asset link {link['name']} to existing release {tag}")
+                      except urllib.error.HTTPError as link_exc:
+                          if link_exc.code != 409:
+                              print(f"Asset link {link['name']} status: {link_exc.code}")
           else:
               raise
       EOF

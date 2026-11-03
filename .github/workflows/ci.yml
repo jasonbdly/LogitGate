@@ -103,8 +103,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-            gh release edit "$GITHUB_REF_NAME" --title "LogitGate $GITHUB_REF_NAME" --notes-file release_notes.md
-          else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "LogitGate $GITHUB_REF_NAME" --notes-file release_notes.md
+            gh release delete "$GITHUB_REF_NAME" --yes
           fi
+          gh release create "$GITHUB_REF_NAME" dist/* --title "LogitGate $GITHUB_REF_NAME" --notes-file release_notes.md --draft=false
