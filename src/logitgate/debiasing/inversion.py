@@ -52,25 +52,31 @@ def compile_batch_binary_prompt(
     rubric_index: int,
     pass_token: str = "A",
     fail_token: str = "B",
-    query_first: bool = True,
+    query_first: bool = False,
     pass_description: str = "The candidate artifact complies fully with the rubric.",
     fail_description: str = "The candidate artifact violates the rubric or has defects.",
 ) -> str:
     """
-    Compiles a prefix-cache-friendly binary evaluation prompt for a multi-rubric batch.
-    Across all 2K passes (forward and reverse for all K rubrics), the prefix containing
-    all rubrics and candidate artifact is 100% byte-identical.
+    Compiles an isolated, prefix-cache-friendly binary evaluation prompt for an individual rubric
+    within a multi-rubric evaluation set.
+
+    Architecture:
+    The candidate artifact forms the shared static prefix:
+        [CANDIDATE ARTIFACT]
+        {candidate}
+    This prefix is 100% byte-identical across ALL K rubrics and across both forward (Pass 1) and
+    reverse (Pass 2) passes, allowing the inference server's KV-cache to retain the candidate tokens
+    across all queries.
+
+    Crucially, each rubric is evaluated in complete isolation: no other rubrics are loaded into the
+    prompt context. This prevents cross-rubric attention leakage and context bloat, scaling
+    consistently whether evaluating 2 rubrics or 500 rubrics.
     """
     if rubric_index < 0 or rubric_index >= len(rubrics):
         raise IndexError(f"rubric_index {rubric_index} out of bounds for rubrics list of size {len(rubrics)}")
 
     cand_str = str(candidate).strip()
-    rubrics_block = "\n".join(f"Rubric #{i + 1}: {r.strip()}" for i, r in enumerate(rubrics))
-
-    if query_first:
-        prefix = f"[EVALUATION RUBRICS]\n{rubrics_block}\n\n[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
-    else:
-        prefix = f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n[EVALUATION RUBRICS]\n{rubrics_block}\n\n"
+    target_rubric = rubrics[rubric_index].strip()
 
     t_pass = pass_token.strip().upper()
     t_fail = fail_token.strip().upper()
@@ -83,13 +89,25 @@ def compile_batch_binary_prompt(
     option_lines = "\n".join(f"{tok}: {mapping[tok]}" for tok in sorted_tokens)
     tokens_str = f"{sorted_tokens[0]} or {sorted_tokens[1]}" if len(sorted_tokens) == 2 else " or ".join(sorted_tokens)
 
-    suffix = (
-        f"[DECISION MAPPING — RUBRIC #{rubric_index + 1}]\n"
-        f"Target Rubric #{rubric_index + 1}: {rubrics[rubric_index].strip()}\n"
-        f"{option_lines}\n"
-        f"Respond with a single character ({tokens_str}) for Rubric #{rubric_index + 1}.\n"
-        f"Verdict:"
-    )
+    if not query_first:
+        prefix = f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+        suffix = (
+            f"[EVALUATION RUBRIC]\n"
+            f"{target_rubric}\n\n"
+            f"[DECISION MAPPING]\n"
+            f"{option_lines}\n"
+            f"Respond with a single character ({tokens_str}).\n"
+            f"Verdict:"
+        )
+    else:
+        prefix = f"[EVALUATION RUBRIC]\n{target_rubric}\n\n[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+        suffix = (
+            f"[DECISION MAPPING]\n"
+            f"{option_lines}\n"
+            f"Respond with a single character ({tokens_str}).\n"
+            f"Verdict:"
+        )
+
     return prefix + suffix
 
 

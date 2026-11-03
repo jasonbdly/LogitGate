@@ -9,6 +9,7 @@ from logitgate.backends.base import (
 from logitgate.backends.llamacpp import LlamaCppBackend
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
+from logitgate.backends.recurrent import RecurrentPyTorchBackend
 from logitgate.cascade import Cascade
 from logitgate.config import (
     LogitGateDefaults,
@@ -73,6 +74,7 @@ __all__ = [
     "LogitGateSystemOneModel",
     "OllamaBackend",
     "OpenAICompatBackend",
+    "RecurrentPyTorchBackend",
     "ScoreGate",
     "StubBackend",
     "Verdict",

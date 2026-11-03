@@ -2,17 +2,17 @@
   "suite_1_multi_domain_24": {
     "gemma4:e4b_gpu": {
       "model": "gemma4:e4b (GPU)",
-      "baseline_time_ms": 19182.5,
-      "baseline_tokens": 1756,
+      "baseline_time_ms": 34946.5,
+      "baseline_tokens": 3323,
       "baseline_accuracy": "24/24 (100.0%)",
-      "cascade_ambig_or_fail_time_ms": 11503.0,
-      "cascade_ambig_or_fail_tokens": 782,
+      "cascade_ambig_or_fail_time_ms": 18773.5,
+      "cascade_ambig_or_fail_tokens": 1504,
       "cascade_ambig_or_fail_accuracy": "23/24 (95.8%)",
-      "cascade_ambig_only_time_ms": 3279.0,
+      "cascade_ambig_only_time_ms": 3286.5,
       "cascade_ambig_only_tokens": 0,
       "cascade_ambig_only_accuracy": "23/24 (95.8%)",
-      "speedup_ambig_only": 5.9,
-      "tokens_saved_ambig_only": 1756,
+      "speedup_ambig_only": 10.6,
+      "tokens_saved_ambig_only": 3323,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
         "l1_decisive": "22/24 (91.7%)",
@@ -22,17 +22,17 @@
     },
     "qwen2.5:14b_gpu": {
       "model": "qwen2.5:14b (GPU)",
-      "baseline_time_ms": 117006.7,
-      "baseline_tokens": 2183,
+      "baseline_time_ms": 138858.1,
+      "baseline_tokens": 2566,
       "baseline_accuracy": "23/24 (95.8%)",
-      "cascade_ambig_or_fail_time_ms": 53046.6,
-      "cascade_ambig_or_fail_tokens": 866,
+      "cascade_ambig_or_fail_time_ms": 57625.2,
+      "cascade_ambig_or_fail_tokens": 941,
       "cascade_ambig_or_fail_accuracy": "23/24 (95.8%)",
-      "cascade_ambig_only_time_ms": 7939.3,
+      "cascade_ambig_only_time_ms": 8160.3,
       "cascade_ambig_only_tokens": 0,
       "cascade_ambig_only_accuracy": "23/24 (95.8%)",
-      "speedup_ambig_only": 14.7,
-      "tokens_saved_ambig_only": 2183,
+      "speedup_ambig_only": 17.0,
+      "tokens_saved_ambig_only": 2566,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
         "l1_decisive": "22/24 (91.7%)",
@@ -42,13 +42,13 @@
     },
     "qwen2.5-coder:14b_gpu": {
       "model": "qwen2.5-coder:14b (GPU)",
-      "baseline_time_ms": 132498.2,
+      "baseline_time_ms": 133724.5,
       "baseline_tokens": 2658,
       "baseline_accuracy": "24/24 (100.0%)",
-      "cascade_ambig_or_fail_time_ms": 65147.1,
+      "cascade_ambig_or_fail_time_ms": 65616.0,
       "cascade_ambig_or_fail_tokens": 1174,
       "cascade_ambig_or_fail_accuracy": "23/24 (95.8%)",
-      "cascade_ambig_only_time_ms": 11743.3,
+      "cascade_ambig_only_time_ms": 11786.2,
       "cascade_ambig_only_tokens": 80,
       "cascade_ambig_only_accuracy": "23/24 (95.8%)",
       "speedup_ambig_only": 11.3,
@@ -62,33 +62,16 @@
     },
     "gemma4:e4b_cpu": {
       "model": "gemma4:e4b (Pure CPU)",
-      "baseline_time_ms": 142780.6,
+      "baseline_time_ms": 143733.1,
       "baseline_tokens": 1086,
       "baseline_accuracy": "24/24 (100.0%)",
-      "cascade_ambig_or_fail_time_ms": 143669.7,
+      "cascade_ambig_or_fail_time_ms": 144976.4,
       "cascade_ambig_or_fail_tokens": 485,
       "cascade_ambig_or_fail_accuracy": "23/24 (95.8%)",
-      "cascade_ambig_only_time_ms": 103426.7,
+      "cascade_ambig_only_time_ms": 104792.0,
       "cascade_ambig_only_tokens": 0,
       "cascade_ambig_only_accuracy": "23/24 (95.8%)",
       "speedup_ambig_only": 1.4,
-      "tokens_saved_ambig_only": 1086,
-      "layer_resolution": {
-        "l0_ast": "2/24 (8.3%)",
-        "l1_decisive": "22/24 (91.7%)",
-        "l2_escalated": "0/24 (0.0%)",
-        "l0_plus_l1_rate": "24/24 (100.0%)"
-      }
-    },
-    "gemma4:e4b_cpu_fast_triage": {
-      "model": "gemma4:e4b (Pure CPU, fast_triage 1-pass)",
-      "baseline_time_ms": 142780.6,
-      "baseline_tokens": 1086,
-      "baseline_accuracy": "24/24 (100.0%)",
-      "cascade_ambig_only_time_ms": 51287.2,
-      "cascade_ambig_only_tokens": 0,
-      "cascade_ambig_only_accuracy": "23/24 (95.8%)",
-      "speedup_ambig_only": 2.8,
       "tokens_saved_ambig_only": 1086,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
@@ -293,7 +276,7 @@
         "total": 8,
         "l1_accuracy": "7/8 (87.5%)",
         "l1_false_pass": 1,
-        "l1_escalated": 2,
+        "l1_escalated": 0,
         "casc_correct": 7,
         "casc_accuracy": "7/8 (87.5%)",
         "items": [
@@ -301,9 +284,9 @@
             "id": "tier_b_pass_1",
             "expected": true,
             "probs": [
-              0.9999,
-              0.9998,
-              0.9995,
+              1.0,
+              1.0,
+              1.0,
               1.0
             ],
             "l1_correct": true,
@@ -349,10 +332,10 @@
             "id": "tier_b_fail_1_mutable_list_default",
             "expected": false,
             "probs": [
-              0.7905,
-              0.9998,
-              0.7153,
-              0.0
+              0.9902,
+              1.0,
+              1.0,
+              0.0714
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -361,9 +344,9 @@
             "id": "tier_b_fail_2_missing_docstring_args",
             "expected": false,
             "probs": [
-              0.9923,
-              0.0001,
-              0.0227,
+              1.0,
+              0.1966,
+              0.9999,
               1.0
             ],
             "l1_correct": true,
@@ -375,7 +358,7 @@
             "probs": [
               1.0,
               1.0,
-              1.0,
+              0.9999,
               1.0
             ],
             "l1_correct": false,
@@ -385,9 +368,9 @@
             "id": "tier_b_fail_4_bare_except_and_mutable_dict",
             "expected": false,
             "probs": [
-              0.2749,
-              0.9991,
-              0.0087,
+              1.0,
+              1.0,
+              0.9997,
               0.0
             ],
             "l1_correct": true,
@@ -778,11 +761,11 @@
         ]
       },
       "tier_b_atomic": {
-        "l1_correct": 7,
+        "l1_correct": 6,
         "total": 8,
-        "l1_accuracy": "7/8 (87.5%)",
+        "l1_accuracy": "6/8 (75.0%)",
         "l1_false_pass": 1,
-        "l1_escalated": 0,
+        "l1_escalated": 1,
         "casc_correct": 7,
         "casc_accuracy": "7/8 (87.5%)",
         "items": [
@@ -839,8 +822,8 @@
             "expected": false,
             "probs": [
               1.0,
-              0.9999,
-              0.0,
+              1.0,
+              1.0,
               0.0
             ],
             "l1_correct": true,
@@ -851,11 +834,11 @@
             "expected": false,
             "probs": [
               1.0,
-              0.0,
+              0.5022,
               1.0,
               1.0
             ],
-            "l1_correct": true,
+            "l1_correct": false,
             "casc_correct": true
           },
           {
@@ -875,8 +858,8 @@
             "expected": false,
             "probs": [
               1.0,
-              0.9982,
-              0.999,
+              1.0,
+              1.0,
               0.0
             ],
             "l1_correct": true,
@@ -1270,19 +1253,19 @@
         "l1_correct": 7,
         "total": 8,
         "l1_accuracy": "7/8 (87.5%)",
-        "l1_false_pass": 0,
-        "l1_escalated": 5,
-        "casc_correct": 8,
-        "casc_accuracy": "8/8 (100.0%)",
+        "l1_false_pass": 1,
+        "l1_escalated": 2,
+        "casc_correct": 7,
+        "casc_accuracy": "7/8 (87.5%)",
         "items": [
           {
             "id": "tier_b_pass_1",
             "expected": true,
             "probs": [
-              0.9779,
-              0.9478,
-              0.825,
-              0.9612
+              0.9025,
+              0.9021,
+              0.951,
+              0.9785
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1291,10 +1274,10 @@
             "id": "tier_b_pass_2",
             "expected": true,
             "probs": [
-              0.9944,
-              0.9822,
-              0.9446,
-              0.9646
+              0.9875,
+              0.967,
+              0.9873,
+              0.9937
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1303,10 +1286,10 @@
             "id": "tier_b_pass_3",
             "expected": true,
             "probs": [
-              0.9907,
-              0.9695,
-              0.9372,
-              0.9451
+              0.9766,
+              0.9505,
+              0.9596,
+              0.9804
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1315,10 +1298,10 @@
             "id": "tier_b_pass_4",
             "expected": true,
             "probs": [
-              0.9927,
-              0.9724,
-              0.9121,
-              0.9527
+              0.9962,
+              0.9793,
+              0.9925,
+              0.994
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1327,10 +1310,10 @@
             "id": "tier_b_fail_1_mutable_list_default",
             "expected": false,
             "probs": [
-              0.065,
-              0.5937,
-              0.0649,
-              0.0062
+              0.866,
+              0.913,
+              0.8492,
+              0.0397
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1339,10 +1322,10 @@
             "id": "tier_b_fail_2_missing_docstring_args",
             "expected": false,
             "probs": [
-              0.9739,
-              0.1145,
-              0.6734,
-              0.9405
+              0.9748,
+              0.0992,
+              0.975,
+              0.9914
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1351,22 +1334,22 @@
             "id": "tier_b_fail_3_missing_return_annotation",
             "expected": false,
             "probs": [
-              0.9912,
-              0.9687,
-              0.8063,
-              0.9418
+              0.9934,
+              0.9714,
+              0.9739,
+              0.992
             ],
             "l1_correct": false,
-            "casc_correct": true
+            "casc_correct": false
           },
           {
             "id": "tier_b_fail_4_bare_except_and_mutable_dict",
             "expected": false,
             "probs": [
-              0.1833,
-              0.7869,
-              0.2205,
-              0.0154
+              0.7676,
+              0.9399,
+              0.8691,
+              0.1065
             ],
             "l1_correct": true,
             "casc_correct": true
@@ -1563,7 +1546,7 @@
       },
       "summary_32": {
         "cascade_compound_b": "29/32 (90.6%)",
-        "cascade_atomic_b": "30/32 (93.8%)"
+        "cascade_atomic_b": "29/32 (90.6%)"
       }
     },
     "gemma4:26b": {
@@ -1756,13 +1739,13 @@
         ]
       },
       "tier_b_atomic": {
-        "l1_correct": 8,
+        "l1_correct": 7,
         "total": 8,
-        "l1_accuracy": "8/8 (100.0%)",
-        "l1_false_pass": 0,
+        "l1_accuracy": "7/8 (87.5%)",
+        "l1_false_pass": 1,
         "l1_escalated": 0,
-        "casc_correct": 8,
-        "casc_accuracy": "8/8 (100.0%)",
+        "casc_correct": 7,
+        "casc_accuracy": "7/8 (87.5%)",
         "items": [
           {
             "id": "tier_b_pass_1",
@@ -1842,11 +1825,11 @@
             "probs": [
               1.0,
               1.0,
-              0.0,
+              1.0,
               1.0
             ],
-            "l1_correct": true,
-            "casc_correct": true
+            "l1_correct": false,
+            "casc_correct": false
           },
           {
             "id": "tier_b_fail_4_bare_except_and_mutable_dict",
@@ -2052,7 +2035,7 @@
       },
       "summary_32": {
         "cascade_compound_b": "30/32 (93.8%)",
-        "cascade_atomic_b": "30/32 (93.8%)"
+        "cascade_atomic_b": "29/32 (90.6%)"
       }
     },
     "gemma4:31b": {
@@ -2245,13 +2228,13 @@
         ]
       },
       "tier_b_atomic": {
-        "l1_correct": 8,
+        "l1_correct": 7,
         "total": 8,
-        "l1_accuracy": "8/8 (100.0%)",
-        "l1_false_pass": 0,
+        "l1_accuracy": "7/8 (87.5%)",
+        "l1_false_pass": 1,
         "l1_escalated": 0,
-        "casc_correct": 8,
-        "casc_accuracy": "8/8 (100.0%)",
+        "casc_correct": 7,
+        "casc_accuracy": "7/8 (87.5%)",
         "items": [
           {
             "id": "tier_b_pass_1",
@@ -2331,11 +2314,11 @@
             "probs": [
               1.0,
               1.0,
-              0.0,
+              1.0,
               1.0
             ],
-            "l1_correct": true,
-            "casc_correct": true
+            "l1_correct": false,
+            "casc_correct": false
           },
           {
             "id": "tier_b_fail_4_bare_except_and_mutable_dict",
@@ -2541,7 +2524,7 @@
       },
       "summary_32": {
         "cascade_compound_b": "30/32 (93.8%)",
-        "cascade_atomic_b": "30/32 (93.8%)"
+        "cascade_atomic_b": "29/32 (90.6%)"
       }
     }
   },
@@ -2549,59 +2532,59 @@
     "gemma4:e4b": {
       "choice_1p_accuracy": "6/6 (100.0%)",
       "choice_2p_accuracy": "6/6 (100.0%)",
-      "choice_2p_latency_ms": "117.9 \u00b1 2.4 ms",
+      "choice_2p_latency_ms": "116.9 \u00b1 1.7 ms",
       "score_high_mean": 4.96,
       "score_medium_mean": 2.15,
       "score_low_mean": 1.01,
       "score_pairwise_rank_accuracy": "6/6 (100.0%)",
-      "score_2p_latency_ms": "167.8 \u00b1 1.2 ms"
+      "score_2p_latency_ms": "167.6 \u00b1 1.1 ms"
     },
     "qwen2.5:14b": {
       "choice_1p_accuracy": "6/6 (100.0%)",
       "choice_2p_accuracy": "6/6 (100.0%)",
-      "choice_2p_latency_ms": "319.1 \u00b1 2.4 ms",
+      "choice_2p_latency_ms": "318.5 \u00b1 3.0 ms",
       "score_high_mean": 5.0,
       "score_medium_mean": 2.96,
       "score_low_mean": 1.0,
       "score_pairwise_rank_accuracy": "6/6 (100.0%)",
-      "score_2p_latency_ms": "492.7 \u00b1 7.7 ms"
+      "score_2p_latency_ms": "499.0 \u00b1 12.2 ms"
     },
     "qwen2.5-coder:14b": {
       "choice_1p_accuracy": "6/6 (100.0%)",
       "choice_2p_accuracy": "6/6 (100.0%)",
-      "choice_2p_latency_ms": "297.2 \u00b1 3.7 ms",
+      "choice_2p_latency_ms": "297.4 \u00b1 4.3 ms",
       "score_high_mean": 4.28,
       "score_medium_mean": 2.61,
       "score_low_mean": 1.43,
       "score_pairwise_rank_accuracy": "6/6 (100.0%)",
-      "score_2p_latency_ms": "446.0 \u00b1 16.9 ms"
+      "score_2p_latency_ms": "451.2 \u00b1 14.5 ms"
     },
     "gemma4:26b": {
       "choice_1p_accuracy": "6/6 (100.0%)",
       "choice_2p_accuracy": "6/6 (100.0%)",
-      "choice_2p_latency_ms": "101.4 \u00b1 4.3 ms",
+      "choice_2p_latency_ms": "104.0 \u00b1 1.1 ms",
       "score_high_mean": 5.0,
       "score_medium_mean": 1.98,
       "score_low_mean": 1.0,
       "score_pairwise_rank_accuracy": "6/6 (100.0%)",
-      "score_2p_latency_ms": "134.3 \u00b1 1.6 ms"
+      "score_2p_latency_ms": "139.1 \u00b1 2.3 ms"
     },
     "gemma4:31b": {
       "choice_1p_accuracy": "6/6 (100.0%)",
       "choice_2p_accuracy": "6/6 (100.0%)",
-      "choice_2p_latency_ms": "232.2 \u00b1 3.0 ms",
+      "choice_2p_latency_ms": "237.2 \u00b1 3.8 ms",
       "score_high_mean": 5.0,
       "score_medium_mean": 1.64,
       "score_low_mean": 1.0,
       "score_pairwise_rank_accuracy": "6/6 (100.0%)",
-      "score_2p_latency_ms": "342.9 \u00b1 3.6 ms"
+      "score_2p_latency_ms": "349.1 \u00b1 4.7 ms"
     }
   },
   "suite_4_diverse_haystack": {
     "gemma4:e4b": [
       {
         "tier": "Short (~200 tok)",
-        "warm_latency_ms": 280.1,
+        "warm_latency_ms": 303.6,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2609,7 +2592,7 @@
       },
       {
         "tier": "Medium (~1,500 tok)",
-        "warm_latency_ms": 467.9,
+        "warm_latency_ms": 483.5,
         "p_compliant": 0.9985,
         "p_violating": 0.0,
         "delta_p": 0.9985,
@@ -2617,7 +2600,7 @@
       },
       {
         "tier": "Long (~4,500 tok)",
-        "warm_latency_ms": 1128.1,
+        "warm_latency_ms": 1141.3,
         "p_compliant": 0.9506,
         "p_violating": 0.0,
         "delta_p": 0.9506,
@@ -2625,7 +2608,7 @@
       },
       {
         "tier": "Very Long (~8,000 tok)",
-        "warm_latency_ms": 1985.5,
+        "warm_latency_ms": 2013.5,
         "p_compliant": 0.9622,
         "p_violating": 0.0001,
         "delta_p": 0.9621,
@@ -2633,7 +2616,7 @@
       },
       {
         "tier": "Massive (~16,000 tok)",
-        "warm_latency_ms": 4044.0,
+        "warm_latency_ms": 4059.7,
         "p_compliant": 0.9448,
         "p_violating": 0.0,
         "delta_p": 0.9448,
@@ -2643,7 +2626,7 @@
     "qwen2.5:14b": [
       {
         "tier": "Short (~200 tok)",
-        "warm_latency_ms": 434.6,
+        "warm_latency_ms": 445.6,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2651,7 +2634,7 @@
       },
       {
         "tier": "Medium (~1,500 tok)",
-        "warm_latency_ms": 1366.2,
+        "warm_latency_ms": 1408.3,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2659,7 +2642,7 @@
       },
       {
         "tier": "Long (~4,500 tok)",
-        "warm_latency_ms": 2611.5,
+        "warm_latency_ms": 2649.4,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2667,7 +2650,7 @@
       },
       {
         "tier": "Very Long (~8,000 tok)",
-        "warm_latency_ms": 4774.7,
+        "warm_latency_ms": 4833.9,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2675,7 +2658,7 @@
       },
       {
         "tier": "Massive (~16,000 tok)",
-        "warm_latency_ms": 11122.8,
+        "warm_latency_ms": 11343.3,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2685,7 +2668,7 @@
     "gemma4:26b": [
       {
         "tier": "Short (~200 tok)",
-        "warm_latency_ms": 207.2,
+        "warm_latency_ms": 204.4,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2693,7 +2676,7 @@
       },
       {
         "tier": "Medium (~1,500 tok)",
-        "warm_latency_ms": 524.6,
+        "warm_latency_ms": 549.7,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2701,7 +2684,7 @@
       },
       {
         "tier": "Long (~4,500 tok)",
-        "warm_latency_ms": 827.6,
+        "warm_latency_ms": 841.1,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2709,7 +2692,7 @@
       },
       {
         "tier": "Very Long (~8,000 tok)",
-        "warm_latency_ms": 1229.7,
+        "warm_latency_ms": 1272.7,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2717,7 +2700,7 @@
       },
       {
         "tier": "Massive (~16,000 tok)",
-        "warm_latency_ms": 2118.3,
+        "warm_latency_ms": 2071.5,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2727,7 +2710,7 @@
     "gemma4:31b": [
       {
         "tier": "Short (~200 tok)",
-        "warm_latency_ms": 738.0,
+        "warm_latency_ms": 798.6,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2735,7 +2718,7 @@
       },
       {
         "tier": "Medium (~1,500 tok)",
-        "warm_latency_ms": 1807.9,
+        "warm_latency_ms": 1760.8,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2743,7 +2726,7 @@
       },
       {
         "tier": "Long (~4,500 tok)",
-        "warm_latency_ms": 2858.9,
+        "warm_latency_ms": 2903.3,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2751,7 +2734,7 @@
       },
       {
         "tier": "Very Long (~8,000 tok)",
-        "warm_latency_ms": 4406.8,
+        "warm_latency_ms": 4430.1,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,
@@ -2759,7 +2742,7 @@
       },
       {
         "tier": "Massive (~16,000 tok)",
-        "warm_latency_ms": 7621.9,
+        "warm_latency_ms": 7652.7,
         "p_compliant": 1.0,
         "p_violating": 0.0,
         "delta_p": 1.0,

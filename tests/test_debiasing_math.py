@@ -116,8 +116,8 @@ def test_compile_binary_prompt_identical_static_prefix():
 
 def test_compile_batch_binary_prompt_identical_static_prefix():
     """
-    Verifies that compile_batch_binary_prompt preserves a 100% byte-identical
-    [EVALUATION RUBRICS] + [CANDIDATE ARTIFACT] prefix across all 2K passes.
+    Verifies that compile_batch_binary_prompt preserves an isolated 100% byte-identical
+    [CANDIDATE ARTIFACT] prefix across all 2K passes while maintaining strict rubric isolation.
     """
     rubrics = [
         "Rubric 1: Functions must have docstrings.",
@@ -132,20 +132,24 @@ def test_compile_batch_binary_prompt_identical_static_prefix():
         p1 = compile_batch_binary_prompt(rubrics, candidate, rubric_index=idx, pass_token="A", fail_token="B")
         # Pass 2: B=Pass, A=Fail
         p2 = compile_batch_binary_prompt(rubrics, candidate, rubric_index=idx, pass_token="B", fail_token="A")
+
+        # Rubric Isolation: Prompt must contain only its target rubric, never other rubrics
+        for other_idx, other_r in enumerate(rubrics):
+            if other_idx != idx:
+                assert other_r not in p1, f"Rubric {other_idx} leaked into prompt for rubric {idx}"
+                assert other_r not in p2, f"Rubric {other_idx} leaked into prompt for rubric {idx}"
+
         prompts.extend([p1, p2])
 
     assert len(prompts) == 6
-    marker = "[DECISION MAPPING — RUBRIC #"
+    marker = "[EVALUATION RUBRIC]"
     prefixes = [p.split(marker)[0] for p in prompts]
 
     # All 6 prefixes across all 3 rubrics and both passes must be 100% byte-identical
     for pref in prefixes[1:]:
         assert pref == prefixes[0]
 
-    assert "[EVALUATION RUBRICS]" in prefixes[0]
     assert "[CANDIDATE ARTIFACT]" in prefixes[0]
-    for r in rubrics:
-        assert r in prefixes[0]
     assert candidate in prefixes[0]
 
     # Out-of-bounds raises IndexError
@@ -171,7 +175,7 @@ def test_batch_evaluate_prompts_byte_identical_prefix_math():
     assert len(verdicts) == 3
     assert len(backend.prompt_log) == 6
 
-    marker = "[DECISION MAPPING — RUBRIC #"
+    marker = "[EVALUATION RUBRIC]"
     prefixes = [p.split(marker)[0] for p in backend.prompt_log]
     for pref in prefixes[1:]:
         assert pref == prefixes[0]
@@ -198,7 +202,7 @@ async def test_batch_aevaluate_prompts_byte_identical_prefix_math():
     assert len(verdicts) == 3
     assert len(backend.prompt_log) == 6
 
-    marker = "[DECISION MAPPING — RUBRIC #"
+    marker = "[EVALUATION RUBRIC]"
     prefixes = [p.split(marker)[0] for p in backend.prompt_log]
     for pref in prefixes[1:]:
         assert pref == prefixes[0]

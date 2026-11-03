@@ -228,6 +228,15 @@ def resolve_logit_backend(
             effective_model_opt = model or (parsed.path.lstrip("/") if parsed.path else None)
             return LlamaCppBackend(model=effective_model_opt, **kwargs)
 
+    if spec.startswith("recurrent://") or spec == "recurrent":
+        from logitgate.backends.recurrent import RecurrentPyTorchBackend
+        if spec.startswith("recurrent://"):
+            parsed_rec = urlparse(spec)
+            target_model = model or (f"{parsed_rec.netloc}{parsed_rec.path}" if parsed_rec.netloc else None) or "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+        else:
+            target_model = model or "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+        return RecurrentPyTorchBackend(model_name=target_model, **kwargs)
+
     # Fallback to Ollama or Stub
     if "stub" in spec:
         return StubBackend(**kwargs)

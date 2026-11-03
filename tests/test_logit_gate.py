@@ -151,15 +151,12 @@ def test_logit_gate_batch_evaluate_prefix_cache_sharing():
     assert len(stub.prompt_log) == 6
 
     # Verify byte-identical prefix across all 6 prompts
-    marker = "[DECISION MAPPING — RUBRIC #"
+    marker = "[EVALUATION RUBRIC]"
     prefixes = [p.split(marker)[0] for p in stub.prompt_log]
     for pref in prefixes[1:]:
         assert pref == prefixes[0]
-    assert "[EVALUATION RUBRICS]" in prefixes[0]
     assert "[CANDIDATE ARTIFACT]" in prefixes[0]
     assert candidate in prefixes[0]
-    for r in rubrics:
-        assert r in prefixes[0]
 
 
 @pytest.mark.asyncio
@@ -181,7 +178,7 @@ async def test_logit_gate_batch_aevaluate_prefix_cache_sharing():
     assert len(verdicts) == 3
     assert len(stub.prompt_log) == 6
 
-    marker = "[DECISION MAPPING — RUBRIC #"
+    marker = "[EVALUATION RUBRIC]"
     prefixes = [p.split(marker)[0] for p in stub.prompt_log]
     for pref in prefixes[1:]:
         assert pref == prefixes[0]
@@ -384,7 +381,7 @@ async def test_deepeval_system_one_multi_question_batching():
     assert "q1" in answers.nouls
     assert "q2" in answers.nouls
     assert len(backend.prompt_log) == 4  # 2 questions * 2 passes
-    marker = "[DECISION MAPPING — RUBRIC #"
+    marker = "[EVALUATION RUBRIC]"
     prefixes = [p.split(marker)[0] for p in backend.prompt_log]
     for pref in prefixes[1:]:
         assert pref == prefixes[0]

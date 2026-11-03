@@ -736,3 +736,75 @@ def test_cli_explain_json_and_human(tmp_path: Any, capsys: pytest.CaptureFixture
         str(tmp_path / "nonexistent"),
     ])
     assert code3 == 1
+
+
+# ---------------------------------------------------------------------------
+# RecurrentPyTorchBackend (Elastic Layer Looping / Dory) Tests
+# ---------------------------------------------------------------------------
+
+def test_recurrent_backend_validation_and_resolution() -> None:
+    from logitgate.backends.recurrent import RecurrentPyTorchBackend
+
+    # Invalid num_loops
+    with pytest.raises(ValueError, match="num_loops must be >= 1"):
+        RecurrentPyTorchBackend(num_loops=0)
+
+    # Resolution via URI
+    backend = resolve_logit_backend("recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16", num_loops=4)
+    assert isinstance(backend, RecurrentPyTorchBackend)
+    assert backend.model_name == "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+    assert backend.num_loops == 4
+    assert "num_loops=4" in repr(backend)
+
+
+def test_recurrent_backend_mock_inference() -> None:
+    from logitgate.backends.recurrent import RecurrentPyTorchBackend
+
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+
+    # Mock tokenizer output
+    mock_inputs = {"input_ids": MagicMock()}
+    mock_tokenizer.return_value = mock_inputs
+    mock_tokenizer.encode.side_effect = lambda tok, **kwargs: [65] if "A" in tok else [66]
+    mock_tokenizer.decode.side_effect = lambda ids, **kwargs: "A" if ids == [65] else "B"
+
+    # Mock model forward output with logits
+    mock_outputs = MagicMock()
+    # 100 vocab logits where index 65 has high value, 66 has lower value
+    fake_logits = [0.0] * 100
+    fake_logits[65] = 4.0
+    fake_logits[66] = -1.0
+    mock_outputs.logits = [[fake_logits]]
+    mock_model.return_value = mock_outputs
+
+    backend = RecurrentPyTorchBackend(
+        model_name="nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+        num_loops=3,
+        model=mock_model,
+        tokenizer=mock_tokenizer,
+        device="cpu",
+    )
+
+    logprobs = backend.query_top_logprobs("Test prompt", allowed_tokens=["A", "B"])
+    assert len(logprobs) == 2
+    assert logprobs[0]["token"] == "A"
+    assert logprobs[1]["token"] == "B"
+    assert logprobs[0]["logprob"] > logprobs[1]["logprob"]
+
+    # Verify num_loops parameter was passed to model forward
+    mock_model.assert_called_once()
+    _, call_kwargs = mock_model.call_args
+    assert call_kwargs.get("num_loops") == 3
+
+    # Mock generation
+    mock_gen_out = MagicMock()
+    mock_gen_out.__getitem__.return_value = [65, 66]
+    mock_model.generate.return_value = mock_gen_out
+    mock_inputs["input_ids"].shape = [1, 5]
+
+    text, _n_tok = backend.generate("Prompt")
+    assert isinstance(text, str)
+    _, gen_kwargs = mock_model.generate.call_args
+    assert gen_kwargs.get("num_loops") == 3
+

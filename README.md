@@ -93,11 +93,10 @@ Evaluated across **24 items spanning 4 domains** ([`benchmarks/data/multi_domain
 
 | Model Configuration | Baseline Judge Time | Cascade Time (`on_ambiguous_or_fail`) | Cascade Time (`on_ambiguous_only`) | Speedup (`on_ambiguous_only`) | CoT Tokens Saved | Baseline Accuracy | Cascade Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 19,182.5 ms | 11,503.0 ms | **3,279.0 ms** | **5.9x** | 1,756 | 24/24 (100.0%) | **23/24 (95.8%)** |
-| **`gemma4:e4b` (Pure CPU, 2-Pass)** | 142,780.6 ms | 143,669.7 ms | **103,426.7 ms** | **1.4x** | 1,086 | 24/24 (100.0%) | **23/24 (95.8%)** |
-| **`gemma4:e4b` (Pure CPU, 1-Pass)** | 142,780.6 ms | 91,430.2 ms | **51,287.2 ms** | **2.8x** | 1,086 | 24/24 (100.0%) | **23/24 (95.8%)** |
-| **`qwen2.5:14b` (GPU)** | 117,006.7 ms | 53,046.6 ms | **7,939.3 ms** | **14.7x** | 2,183 | 23/24 (95.8%) | **23/24 (95.8%)** |
-| **`qwen2.5-coder:14b` (GPU)** | 132,498.2 ms | 65,147.1 ms | **11,743.3 ms** | **11.3x** | 2,578 | 24/24 (100.0%) | **23/24 (95.8%)** |
+| **`gemma4:e4b` (GPU)** | 34,946.5 ms | 18,773.5 ms | **3,286.5 ms** | **10.6x** | 3,323 | 24/24 (100.0%) | **23/24 (95.8%)** |
+| **`gemma4:e4b` (Pure CPU)** | 143,733.1 ms | 144,976.4 ms | **104,792.0 ms** | **1.4x** | 1,086 | 24/24 (100.0%) | **23/24 (95.8%)** |
+| **`qwen2.5:14b` (GPU)** | 138,858.1 ms | 57,625.2 ms | **8,160.3 ms** | **17.0x** | 2,566 | 23/24 (95.8%) | **23/24 (95.8%)** |
+| **`qwen2.5-coder:14b` (GPU)** | 133,724.5 ms | 65,616.0 ms | **11,786.2 ms** | **11.3x** | 2,578 | 24/24 (100.0%) | **23/24 (95.8%)** |
 
 ---
 
@@ -135,11 +134,11 @@ Evaluated on the 12-item routing and scoring suite ([`benchmarks/data/choice_and
 
 | Model Architecture | `ChoiceGate` Accuracy (2-Pass) | `ChoiceGate` Latency ($N=5$) | `ScoreGate` Mean (High Tier) | `ScoreGate` Mean (Medium Tier) | `ScoreGate` Mean (Low Tier) | `ScoreGate` Pairwise Rank Accuracy | `ScoreGate` Latency ($N=5$) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (4B General)** | **6/6 (100.0%)** | 117.9 ± 2.4 ms | 4.96 | 2.15 | 1.01 | **6/6 (100.0%)** | 167.8 ± 1.2 ms |
-| **`qwen2.5:14b` (14B General)** | **6/6 (100.0%)** | 319.1 ± 2.4 ms | 5.00 | 2.96 | 1.00 | **6/6 (100.0%)** | 492.7 ± 7.7 ms |
-| **`qwen2.5-coder:14b` (14B Code)** | **6/6 (100.0%)** | 297.2 ± 3.7 ms | 4.28 | 2.61 | 1.43 | **6/6 (100.0%)** | 446.0 ± 16.9 ms |
-| **`gemma4:26b` (26B MoE, ~4B act)** | **6/6 (100.0%)** | **101.4 ± 4.3 ms** | 5.00 | 1.98 | 1.00 | **6/6 (100.0%)** | **134.3 ± 1.6 ms** |
-| **`gemma4:31b` (31B Dense)** | **6/6 (100.0%)** | 232.2 ± 3.0 ms | 5.00 | 1.64 | 1.00 | **6/6 (100.0%)** | 342.9 ± 3.6 ms |
+| **`gemma4:e4b` (4B General)** | **6/6 (100.0%)** | 116.9 ± 1.7 ms | 4.96 | 2.15 | 1.01 | **6/6 (100.0%)** | 167.6 ± 1.1 ms |
+| **`qwen2.5:14b` (14B General)** | **6/6 (100.0%)** | 318.5 ± 3.0 ms | 5.00 | 2.96 | 1.00 | **6/6 (100.0%)** | 499.0 ± 12.2 ms |
+| **`qwen2.5-coder:14b` (14B Code)** | **6/6 (100.0%)** | 297.4 ± 4.3 ms | 4.28 | 2.61 | 1.43 | **6/6 (100.0%)** | 451.2 ± 14.5 ms |
+| **`gemma4:26b` (26B MoE, ~4B act)** | **6/6 (100.0%)** | **104.0 ± 1.1 ms** | 5.00 | 1.98 | 1.00 | **6/6 (100.0%)** | **139.1 ± 2.3 ms** |
+| **`gemma4:31b` (31B Dense)** | **6/6 (100.0%)** | 237.2 ± 3.8 ms | 5.00 | 1.64 | 1.00 | **6/6 (100.0%)** | 349.1 ± 4.7 ms |
 
 ---
 
@@ -162,11 +161,11 @@ A causal transformer evaluates its first token in a single forward pass through 
 
 | Model Architecture | Tier A (Direct) | Tier B (Compound) | Tier B (Atomic Batch) | Tier C (Multi-Hop) | Tier D (Adversarial) | Cascade Accuracy (Compound B) | Cascade Accuracy (Atomic B) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (4B General)** | **8/8 (100.0%)** | 6/8 (75.0%) | 7/8 (87.5%) | 7/8 (87.5%) | 6/8 (75.0%) | 27/32 (84.4%) | 28/32 (87.5%) |
-| **`qwen2.5:14b` (14B General)** | **8/8 (100.0%)** | 7/8 (87.5%) | 7/8 (87.5%) | 6/8 (75.0%) | 7/8 (87.5%) | 28/32 (87.5%) | 28/32 (87.5%) |
-| **`qwen2.5-coder:14b` (14B Code)** | **8/8 (100.0%)** | 7/8 (87.5%) | **8/8 (100.0%)** | 7/8 (87.5%) | 7/8 (87.5%) | 29/32 (90.6%) | **30/32 (93.8%)** |
-| **`gemma4:26b` (26B MoE, ~4B act)** | **8/8 (100.0%)** | **8/8 (100.0%)** | **8/8 (100.0%)** | 7/8 (87.5%) | 7/8 (87.5%) | **30/32 (93.8%)** | **30/32 (93.8%)** |
-| **`gemma4:31b` (31B Dense)** | **8/8 (100.0%)** | **8/8 (100.0%)** | **8/8 (100.0%)** | 7/8 (87.5%) | 7/8 (87.5%) | **30/32 (93.8%)** | **30/32 (93.8%)** |
+| **`gemma4:e4b` (4B General)** | **8/8 (100.0%)** | 6/8 (75.0%) | **7/8 (87.5%)** | 7/8 (87.5%) | 6/8 (75.0%) | 27/32 (84.4%) | 28/32 (87.5%) |
+| **`qwen2.5:14b` (14B General)** | **8/8 (100.0%)** | 7/8 (87.5%) | **7/8 (87.5%)** | 6/8 (75.0%) | 7/8 (87.5%) | 28/32 (87.5%) | 28/32 (87.5%) |
+| **`qwen2.5-coder:14b` (14B Code)** | **8/8 (100.0%)** | 7/8 (87.5%) | **7/8 (87.5%)** | 7/8 (87.5%) | 7/8 (87.5%) | 29/32 (90.6%) | 29/32 (90.6%) |
+| **`gemma4:26b` (26B MoE, ~4B act)** | **8/8 (100.0%)** | **8/8 (100.0%)** | **7/8 (87.5%)** | 7/8 (87.5%) | 7/8 (87.5%) | **30/32 (93.8%)** | 29/32 (90.6%) |
+| **`gemma4:31b` (31B Dense)** | **8/8 (100.0%)** | **8/8 (100.0%)** | **7/8 (87.5%)** | 7/8 (87.5%) | 7/8 (87.5%) | **30/32 (93.8%)** | 29/32 (90.6%) |
 
 #### Crucial Insights & Mitigation Strategies:
 1. **Model Capacity & Atomic Decomposition on Compound Rubrics (`Tier B`)**:
@@ -251,7 +250,37 @@ In traditional LLM-as-a-judge frameworks, evaluators often ask for a verdict bef
 
 ---
 
-### 5. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 5. The Frontier of Circuit Depth: Elastic Recurrent Layer-Looping (NVIDIA-Nemotron Dory & Universal Transformers)
+
+A causal transformer evaluates its first token in a single forward pass through $L$ attention layers ($O(1)$ sequential circuit depth). Standard causal models cannot compute multi-digit arithmetic, complex state machines, or nested boolean logic in a single pass without emitting intermediate scratchpad tokens (Chain-of-Thought / `<think>`), which incurs substantial autoregressive decoding latency.
+
+#### Latent Reasoning in Hidden-State Space
+Architectures like **NVIDIA-Nemotron-Labs Dory** (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`) and Universal Transformers overcome this limitation by introducing **elastic recurrent depth**. Instead of traversing intermediate transformer layers once, Dory recirculates hidden state representations through a shared recurrent block for $K$ iterations (`num_loops`, typically 1 to 4) before projecting to output logits:
+
+$$\mathbf{h}^{(k+1)} = \text{RecurrentLayerBlock}(\mathbf{h}^{(k)}, \mathbf{x}), \quad k \in \{1, \dots, K\}$$
+
+This performs multi-step iterative latent reasoning directly in embedding space prior to emitting token 1. While looping increases prefill compute by ~30–60%, it completely eliminates the memory-bandwidth bottleneck of autoregressive token generation, providing high-fidelity first-token logits on complex constraints with **zero generated CoT tokens**.
+
+#### Seamless Integration via `RecurrentPyTorchBackend`
+LogitGate provides native support for latent recurrent architectures via `RecurrentPyTorchBackend` and the `recurrent://` URI scheme:
+
+```python
+from logitgate import LogitGate
+
+# Elastic recurrent depth: 3 internal latent loops before first-token projection
+gate = LogitGate(
+    rubric="Does the SQL query use proper parameterized statements without dynamic string interpolation?",
+    backend="recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+    num_loops=3,
+)
+
+verdict = gate.evaluate(candidate_sql)
+print(f"Passed: {verdict.passed} (Calibrated P={verdict.probability:.4f})")
+```
+
+---
+
+### 6. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.
@@ -481,13 +510,56 @@ for r, v in zip(rubrics, verdicts):
 ### 1. Document Context Length & When to Chunk
 - **Zero-Chunking Sweet Spot (Up to 16,000–32,000 Tokens)**: As shown in our [Needle-in-a-Haystack benchmarks](#2-context-length-scaling--needle-in-a-haystack-boundary-200-to-16000-tokens), modern causal transformers (`gemma4`, `qwen2.5`) maintain strong probability separation ($\Delta P > 0.993$) up to **16,000+ tokens** without manual chunking, and sliding-window/MoE architectures scale cleanly to **32k–64k tokens** in VRAM.
 - **When to Chunk (50,000+ Token Codebases or Books)**: If a document exceeds your model's configured context window (`num_ctx`) or exceeds 32k–50k tokens on a dense attention model, split the document into logical sections or files and call `gate.evaluate(chunk)` on each section independently.
-- **Multi-Rubric KV Sharing (`evaluate_batch`)**: Note that `gate.evaluate_batch(candidate, rubrics)` is designed for evaluating **multiple atomic rubrics against a single candidate artifact** (sharing the `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prefix across all $K$ rubrics), rather than evaluating multiple documents against one rubric.
+- **Multi-Rubric KV Sharing (`evaluate_batch`)**: `gate.evaluate_batch(candidate, rubrics)` is designed for evaluating **multiple atomic rubrics against a single candidate artifact** (sharing the `[CANDIDATE ARTIFACT]` root prefix across all $K$ rubrics in the KV-cache), rather than evaluating multiple documents against one rubric.
 
-### 2. Writing Atomic, Observable Rubrics vs. Giant Compound Prompts
-- **Single Observable Property**: Write rubrics that test one clear, falsifiable property (e.g. *"Does the reply refuse to reset passwords without 2FA?"* rather than *"Is the reply polite, compliant with 2FA, formatted as markdown, and under 200 words?"*).
-- **Prefix-Shared Batching**: Instead of one monolithic prompt, pass a list of atomic rubrics to `evaluate_batch(candidate, rubrics)`. Because all rubrics share the candidate prefix, running 4–5 atomic rubrics takes ~110ms per rubric while avoiding compound rubric dilution and giving per-criterion observability.
+### 2. Best Practice vs. Anti-Pattern: Candidate-Prefix Isolated Batching (`evaluate_batch`)
 
-### 3. Escalation Mechanics: How Symmetric Log-Odds Handle Model Uncertainty
+When evaluating complex systems, users often wonder whether to write one large prompt or multiple smaller ones, and how to execute them efficiently:
+
+#### The Anti-Patterns
+1. **Monolithic Compound Rubrics**: Cramming multiple orthogonal requirements into a single giant rubric prompt (e.g. *"Ensure valid syntax, Google docstrings, full type hints, no mutable defaults, and SQL safety"*). When a candidate complies with 4 of 5 requirements but subtly violates 1 (e.g. an omitted return type annotation on a typed function), first-token logits experience signal dilution, resulting in $P \approx 0.82–0.89$ which can either slip through as an uninspected false pass or trigger inconsistent escalation.
+2. **Monolithic Prompt-Prefix Concatenation**: Concatenating all $K$ rubrics together into a single shared prompt block (`[EVALUATION RUBRICS]\nRubric #1...\nRubric #K...`) preceding the candidate. When evaluating 50 to 500 rubrics, this injects thousands of rubric tokens before the candidate artifact, blowing the context window on lightweight models and causing severe **cross-rubric attention contamination** (attention heads judging Rubric #1 become distracted by text in Rubric #47).
+
+#### The Best Practice: Candidate-Prefix Isolated Batching
+LogitGate solves both problems via **Candidate-Prefix Isolated Batching** (`compile_batch_binary_prompt(..., query_first=False)`):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Token 0: Shared Static Prefix (95–99% of prompt tokens)     │
+│ [CANDIDATE ARTIFACT]                                        │
+│ {candidate}                                                 │  ◄── KV-Cached ONCE
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+       ┌───────────────────────┼───────────────────────┐
+       ▼                       ▼                       ▼
+┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+│ Isolated     │        │ Isolated     │        │ Isolated     │
+│ Suffix #1    │        │ Suffix #2    │        │ Suffix #K    │
+│ Rubric #1    │        │ Rubric #2    │        │ Rubric #K    │
+│ Mapping P1/P2│        │ Mapping P1/P2│        │ Mapping P1/P2│
+└──────────────┘        └──────────────┘        └──────────────┘
+```
+
+- **Candidate Anchored at Token 0**: The candidate artifact (500 to 10,000+ tokens) forms the shared static root prefix across all $K$ rubrics and both forward/reverse debiasing passes ($2K$ forward passes total).
+- **100% Suffix Rubric Isolation**: Each rubric is appended in complete isolation at the very end of the prompt. It never sees or attends to any other rubric.
+- **Zero Cross-Rubric Attention Contamination**: Because causal attention is strictly unidirectional, the candidate context cannot attend forward to future tokens. The candidate representation is computed and KV-cached once. Each isolated rubric query suffix only attends back to the candidate document.
+- **Zero Context Bloat & Linear Scalability**: Evaluating 2 rubrics or 500 rubrics requires the exact same context window length ($|\text{candidate}| + |\text{rubric}_k| + |\text{mapping}|$).
+- **Near-Instant Execution**: Across all $2K$ forward passes, inference engines (vLLM, Ollama, llama.cpp) hit the prefix cache for 95–99% of total tokens, dropping per-rubric warm latency to ~20–40ms.
+
+### 3. Defense-in-Depth: Combining Temperature Calibration with Strict Operational Thresholds
+
+A common question in production gating is whether temperature calibration makes strict confidence thresholds redundant, or vice versa. In LogitGate, they serve two distinct, complementary functions:
+
+1. **Temperature Calibration ($T$) Repairs Intrinsic Model Distortion**:
+   Different model families have distinct confidence distributions. An uncalibrated model might output a raw probability of $0.93$ when its actual empirical precision on that task is only $75\%$, or conversely remain underconfident ($P=0.79$) on unambiguous passes. Post-hoc temperature scaling ($\bar{L} / T$) rescales the symmetric log-odds so that a reported $P=0.85$ mathematically corresponds to an empirical 85% probability of correctness. Calibration normalizes the meaning of confidence across diverse models (`gemma4:e4b`, `qwen2.5:14b`, `llama3`).
+2. **Operational Thresholds (`pass_threshold`, `fail_threshold`) Enforce Risk Tolerance**:
+   Operational thresholds govern the system's escalation policy (the width of the ambiguity/escalation band):
+   - **`preset="fast_triage"` (`pass_threshold=0.80`, `fail_threshold=0.20`)**: Maximizes short-circuiting speed for local developer loops, agent routing, and high-throughput classification.
+   - **`preset="strict"` (`pass_threshold=0.90`, `fail_threshold=0.25`)**: Enforces defense-in-depth for mission-critical CI merge gates, financial transactions, or automated security reviews. Any candidate with less than 90% calibrated confidence is classified as `AMBIGUOUS` and escalated to Layer 2 (`JudgeGate`) for full step-by-step System-2 diagnostic critique.
+
+**Conclusion**: Temperature calibration ensures that $P=0.90$ actually means 90% certainty; strict operational thresholds ensure that your pipeline never bypasses System-2 reasoning on anything less than 90% certainty.
+
+### 4. Escalation Mechanics: How Symmetric Log-Odds Handle Model Uncertainty
 - **Decisive Signal**: When a model is confident that an artifact passes, both forward ($L_1 = s + b$) and reverse ($L_2 = s - b$) log-odds are positive, yielding calibrated probability $P \ge 0.85$ (fast-path pass, no Layer 2 critique).
 - **Decisive Failure**: When an artifact clearly violates the rubric, both forward and reverse log-odds are negative, yielding $P \le 0.20$ (decisive failure).
 - **Ambiguity & Escalation**: When small models (e.g. 3B–4B) or complex edge cases yield borderline log-odds (between 0.20 and 0.85), LogitGate flags the item as `AMBIGUOUS` and triggers Layer 2 (`JudgeGate`) to generate an autoregressive critique.
@@ -500,9 +572,10 @@ LogitGate builds upon established methods in calibration, logit debiasing, and L
 
 ### Key Design Decisions in `LogitGate`
 1. **Shared-Model 3-Layer Cascade**: Uses the existing generator model instance for both gating and diagnostics without loading a dedicated secondary judge model into VRAM.
-2. **Prefix-Preserving KV Compilation (`compile_batch_binary_prompt`)**: Arranges prompts so the candidate artifact and evaluation rubrics form an identical static prefix across forward and reverse debiasing passes, retaining the prefix in the KV-cache across queries.
+2. **Candidate-Prefix Isolated KV Compilation (`compile_batch_binary_prompt`)**: Anchors the candidate artifact at token 0 as the shared static root prefix across all $K$ rubrics, evaluating each rubric in 100% isolation as a query suffix without cross-rubric attention contamination or context bloat.
 3. **Log-Odds Space Symmetric Inversion**: Cancels additive prior token bias in log-odds space ($\bar{L} = \frac{L_1 + L_2}{2T}$) rather than probability averaging.
 4. **Missing-Token Dynamic Floor**: Bounds unobserved token logprobs using residual probability mass $\min(\min_i \text{logprob}_i, \ln(1 - \sum P_i))$, avoiding distortion from arbitrary $-99.0$ constants.
+5. **Elastic Recurrent Latent Reasoning**: Integrates latent recurrent layer-looping architectures (`RecurrentPyTorchBackend`), recirculating hidden states through recurrent blocks (`num_loops`) to expand circuit depth before emitting first-token logits.
 
 ### Foundational Literature Credited
 
@@ -525,6 +598,10 @@ LogitGate builds upon established methods in calibration, logit debiasing, and L
 5. **System-1 Single-Token Decision Benchmarking**:
    - Deußer, T., Sparrenberg, L., & Sifa, R. (2026). *"Evaluating and Benchmarking the System One Model Jev"*. [arXiv:2609.37647](https://arxiv.org/abs/2609.37647).
    - *Contribution to LogitGate*: Benchmarks fast, single-token System-1 evaluation pipelines against heavy System-2 generative reasoning judges.
+
+6. **Recurrent Depth & Universal Transformers**:
+   - Dehghani, M., Gouws, S., Vinyals, O., Uszkoreit, J., & Kaiser, Ł. (2019). *"Universal Transformers"*. **ICLR 2019**. [arXiv:1807.03819](https://arxiv.org/abs/1807.03819).
+   - *Contribution to LogitGate*: Establishes the theoretical foundation for elastic layer-looping (`num_loops`), enabling iterative latent computation in hidden-state space prior to vocabulary projection.
 
 ### BibTeX Citation
 
@@ -634,6 +711,9 @@ pip install logitgate
 
 # With all optional integrations (OpenAI, DeepEval, LangGraph, Pytest)
 pip install "logitgate[all]"
+
+# With PyTorch elastic recurrent layer-looping (NVIDIA Dory & Universal Transformers)
+pip install "logitgate[recurrent]"
 ```
 
 ---

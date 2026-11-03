@@ -583,6 +583,16 @@ def main() -> None:
             b.close()
             unload_all(all_urls)
 
+    # 3. Pure CPU Mode for gemma4:e4b (Suite 1)
+    print("\n=== [Pure CPU Benchmark: gemma4:e4b] ===", flush=True)
+    b_cpu = OllamaBackend(base_url=gpu1_url, model="gemma4:e4b", options={"num_gpu": 0}, timeout=240.0)
+    try:
+        master["suite_1_multi_domain_24"]["gemma4:e4b_cpu"] = eval_multi_domain_24(b_cpu, "gemma4:e4b", is_cpu=True)
+        _save()
+    finally:
+        b_cpu.close()
+        unload_all(all_urls)
+
     print(f"\nALL BENCHMARKS COMPLETE! Saved to {out_path}", flush=True)
 
 

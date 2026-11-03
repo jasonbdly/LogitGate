@@ -357,7 +357,7 @@ class LogitGate(BaseGate):
                 rubric_index=idx,
                 pass_token="A",
                 fail_token="B",
-                query_first=self.query_first,
+                query_first=False,
             )
             top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
             l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
@@ -369,7 +369,7 @@ class LogitGate(BaseGate):
                     rubric_index=idx,
                     pass_token="B",
                     fail_token="A",
-                    query_first=self.query_first,
+                    query_first=False,
                 )
                 top2 = self.backend.query_top_logprobs(prompt2, top_k=10, allowed_tokens=["A", "B"])
                 l2, p2 = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
@@ -436,7 +436,7 @@ class LogitGate(BaseGate):
                 rubric_index=idx,
                 pass_token="A",
                 fail_token="B",
-                query_first=self.query_first,
+                query_first=False,
             )
 
             if self.symmetric_debiasing:
@@ -446,7 +446,7 @@ class LogitGate(BaseGate):
                     rubric_index=idx,
                     pass_token="B",
                     fail_token="A",
-                    query_first=self.query_first,
+                    query_first=False,
                 )
                 top1, top2 = await asyncio.gather(
                     self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"]),

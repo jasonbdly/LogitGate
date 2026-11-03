@@ -45,6 +45,7 @@ openai = ["openai>=1.0.0"]
 deepeval = ["deepeval>=1.0.0"]
 langgraph = ["langgraph>=0.0.1"]
 llamacpp = ["llama-cpp-python>=0.2.0"]
+recurrent = ["torch>=2.0.0", "transformers>=4.40.0"]
 pytest = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 test = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 all = [
@@ -52,6 +53,8 @@ all = [
     "deepeval>=1.0.0",
     "langgraph>=0.0.1",
     "llama-cpp-python>=0.2.0",
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
