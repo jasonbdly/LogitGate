@@ -476,9 +476,12 @@ def test_judge_gate_parse_verdict_robustness():
     fail_sample = "Evaluation summary: The code failed on edge cases."
     assert judge._parse_verdict(fail_sample)[0] is False
 
-    # Case 5: Verdict-first prompt check
+    # Case 5: Reason-then-Verdict default prompt vs Verdict-first short cap prompt
     prompt = judge._compile_prompt("def add(a, b): return a + b")
-    assert "Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in prompt
+    assert "conclude on the very last line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in prompt
+    short_judge = JudgeGate(rubric="Critique", max_tokens=60, backend=StubBackend())
+    short_prompt = short_judge._compile_prompt("def add(a, b): return a + b")
+    assert "Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in short_prompt
 
     # Case 6: Dogfood LogitGate probe when text has zero explicit keywords
     # Review text without "PASS" or "FAIL":

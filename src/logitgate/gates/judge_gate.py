@@ -76,19 +76,28 @@ class JudgeGate(BaseGate):
 
     def _compile_prompt(self, candidate: Any, rubric_override: str | None = None) -> str:
         effective_rubric = (rubric_override or self.rubric or "Evaluate if the artifact complies with standards.").strip()
+        if self.max_tokens is not None and self.max_tokens <= 80:
+            return (
+                f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
+                f"[CANDIDATE ARTIFACT]\n{str(candidate).strip()}\n\n"
+                f"[INSTRUCTIONS]\n"
+                f"Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]\n"
+                f"Then provide a concise 1-2 sentence diagnostic critique explaining why the candidate artifact passes or fails the rubric, and end by repeating [VERDICT: PASS] or [VERDICT: FAIL]."
+            )
         return (
             f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
             f"[CANDIDATE ARTIFACT]\n{str(candidate).strip()}\n\n"
             f"[INSTRUCTIONS]\n"
-            f"Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]\n"
-            f"Then provide a concise diagnostic critique explaining why the candidate artifact passes or fails the rubric, and end by repeating [VERDICT: PASS] or [VERDICT: FAIL]."
+            f"First, concisely verify each requirement or calculation in the candidate artifact against the rubric step-by-step (in 2-4 concise bullet points).\n"
+            f"After completing your verification, conclude on the very last line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]."
         )
 
     def _parse_verdict(self, text: str) -> tuple[bool, DecisionStatus, float | None]:
         # 1. Standard / Markdown tag check (matches [VERDICT: PASS], **[VERDICT: PASS]**, Verdict: PASS, etc.)
-        match = re.search(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE)
-        if match:
-            tag = match.group(1).upper()
+        # Use the final occurrence so step-by-step reasoning concluding with [VERDICT: ...] is authoritative.
+        matches = list(re.finditer(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE))
+        if matches:
+            tag = matches[-1].group(1).upper()
             if tag == "PASS":
                 return True, DecisionStatus.PASSED, 1.0
             return False, DecisionStatus.FAILED, 0.0
@@ -106,13 +115,33 @@ class JudgeGate(BaseGate):
             except (json.JSONDecodeError, ValueError, TypeError, KeyError):
                 data = None
 
-        # 3. Explicit keyword heuristic on candidate lines (first line and last non-empty line)
+        # 3. Eating Our Own Dogfood: When the critique text omits an explicit [VERDICT: ...] tag
+        # (e.g. due to max_tokens truncation mid-explanation) and the backend supports LogitBackend,
+        # probe the generated critique text with a 1-token LogitGate before falling back to loose regexes.
+        from logitgate.backends.base import LogitBackend, StubBackend
+        if isinstance(self.backend, LogitBackend) and not (isinstance(self.backend, StubBackend) and self.backend.logprob_responses is None):
+            try:
+                from logitgate.gates.logit_gate import LogitGate
+                probe_gate = LogitGate(
+                    rubric="Based on this review critique, did the candidate artifact satisfy all requirements and PASS the evaluation without any defects or errors?",
+                    backend=self.backend,
+                    model=self.model,
+                    symmetric_debiasing=False,
+                )
+                pv = probe_gate.evaluate(text)
+                if pv.probability is not None:
+                    is_pass = (pv.probability >= 0.5)
+                    return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
+            except (ValueError, RuntimeError, OSError, httpx.HTTPError):
+                pv = None
+
+        # 4. Explicit keyword heuristic on candidate lines (last non-empty line first, then first line)
         lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
         candidate_lines = []
         if lines:
-            candidate_lines.append(lines[0])
+            candidate_lines.append(lines[-1])
             if len(lines) > 1:
-                candidate_lines.append(lines[-1])
+                candidate_lines.append(lines[0])
 
         def sanitize_negations(s: str) -> str:
             neg_pattern = r"\b(not|no|without|never|doesn't|does\s+not|did\s+not|didn't|zero)\s+(?:any\s+|to\s+)?(?:fail|failed|failure|failures|reject|rejected)\b"
@@ -136,25 +165,6 @@ class JudgeGate(BaseGate):
                     if p_match.start() < f_match.start():
                         return True, DecisionStatus.PASSED, 1.0
                     return False, DecisionStatus.FAILED, 0.0
-
-        # 4. Eating Our Own Dogfood: If first/last lines are ambiguous or missing explicit keywords,
-        # and backend supports LogitBackend, probe the full critique text with a 1-token LogitGate!
-        from logitgate.backends.base import LogitBackend, StubBackend
-        if isinstance(self.backend, LogitBackend) and not (isinstance(self.backend, StubBackend) and self.backend.logprob_responses is None):
-            try:
-                from logitgate.gates.logit_gate import LogitGate
-                probe_gate = LogitGate(
-                    rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
-                    backend=self.backend,
-                    model=self.model,
-                    symmetric_debiasing=False,
-                )
-                pv = probe_gate.evaluate(text)
-                if pv.probability is not None:
-                    is_pass = (pv.probability >= 0.5)
-                    return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
-            except (ValueError, RuntimeError, OSError, httpx.HTTPError):
-                pv = None
 
         # 5. Full text fallback heuristic
         sanitized_full = sanitize_negations(text)

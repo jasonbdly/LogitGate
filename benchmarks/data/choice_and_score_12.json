@@ -1,0 +1,132 @@
+{
+  "choice_gate_items": [
+    {
+      "id": "choice_1_security_incident_with_billing_mention",
+      "question": "Classify the primary operational routing category for this incoming ticket.",
+      "options": {
+        "A": "Active security incident or credential compromise requiring immediate SecOps response",
+        "B": "Routine billing, invoice, or subscription refund inquiry",
+        "C": "Product feature request or UI enhancement suggestion"
+      },
+      "expected_choice": "A",
+      "candidate": "Ticket #9041: While reviewing our monthly billing invoice this morning, our DevOps lead discovered three unrecognized production API keys created at 03:14 UTC from an external IP address exfiltrating customer records from the `/v1/exports` endpoint. Please revoke all active tokens immediately."
+    },
+    {
+      "id": "choice_2_billing_inquiry_with_api_mention",
+      "question": "Classify the primary operational routing category for this incoming ticket.",
+      "options": {
+        "A": "Active security incident or credential compromise requiring immediate SecOps response",
+        "B": "Routine billing, invoice, or subscription refund inquiry",
+        "C": "Product feature request or UI enhancement suggestion"
+      },
+      "expected_choice": "B",
+      "candidate": "Ticket #9042: Our finance department noticed that our April invoice charged us for 15 Enterprise seats instead of the 12 seats we have provisioned after rotating our SSO certificates last month. Could you issue a prorated credit for the 3 unused seats?"
+    },
+    {
+      "id": "choice_3_feature_request",
+      "question": "Classify the primary operational routing category for this incoming ticket.",
+      "options": {
+        "A": "Active security incident or credential compromise requiring immediate SecOps response",
+        "B": "Routine billing, invoice, or subscription refund inquiry",
+        "C": "Product feature request or UI enhancement suggestion"
+      },
+      "expected_choice": "C",
+      "candidate": "Ticket #9043: It would be really helpful if the audit log export page supported filtering by custom date ranges and exporting directly to Parquet format in addition to CSV."
+    },
+    {
+      "id": "choice_4_arch_atomic_endpoint",
+      "question": "Select the appropriate architectural scope classification for this engineering epic.",
+      "options": {
+        "A": "Single-service local change requiring no database schema migrations or new infrastructure",
+        "B": "Schema migration change altering persistent relational database tables and indexes",
+        "C": "Distributed multi-service architecture requiring cross-service RPCs and message queues"
+      },
+      "expected_choice": "A",
+      "candidate": "Epic: Add a `/healthz/readiness` HTTP GET endpoint to the existing Go gateway service that returns HTTP 200 JSON `{status: 'ok', uptime_s: ...}` using an in-memory startup timestamp."
+    },
+    {
+      "id": "choice_5_arch_schema_migration",
+      "question": "Select the appropriate architectural scope classification for this engineering epic.",
+      "options": {
+        "A": "Single-service local change requiring no database schema migrations or new infrastructure",
+        "B": "Schema migration change altering persistent relational database tables and indexes",
+        "C": "Distributed multi-service architecture requiring cross-service RPCs and message queues"
+      },
+      "expected_choice": "B",
+      "candidate": "Epic: Add a nullable `due_at TIMESTAMPTZ` column and a `priority SMALLINT NOT NULL DEFAULT 2` column to the `checklist_items` PostgreSQL table, along with a composite partial B-tree index on `(user_id, priority, due_at) WHERE completed_at IS NULL`."
+    },
+    {
+      "id": "choice_6_arch_distributed_collab",
+      "question": "Select the appropriate architectural scope classification for this engineering epic.",
+      "options": {
+        "A": "Single-service local change requiring no database schema migrations or new infrastructure",
+        "B": "Schema migration change altering persistent relational database tables and indexes",
+        "C": "Distributed multi-service architecture requiring cross-service RPCs and message queues"
+      },
+      "expected_choice": "C",
+      "candidate": "Epic: Implement real-time collaborative checklist editing across the WebSocket fanout gateway, the Checklist domain service, and the Notification worker via Redis Pub/Sub event streams and gRPC permission checks against the Identity service."
+    }
+  ],
+  "score_gate_items": [
+    {
+      "id": "score_1_high_quality_code",
+      "tier": "high",
+      "expected_band": [
+        4.0,
+        5.0
+      ],
+      "rubric": "Rate the overall engineering quality of this Python function from 1 (severely flawed, unsafe, or unmaintainable) to 5 (production-grade, well-typed, safe, and clearly documented).",
+      "candidate": "from pathlib import Path\nimport hashlib\n\ndef compute_sha256_digest(file_path: Path, chunk_size: int = 65536) -> str:\n    \"\"\"Computes the hex-encoded SHA-256 digest of a file in streaming chunks.\n\n    Args:\n        file_path: Path to the target file on disk.\n        chunk_size: Byte buffer size per read iteration.\n\n    Returns:\n        Lowercase 64-character hexadecimal SHA-256 digest.\n    \"\"\"\n    if chunk_size <= 0:\n        raise ValueError(\"chunk_size must be positive\")\n    hasher = hashlib.sha256()\n    with file_path.open(\"rb\") as handle:\n        while chunk := handle.read(chunk_size):\n            hasher.update(chunk)\n    return hasher.hexdigest()\n"
+    },
+    {
+      "id": "score_2_high_quality_incident_postmortem",
+      "tier": "high",
+      "expected_band": [
+        4.0,
+        5.0
+      ],
+      "rubric": "Rate the quality and completeness of this incident postmortem summary from 1 (vague, blaming, missing root cause or remediation) to 5 (clear timeline, concrete technical root cause, quantified impact, and actionable preventative items).",
+      "candidate": "## Incident Postmortem: INC-2048 (Checkout API Elevated 503s)\n- **Duration & Impact**: 14:12–14:29 UTC (17 minutes); 4.2% of checkout requests returned HTTP 503.\n- **Root Cause**: Deployment v3.19.0 introduced an unindexed lookup on `promotions.coupon_code`, exhausting the 50-connection PostgreSQL pool under flash-sale traffic.\n- **Resolution**: Rolled back to v3.18.4 at 14:26 UTC and added `CREATE INDEX CONCURRENTLY`.\n- **Action Items**: (1) Add `EXPLAIN` query-plan gate in CI for new SQL queries (Owner: DB Team); (2) Configure PgBouncer statement_timeout=2000ms (Owner: SRE)."
+    },
+    {
+      "id": "score_3_medium_quality_code",
+      "tier": "medium",
+      "expected_band": [
+        2.2,
+        4.2
+      ],
+      "rubric": "Rate the overall engineering quality of this Python function from 1 (severely flawed, unsafe, or unmaintainable) to 5 (production-grade, well-typed, safe, and clearly documented).",
+      "candidate": "import hashlib\n\ndef get_hash(p):\n    # reads file and hashes it\n    f = open(p, 'rb')\n    data = f.read()\n    f.close()\n    return hashlib.sha256(data).hexdigest()\n"
+    },
+    {
+      "id": "score_4_medium_quality_postmortem",
+      "tier": "medium",
+      "expected_band": [
+        2.0,
+        4.0
+      ],
+      "rubric": "Rate the quality and completeness of this incident postmortem summary from 1 (vague, blaming, missing root cause or remediation) to 5 (clear timeline, concrete technical root cause, quantified impact, and actionable preventative items).",
+      "candidate": "Incident Summary: The checkout service slowed down this afternoon for about 20 minutes because the database CPU spiked during a promotion event. We restarted the pods and rolled back the latest release, which fixed the errors. Next time we will test load better."
+    },
+    {
+      "id": "score_5_low_quality_code",
+      "tier": "low",
+      "expected_band": [
+        1.0,
+        2.2
+      ],
+      "rubric": "Rate the overall engineering quality of this Python function from 1 (severely flawed, unsafe, or unmaintainable) to 5 (production-grade, well-typed, safe, and clearly documented).",
+      "candidate": "import os\ndef h(f):\n    try:\n        return eval(os.popen('sha256sum ' + f).read())\n    except:\n        return None\n"
+    },
+    {
+      "id": "score_6_low_quality_postmortem",
+      "tier": "low",
+      "expected_band": [
+        1.0,
+        2.2
+      ],
+      "rubric": "Rate the quality and completeness of this incident postmortem summary from 1 (vague, blaming, missing root cause or remediation) to 5 (clear timeline, concrete technical root cause, quantified impact, and actionable preventative items).",
+      "candidate": "Server went down because someone pushed bad code without checking. It is working now. Developers need to be more careful in the future."
+    }
+  ]
+}

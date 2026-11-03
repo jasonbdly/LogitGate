@@ -187,6 +187,11 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             else:
                 payload[k] = v
         resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
+        if resp.status_code == 400 and think_val:
+            # Fallback for non-thinking models (e.g. qwen2.5, llama3) that reject think=True
+            payload["think"] = False
+            think_val = False
+            resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
         content = data.get("message", {}).get("content", "")
@@ -247,6 +252,10 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             else:
                 payload[k] = v
         resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
+        if resp.status_code == 400 and think_val:
+            payload["think"] = False
+            think_val = False
+            resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
         content = data.get("message", {}).get("content", "")
