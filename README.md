@@ -1,10 +1,13 @@
 # LogitGate (`logitgate`)
 
+[![Release: v0.1.0](https://img.shields.io/badge/release-v0.1.0-blue.svg)](CHANGELOG.md)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10–3.15](https://img.shields.io/badge/python-3.10--3.15-blue.svg)](https://www.python.org/downloads/)
 [![PEP 561 Typed](https://img.shields.io/badge/typing-PEP%20561-blueviolet.svg)](src/logitgate/py.typed)
-[![Offline First](https://img.shields.io/badge/offline--first-local--LLM%20ready-brightgreen.svg)](README.md)
-[![CI](https://github.com/jasonbdly/LogitGate/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
+[![Typechecked: mypy](https://img.shields.io/badge/typechecked-mypy-blue.svg)](pyproject.toml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![GitHub CI](https://github.com/jasonbdly/LogitGate/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonbdly/LogitGate/actions/workflows/ci.yml)
+[![GitLab CI](https://gitlab.com/jasonbdly/logitgate/badges/main/pipeline.svg)](https://gitlab.com/jasonbdly/logitgate/-/pipelines)
 
 **Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs.**
 
@@ -61,10 +64,10 @@ Empirical measurements gathered on local inference across 4 distinct model confi
 
 | Model Configuration | Model Family / Specialization | Compute Device | Warm Single-Pass Latency | Warm 2-Pass Symmetric Latency | 4-Rubric Batch Total | Per-Rubric Batch Latency | Classification Accuracy (4 Cases) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b`** | 4B General Model | GPU | **44.2 ms** | **118.7 ms** | **686.1 ms** | **171.5 ms** | **100% (4/4)** |
-| **`gemma4:e4b`** | 4B General Model | **Pure CPU-Only (0 GPU)** | **172.9 ms** | **4,323.6 ms** | N/A | N/A | N/A |
-| **`qwen2.5:14b`** | 14B General Model | GPU | **47.5 ms** | **86.2 ms** | **441.5 ms** | **110.4 ms** | **100% (4/4)** |
-| **`qwen2.5-coder:14b`** | 14B Code Model | GPU | **43.1 ms** | **86.1 ms** | **436.6 ms** | **109.1 ms** | **100% (4/4)** |
+| **`gemma4:e4b`** | 4B General Model | GPU (RTX 4070) | **44.2 ms** | **118.7 ms** | **686.1 ms** | **171.5 ms** | **100% (4/4)** |
+| **`gemma4:e4b`** | 4B General Model | **Pure CPU-Only (0 GPU)** | **172.9 ms** | **4,323.6 ms** | **20,009.3 ms** | **5,002.3 ms** | **100% (4/4)** |
+| **`qwen2.5:14b`** | 14B General Model | GPU (RTX 4070) | **47.5 ms** | **86.2 ms** | **441.5 ms** | **110.4 ms** | **100% (4/4)** |
+| **`qwen2.5-coder:14b`** | 14B Code Model | GPU (RTX 4070) | **43.1 ms** | **86.1 ms** | **436.6 ms** | **109.1 ms** | **100% (4/4)** |
 
 ### Benchmark Analysis & Insights:
 1. **Single-Pass Latency (~43–48 ms on GPU)**:
@@ -180,7 +183,7 @@ Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.config
 | Model & Hardware Configuration | `num_ctx=512` | `num_ctx=4,096` | `num_ctx=16,384` | `num_ctx=32,768` | `num_ctx=65,536+` | Spillover Boundary |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`gemma4:e4b` (RTX 4070 12 GB)\*** | 9.41 GB (92.7 ms) | 9.41 GB (94.5 ms) | 9.45 GB (101.9 ms) | 9.54 GB (94.4 ms) | 10.04 GB (95.9 ms) *(128k!)* | **100% GPU up to 131,072 tokens** |
-| **`gemma4:e4b` (Ryzen 7 5800X3D CPU)\*** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | N/A | **Zero VRAM footprint** |
+| **`gemma4:e4b` (Ryzen 7 5800X3D CPU)\*** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | 9.60 GB RAM (2.45s) *(64k)* | **Zero VRAM footprint** |
 | **`qwen2.5:14b` (RTX 4070 12 GB)** | 8.71 GB (94.4 ms) | 9.09 GB (93.4 ms) | 10.39 GB (99.7 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.5 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.3 ms) | **Spills to CPU at $\ge$ 32,768 (>12 GB)** |
 | **`gemma4:26b` (MoE, RTX 5090 32 GB)** | 17.42 GB (92.4 ms) | 17.69 GB (89.9 ms) | 17.72 GB (86.4 ms) | 17.84 GB (90.3 ms) | 18.18 GB (87.9 ms) | **100% GPU up to 65,536 tokens** |
 | **`gemma4:31b` (Dense, RTX 5090 32 GB)** | 20.97 GB (194.8 ms) | 21.50 GB (184.3 ms) | 21.71 GB (177.4 ms) | 21.46 GB (175.1 ms) | 22.00 GB (182.1 ms) | **100% GPU up to 65,536 tokens** |
