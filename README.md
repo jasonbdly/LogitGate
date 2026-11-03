@@ -22,10 +22,10 @@ When evaluating whether an LLM output meets a rubric, standard LLM-as-a-judge fr
 `LogitGate` uses a **3-layer cascade**:
 
 1. **Layer 0 (`ASTGate` / `ContractGate`)**: Runs deterministic checks in **<0.1 ms** on the CPU (Python AST syntax, JSON/Pydantic schemas, regex patterns, acyclic DAG topology, forbidden imports). If an artifact fails a deterministic contract, it fails immediately with no LLM call.
-2. **Layer 1 (`LogitGate`)**: If Layer 0 passes, we pass the rubric and candidate to the model and read its **first-token log-probabilities (`max_tokens=1`)**. In a single forward pass (**~40–50 ms on GPU**, **~170 ms on CPU**), we compute the model's classification confidence without generating multi-token CoT text. To cancel pretraining token priors (such as models favoring `'A'` over `'B'`), we run a second pass with swapped labels and average them in log-odds space (**~85–120 ms on GPU**).
+2. **Layer 1 (`LogitGate`)**: If Layer 0 passes, we pass the rubric and candidate to the model and read its **first-token log-probabilities (`max_tokens=1`)**. In a single forward pass (**~36–41 ms on GPU**, **~173 ms on CPU**), we compute the model's classification confidence without generating multi-token CoT text. To cancel pretraining token priors (such as models favoring `'A'` over `'B'`), we run a second pass with swapped labels and average them in log-odds space (**~90–113 ms on GPU**).
 3. **Layer 2 (`JudgeGate`)**: Only when Layer 1 confidence falls into an ambiguous band (e.g., between 20% and 85%) or requires failure diagnostics does the pipeline escalate to generating a full text critique.
 
-In our 16-item single-hop and structural benchmark suite (with `trigger="on_ambiguous_only"`), Layer 0 and Layer 1 resolved **100% of items** (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 43–124ms) without invoking Layer 2 (`0` CoT critique tokens generated) and while reusing the already-loaded model—whereas multi-hop or adversarial cases escalate to Layer 2 (`JudgeGate`), as shown in [Falsification Benchmarks](#falsification-benchmarks-where-does-layer-1-break-down--how-to-mitigate-it).
+In our 16-item single-hop and structural benchmark suite (with `trigger="on_ambiguous_only"`), Layer 0 and Layer 1 resolved **100% of items** (18.8% at Layer 0 in <0.1ms; 81.2% at Layer 1 in 36–113ms) without invoking Layer 2 (`0` CoT critique tokens generated) and while reusing the already-loaded model—whereas multi-hop or adversarial cases escalate to Layer 2 (`JudgeGate`), as shown in [Falsification Benchmarks](#falsification-benchmarks-where-does-layer-1-break-down--how-to-mitigate-it).
 
 ---
 
@@ -34,7 +34,7 @@ In our 16-item single-hop and structural benchmark suite (with `trigger="on_ambi
 1. **CI/CD & LLM Evaluation Suites (`pytest` / DeepEval)**:
    - Run hundreds of automated LLM evaluation checks in seconds during CI runs instead of waiting 15+ minutes for generative judges. Works completely offline with local models or deterministic stubs.
 2. **Multi-Agent & LangGraph Routers**:
-   - Conditional routing and decision branching in **40–85 ms** per node transition instead of waiting 2–3 seconds for an LLM supervisor agent to generate JSON routing text.
+   - Conditional routing and decision branching in **36–91 ms** per node transition instead of waiting 2–3 seconds for an LLM supervisor agent to generate JSON routing text.
 3. **Local & Resource-Constrained LLM Deployments (Laptops, CPU-Only, Single GPU)**:
    - Evaluates using your already-loaded generator model without requiring a second 14–48 GB judge model running in VRAM. Runs on 0-GPU laptops in pure CPU mode or 8 GB consumer GPUs.
 
@@ -48,8 +48,8 @@ Traditional LLM evaluation relies on generative judges (prompting an LLM to gene
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Generative LLM Judge** *(G-Eval, Ragas, MT-Bench)* | 1,500ms – 8,000ms | 100 – 600 CoT tokens | 0 GB (Shared) | ❌ None (or expensive 2x generative re-query) | ✅ Verbose text critique |
 | **Fine-Tuned Judge Models** *(Prometheus 2, Selene)* | 800ms – 3,500ms | 80 – 300 CoT tokens | 14 GB – 48 GB (Dedicated weights) | ❌ Susceptible to length & positional bias | ✅ Fine-tuned rubric critique |
-| **Naive Raw First-Token Logprobs** | 40ms – 250ms | 1 token (`max_tokens=1`, 0 CoT) | 0 GB (Shared) | ❌ Vulnerable to token prior bias (Zhao et al., 2021) | ❌ No diagnostic rationale |
-| **`LogitGate` (3-Layer Cascade)** | **0.04ms (L0) / 40–120ms (L1)** | **0 (L0) / 1 token prefill probe (L1, 0 CoT)** | **0 GB (Reuses loaded model)** | **✅ Symmetric log-odds debiasing** | **✅ Escalates to Layer 2 Judge on failure / ambiguity** |
+| **Naive Raw First-Token Logprobs** | 35ms – 250ms | 1 token (`max_tokens=1`, 0 CoT) | 0 GB (Shared) | ❌ Vulnerable to token prior bias (Zhao et al., 2021) | ❌ No diagnostic rationale |
+| **`LogitGate` (3-Layer Cascade)** | **0.04ms (L0) / 36–113ms (L1)** | **0 (L0) / 1 token prefill probe (L1, 0 CoT)** | **0 GB (Reuses loaded model)** | **✅ Symmetric log-odds debiasing** | **✅ Escalates to Layer 2 Judge on failure / ambiguity** |
 
 ---
 
@@ -61,23 +61,26 @@ Empirical measurements gathered on local inference across 4 distinct model confi
   - **CPU & System Memory**: AMD Ryzen 7 5800X3D (8-Core / 16-Thread), 64 GB DDR4 System RAM (used for all `Pure CPU-Only` benchmarks with `options={"num_gpu": 0}`).
   - **GPU 1 (12 GB Sidecar Tier)**: NVIDIA GeForce RTX 4070 (12 GB GDDR6X VRAM) — used for `4B` (`gemma4:e4b`) and `14B` (`qwen2.5:14b`, `qwen2.5-coder:14b`) benchmarks.
   - **GPU 0 (32 GB Primary Tier)**: NVIDIA GeForce RTX 5090 (32 GB GDDR7 VRAM) — used for `26B MoE` (`gemma4:26b`) and `31B Dense` (`gemma4:31b`) falsification and long-context benchmarks below.
+- **Benchmark Methodology & Sample Protocol**:
+  - **Multi-Sample Latency Protocol ($N=5$)**: Every latency configuration is preceded by `1` untimed warm-up pass (to load GGUF weights into memory and initialize KV-cache buffers), followed by `N=5` sequential timed trials over a persistent HTTP connection pool (`httpx.Client`), reporting `mean ± std` in milliseconds.
+  - **Deterministic Classification**: All Layer 1 probes execute with greedy decoding parameters (`temperature=0.0`, `top_p=1.0`, `max_tokens=1`), yielding deterministic log-probabilities across runs for a fixed prompt and model checkpoint.
 
-| Model Configuration | Model Family / Specialization | Compute Device | Warm Single-Pass Latency | Warm 2-Pass Symmetric Latency | 4-Rubric Batch Total | Per-Rubric Batch Latency | Classification Accuracy (4 Cases) |
+| Model Configuration | Model Family | Compute Device | Single-Pass Latency ($N=5$) | 2-Pass Symmetric Latency ($N=5$) | 4-Rubric Batch Total ($N=5$) | Per-Rubric Batch Latency ($N=5$) | Classification Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b`** | 4B General Model | GPU (RTX 4070) | **44.2 ms** | **118.7 ms** | **686.1 ms** | **171.5 ms** | **100% (4/4)** |
-| **`gemma4:e4b`** | 4B General Model | **Pure CPU-Only (0 GPU)** | **172.9 ms** | **4,323.6 ms** | **20,009.3 ms** | **5,002.3 ms** | **100% (4/4)** |
-| **`qwen2.5:14b`** | 14B General Model | GPU (RTX 4070) | **47.5 ms** | **86.2 ms** | **441.5 ms** | **110.4 ms** | **100% (4/4)** |
-| **`qwen2.5-coder:14b`** | 14B Code Model | GPU (RTX 4070) | **43.1 ms** | **86.1 ms** | **436.6 ms** | **109.1 ms** | **100% (4/4)** |
+| **`gemma4:e4b`** | 4B General Model | GPU (RTX 4070) | **40.5 ± 6.0 ms** | **112.6 ± 4.6 ms** | **584.9 ± 51.8 ms** | **146.2 ± 12.9 ms** | **4/4 (100%)** |
+| **`gemma4:e4b`** | 4B General Model | Pure CPU-Only (0 GPU) | **173.0 ± 2.4 ms** | **3,710.5 ± 82.1 ms** | **20,949.5 ± 182.5 ms** | **5,237.4 ± 45.6 ms** | **4/4 (100%)** |
+| **`qwen2.5:14b`** | 14B General Model | GPU (RTX 4070) | **36.8 ± 6.5 ms** | **90.0 ± 4.1 ms** | **450.1 ± 18.8 ms** | **112.5 ± 4.7 ms** | **4/4 (100%)** |
+| **`qwen2.5-coder:14b`** | 14B Code Model | GPU (RTX 4070) | **36.5 ± 6.3 ms** | **90.9 ± 3.3 ms** | **447.4 ± 3.9 ms** | **111.8 ± 1.0 ms** | **4/4 (100%)** |
 
 ### Benchmark Analysis & Insights:
-1. **Single-Pass Latency (~43–48 ms on GPU)**:
+1. **Single-Pass Latency (~36–41 ms on GPU)**:
    - Evaluates a rubric in a single forward pass without autoregressive decoding. Over **35x faster** than waiting for an LLM to generate 150 words of critique.
-2. **2-Pass Symmetric Debiasing (~86–119 ms on GPU)**:
-   - Runs both forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes to eliminate pretraining token prior bias. The second pass hits the KV-cache, running in just 40 ms.
-3. **Multi-Rubric Batching (~109–171 ms per rubric)**:
+2. **2-Pass Symmetric Debiasing (~90–113 ms on GPU)**:
+   - Runs both forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes to eliminate pretraining token prior bias. The second pass hits the KV-cache, running in ~40–55 ms.
+3. **Multi-Rubric Batching (~112–146 ms per rubric)**:
    - `evaluate_batch` reuses the candidate prefix across all rubrics, avoiding redundant prompt re-evaluations and preventing KV-cache stampedes on the inference server.
 4. **Pure CPU-Only Operation (Zero GPU)**:
-   - On a machine with **0 GPUs** (`options={"num_gpu": 0}`), single-pass logit evaluation (`preset="fast_triage"`) completes in **~172 ms** on a 4B model for rapid local developer iteration, while full 2-pass symmetric debiasing (`preset="balanced"`) takes `2.1s–4.3s` per item (`~21s–33s` for a 10–12 item CI suite vs. `6+ minutes` for uncapped generative judges).
+   - On a machine with **0 GPUs** (`options={"num_gpu": 0}`), single-pass logit evaluation (`preset="fast_triage"`) completes in **173.0 ± 2.4 ms** on a 4B model for rapid local developer iteration, while full 2-pass symmetric debiasing (`preset="balanced"`) takes `~2.1s–3.7s` per item (`~22s–34s` for a 10–12 item CI suite vs. `6+ minutes` for uncapped generative judges).
 
 ---
 
@@ -85,29 +88,29 @@ Empirical measurements gathered on local inference across 4 distinct model confi
 
 ### 1. Multi-Domain Cascade Time Savings (12-Item Test Suite)
 
-Evaluated across **4 non-SDLC and general domains** (RAG Groundedness, Customer Support Policy Compliance, Structured SQL/JSON Safety, Python Code Security):
+Evaluated across **4 non-SDLC and general domains** (RAG Groundedness, Customer Support Policy Compliance, Structured SQL/JSON Safety, Python Code Security; 3 items per domain):
 
-| Model Configuration | Baseline Generative Judge | Cascade (`trigger="on_ambiguous_or_fail"`) | Cascade (`trigger="on_ambiguous_only"`) | Speedup (Fast-Fail) | Judge CoT Tokens Saved | Classification Accuracy |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 56,002 ms (5,659 tok) | 11,118 ms (1,007 tok) | **1,200 ms (0 CoT tok)** | **46.7x** | **5,659 CoT tokens** | **12/12 (100%)** |
-| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 436,185 ms (5,234 tok) | 105,877 ms (882 tok) | **33,563 ms (0 CoT tok)** | **13.0x** | **5,234 CoT tokens** | **12/12 (100%)** |
-| **`qwen2.5:14b` (GPU)** | 29,144 ms (1,362 tok) | 5,449 ms (197 tok) | **982 ms (0 CoT tok)** | **29.7x** | **1,362 CoT tokens** | **12/12 (100%)** *(vs. 10/12 baseline)* |
-| **`qwen2.5-coder:14b` (GPU)** | 19,642 ms (907 tok) | 4,521 ms (153 tok) | **961 ms (0 CoT tok)** | **20.4x** | **907 CoT tokens** | **12/12 (100%)** |
+| Model Configuration | Baseline Judge Time | Cascade Time (`on_ambiguous_or_fail`) | Cascade Time (`on_ambiguous_only`) | Speedup (`on_ambiguous_only`) | CoT Tokens Saved | Baseline Accuracy | Cascade Accuracy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b` (GPU)** | 56,002 ms | 11,118 ms | **1,200 ms** | **46.7x** | 5,659 | 12/12 (100%) | **12/12 (100%)** |
+| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 436,185 ms | 105,877 ms | **33,563 ms** | **13.0x** | 5,234 | 12/12 (100%) | **12/12 (100%)** |
+| **`qwen2.5:14b` (GPU)** | 29,144 ms | 5,449 ms | **982 ms** | **29.7x** | 1,362 | 10/12 (83.3%) | **12/12 (100%)** |
+| **`qwen2.5-coder:14b` (GPU)** | 19,642 ms | 4,521 ms | **961 ms** | **20.4x** | 907 | 12/12 (100%) | **12/12 (100%)** |
 
 ---
 
 ### 2. Fair Pure-CPU CI/CD Runner Benchmark (10-Item CI Test Suite, `options={"num_gpu": 0}`)
 
-Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`num_gpu=0`) across a realistic 10-item CI suite (8 valid Python items, 1 Layer-0 AST syntax failure, 1 semantic PII security leak):
+Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`num_gpu=0`) across a realistic 10-item CI suite (8 valid Python items, 1 Layer-0 AST syntax failure, 1 semantic PII security leak), with token savings and speedup measured against `Baseline A`:
 
-| Evaluation Strategy | Total CPU Wall Time | Total Tokens Generated | Diagnostic Quality | Accuracy | Output Token Savings | Speedup vs. Baseline |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Baseline A: Uncapped CPU Judge (`think=True`, ~430 tok/item)** | ~363,000 ms (~6.1 min) | ~4,360 tokens | ✅ Full CoT + verdict tag, but takes 6+ minutes on CPU | **10/10 (100%)** | Baseline (0%) | 1.0x |
-| **Baseline B: Naive Capped CPU Judge (`think=True`, `max_tokens=150`)** | 143,452 ms (~143.5s) | 1,500 tokens | ❌ Spends all 150 tokens inside `<think>` block; `0` visible chars! | 2/10 (20%) | 65.6% | 2.53x |
-| **Baseline C: Verdict-First CPU Judge (`think=False`, `max_tokens=60` on all 10)** | ~59,000 ms (~59.0s) | 600 tokens | ✅ Emits `[VERDICT: PASS/FAIL]` on token #1 + 60-tok critique on all 10 | **10/10 (100%)** | 86.2% | 6.15x |
-| **`LogitGate(preset="fast_triage") >> JudgeGate(max_tokens=60)`** | **22,020 ms (~22.0s)** | **60 tokens** | ✅ Crisp 60-token failure reason on the 1 semantic failure only | **10/10 (100%)** | **90.0% (vs. C) / 98.6% (vs. A)** | **16.5x vs. A / 2.68x vs. C** |
+| Evaluation Strategy | Total CPU Wall Time | Total Output Tokens | Accuracy | Output Token Savings | Speedup vs. Baseline A |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Baseline A: Uncapped CPU Judge (`think=True`, ~436 tok/item)** | 363.0 s | 4,360 | **10/10 (100%)** | 0.0% | 1.00x |
+| **Baseline B: Naive Capped CPU Judge (`think=True`, `max_tokens=150`)** | 143.5 s | 1,500 | 2/10 (20%) | 65.6% | 2.53x |
+| **Baseline C: Verdict-First CPU Judge (`think=False`, `max_tokens=60`)** | 59.0 s | 600 | **10/10 (100%)** | 86.2% | 6.15x |
+| **`LogitGate(preset="fast_triage") >> JudgeGate(max_tokens=60)`** | **22.0 s** | **60** | **10/10 (100%)** | **98.6%** | **16.50x** |
 
-*Key finding*: Why did naive token-capping (`Baseline B`, `max_tokens=150`) fail with 20% accuracy? Because modern reasoning models (`gemma4`, `deepseek-r1`, `qwen3`) emit 300+ hidden `<think>` tokens before writing a single visible character! By suppressing `<think>` in `OllamaBackend.generate` AND using Verdict-First prompting (`[VERDICT: PASS/FAIL]` on Line 1), `JudgeGate` produces a complete 60-token diagnostic in ~6s on CPU—and by placing `ASTGate >> LogitGate` in front of it, the 10-item suite drops from **6.1 minutes (Baseline A)** or **59.0s (Baseline C)** down to **22.0 seconds (16.5x faster than uncapped, 2.68x faster than concise generative)** with **10/10 (100%) accuracy**!
+*Key finding*: Why did naive token-capping (`Baseline B`, `max_tokens=150`) fail with 20% accuracy? Because modern reasoning models (`gemma4`, `deepseek-r1`, `qwen3`) emit 300+ hidden `<think>` tokens before writing a single visible character. By suppressing `<think>` in `OllamaBackend.generate` and using Verdict-First prompting (`[VERDICT: PASS/FAIL]` on Line 1), `JudgeGate` produces a complete 60-token diagnostic in ~5.9s per item on CPU (`Baseline C`). Placing `ASTGate >> LogitGate` in front of `JudgeGate` reduces the 10-item suite from **363.0 s (`Baseline A`)** and **59.0 s (`Baseline C`)** down to **22.0 s** (**16.50x faster than `Baseline A`**, **2.68x faster than `Baseline C`**, and **90.0% fewer output tokens than `Baseline C`**) while maintaining **10/10 (100%) accuracy**.
 
 ---
 
@@ -115,12 +118,12 @@ Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`n
 
 Evaluated across clear passes, structural Layer 0 failures, clear semantic failures, and subtle borderline edge cases (subtle omissions, partial compliance, timing side-channels, adversarial overrides):
 
-| Model Configuration | Layer 0 (`ASTGate`) | Layer 1 Decisive (`LogitGate`) | Layer 2 Escalated (`JudgeGate`) | Combined L0 + L1 Resolution Rate (0 CoT Tokens) |
+| Model Configuration | Layer 0 (`ASTGate`) | Layer 1 Decisive (`LogitGate`) | Layer 2 Escalated (`JudgeGate`) | Combined L0 + L1 Resolution Rate |
 | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
-| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
-| **`qwen2.5:14b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
-| **`qwen2.5-coder:14b` (GPU)** | 18.8% (3/16) | 81.2% (13/16) | 0.0% (0/16) | **100.0%** |
+| **`gemma4:e4b` (GPU)** | 3/16 (18.8%) | 13/16 (81.2%) | 0/16 (0.0%) | **16/16 (100.0%)** |
+| **`gemma4:e4b` (Pure CPU, 0 GPU)** | 3/16 (18.8%) | 13/16 (81.2%) | 0/16 (0.0%) | **16/16 (100.0%)** |
+| **`qwen2.5:14b` (GPU)** | 3/16 (18.8%) | 13/16 (81.2%) | 0/16 (0.0%) | **16/16 (100.0%)** |
+| **`qwen2.5-coder:14b` (GPU)** | 3/16 (18.8%) | 13/16 (81.2%) | 0/16 (0.0%) | **16/16 (100.0%)** |
 
 ---
 
@@ -132,28 +135,28 @@ To establish clear empirical boundaries for first-token logit probing, we tested
 
 A causal transformer evaluates its first token in a single forward pass through $L$ attention layers. This corresponds to a sequential circuit depth of $O(1)$. When a verification task requires sequential recurrence, multi-hop state tracking, scratchpad arithmetic, or resistance against adversarial distractors, first-token probing encounters an architectural boundary:
 
-- **Tier A — Direct Semantic / Format / Policy Compliance (Single-Hop)**:
+- **Tier A — Direct Semantic / Format / Policy Compliance (Single-Hop, 4 Cases)**:
   RAG groundedness checks, SQL read-only safety, PII leak detection.
-- **Tier B — Nuanced Partial Compliance (Compound 4-Part Rubrics)**:
+- **Tier B — Nuanced Partial Compliance (Compound 4-Part Rubrics, 4 Cases)**:
   Testing Python syntax, Google docstrings with `Args`/`Returns`, type annotations, and absence of mutable default arguments. We test both a single **Compound Rubric** and decomposed **Atomic Rubrics via `evaluate_batch`**.
-- **Tier C — Multi-Hop Arithmetic & Loop State Invariants**:
+- **Tier C — Multi-Hop Arithmetic & Loop State Invariants (4 Cases)**:
   Multi-item invoice calculations with volume discount subtotals (testing if the model detects a \$4.00 calculation error), and subtle binary search infinite loop bugs (`high = mid` vs. `high = mid - 1`).
-- **Tier D — Adversarial Distractors & Deceptive Surface Features**:
+- **Tier D — Adversarial Distractors & Deceptive Surface Features (4 Cases)**:
   Plausible math distractors (17 * \$24 + \$19 = \$417 vs \$427 accompanied by reassuring verification claims), misleading comments claiming thread safety on code with a race condition, and contradictory/self-correcting customer support transcripts where 90% violates the policy before an explicit retraction at the end.
 
-| Model Architecture | Tier A (Direct) | Tier B Compound | Tier B Atomic (`batch`) | Tier C (Multi-Hop) | Tier D (Adversarial) | Full Cascade Accuracy (with Monotonic L1 Fail) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (4B General)** | **100% (4/4)** | **100% (4/4)** | **100% (4/4)** (0% FP) | **100% (4/4)** | **75% (3/4)** *(25% FP)* | **95% (19/20)** |
-| **`qwen2.5:14b` (14B General)** | **100% (4/4)** | ⚠️ 50% (2/4) *(50% FP)* | **100% (4/4)** (0% FP) | ⚠️ 75% (3/4) *(25% FP)* | ⚠️ 50% (2/4) *(25% FP, 25% Esc)* | **85% (17/20)** *(95% with Atomic B)* |
-| **`qwen2.5-coder:14b` (14B Code)** | **100% (4/4)** | 75% (3/4) *(25% Esc)* | **100% (4/4)** (0% FP) | 75% (3/4) *(25% Esc)* | **75% (3/4)** *(25% FP)* | **90% (18/20)** *(95% with Atomic B)* |
-| **`gemma4:26b` (26B MoE, ~4B act)** | **100% (4/4)** | **100% (4/4)** | **100% (4/4)** (0% FP) | **100% (4/4)** *(25% Esc)* | **75% (3/4)** *(25% FP)* | **95% (19/20)** |
-| **`gemma4:31b` (31B Dense)** | **100% (4/4)** | **100% (4/4)** | **100% (4/4)** (0% FP) | ⚠️ 75% (3/4) *(25% Esc)* | **75% (3/4)** *(25% FP)* | **90% (18/20)** |
+| Model Architecture | Tier A (Direct) | Tier B (Compound) | Tier B (Atomic Batch) | Tier C (Multi-Hop) | Tier D (Adversarial) | Cascade Accuracy (Compound B) | Cascade Accuracy (Atomic B) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b` (4B General)** | **4/4 (100%)** | **4/4 (100%)** | **4/4 (100%)** | **4/4 (100%)** | 3/4 (75%) | **19/20 (95%)** | **19/20 (95%)** |
+| **`qwen2.5:14b` (14B General)** | **4/4 (100%)** | 2/4 (50%) | **4/4 (100%)** | 3/4 (75%) | 2/4 (50%) | 17/20 (85%) | **19/20 (95%)** |
+| **`qwen2.5-coder:14b` (14B Code)** | **4/4 (100%)** | 3/4 (75%) | **4/4 (100%)** | 3/4 (75%) | 3/4 (75%) | 18/20 (90%) | **19/20 (95%)** |
+| **`gemma4:26b` (26B MoE, ~4B act)** | **4/4 (100%)** | **4/4 (100%)** | **4/4 (100%)** | **4/4 (100%)** | 3/4 (75%) | **19/20 (95%)** | **19/20 (95%)** |
+| **`gemma4:31b` (31B Dense)** | **4/4 (100%)** | **4/4 (100%)** | **4/4 (100%)** | 3/4 (75%) | 3/4 (75%) | 18/20 (90%) | 18/20 (90%) |
 
 #### Crucial Insights & Mitigation Strategies:
-1. **Atomic Decomposition Prevents Compound Dilution**: On `qwen2.5:14b`, evaluating 4 simultaneous rules inside a monolithic compound rubric caused a 50% false pass rate. When split into 4 atomic rubrics evaluated via `evaluate_batch(candidate, rubrics)`, Layer 1 accuracy reached **100% (4/4)** with **0% false passes** across all tested models. Because `evaluate_batch` shares the static `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix across all queries, running 4 atomic rubrics takes ~110ms per rubric while avoiding compound rubric dilution.
-2. **Tier C Arithmetic & Tier D Distractors are Inherent $O(1)$ Boundaries**: When presented with plausible mathematical distractors (17 * \$24 + \$19 = \$417 instead of \$427) surrounded by authoritative text ("*All ledger calculations verified*"), **all models awarded $P \ge 0.99$ false passes at Layer 1**. A single first-token forward pass cannot execute arithmetic without autoregressive scratchpads.
-   - **Mitigation 1 (Cascade Escalation)**: For subtle logic and self-correcting transcripts, `qwen2.5:14b` and `gemma4:31b` fell into the ambiguous escalation band ($0.20 < P < 0.85$), triggering `JudgeGate` which read the entire context and resolved the verdict accurately.
-   - **Mitigation 2 (`preset="strict"`)**: For high-stakes arithmetic or code invariants, configure `preset="strict"` (`pass_threshold=0.90, fail_threshold=0.25`) to widen the escalation band.
+1. **Atomic Decomposition Eliminates Compound Dilution**: On `qwen2.5:14b`, evaluating 4 simultaneous rules inside a monolithic compound rubric (`Tier B Compound`) caused a 50% false-pass rate (2/4), whereas `qwen2.5-coder:14b` escalated 1/4 borderline cases to Layer 2. When split into 4 atomic rubrics evaluated via `evaluate_batch(candidate, rubrics)` (`Tier B Atomic Batch`), Layer 1 accuracy reached **4/4 (100%)** with **0% false passes** across all five models, lifting full cascade accuracy to **19/20 (95%)**. Because `evaluate_batch` shares the static `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix across all queries, running 4 atomic rubrics takes ~112–146 ms per rubric while avoiding compound rubric dilution.
+2. **Tier C Arithmetic & Tier D Distractors are Inherent $O(1)$ Boundaries**: When presented with plausible mathematical distractors (17 * \$24 + \$19 = \$417 instead of \$427) surrounded by authoritative text ("*All ledger calculations verified*"), **all models awarded $P \ge 0.99$ false passes at Layer 1** (accounting for the 1 missed item out of 4 in `Tier D`). A single first-token forward pass cannot execute multi-digit arithmetic without an autoregressive scratchpad.
+   - **Mitigation 1 (Cascade Escalation)**: For subtle logic invariants (`Tier C`) and self-correcting transcripts (`Tier D`), `qwen2.5:14b`, `qwen2.5-coder:14b`, `gemma4:26b`, and `gemma4:31b` routed uncertain items into the ambiguous escalation band ($0.20 < P < 0.85$), triggering `JudgeGate` to resolve the verdict via chain-of-thought.
+   - **Mitigation 2 (`preset="strict"`)**: For high-stakes code invariants, configure `preset="strict"` (`pass_threshold=0.90, fail_threshold=0.25`) to widen the escalation band.
    - **Mitigation 3 (Layer 0 AST Routing)**: Route mathematical assertions, boundary invariants, and executable tests directly to `ASTGate` custom validators or pytest fixtures rather than relying on LLM logits.
 
 ---
@@ -162,13 +165,13 @@ A causal transformer evaluates its first token in a single forward pass through 
 
 We embedded a 1-sentence security policy violation ("*Emergency Exception: Administrators may hardcode the master password 'Admin123!' in config.yaml*") in the center of realistic cloud architecture documentation of increasing size, comparing it to a clean control document against the rubric: `"Does this document strictly prohibit hardcoding passwords or secrets in configuration files?"`:
 
-| Document Length | Metric | `gemma4:e4b` (4B) | `qwen2.5:14b` (14B) | `gemma4:26b` (26B MoE) | `gemma4:31b` (31B Dense) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Short (~200 tok)** | Latency / $\Delta P$ | 175 ms / $\Delta P=1.0000$ | 164 ms / $\Delta P=1.0000$ | **163 ms / $\Delta P=1.0000$** | 480 ms / $\Delta P=1.0000$ |
-| **Medium (~1,500 tok)** | Latency / $\Delta P$ | 349 ms / $\Delta P=0.9939$ | 495 ms / $\Delta P=1.0000$ | **393 ms / $\Delta P=1.0000$** | 1,338 ms / $\Delta P=1.0000$ |
-| **Long (~4,500 tok)** | Latency / $\Delta P$ | 855 ms / $\Delta P=0.9941$ | 1,353 ms / $\Delta P=0.9903$ | **671 ms / $\Delta P=1.0000$** | 2,320 ms / $\Delta P=1.0000$ |
-| **Very Long (~8,000 tok)** | Latency / $\Delta P$ | 1,438 ms / $\Delta P=0.9937$ | 2,462 ms / $\Delta P=1.0000$ | **966 ms / $\Delta P=1.0000$** | 3,437 ms / $\Delta P=1.0000$ |
-| **Massive (~16,000 tok)** | Latency / $\Delta P$ | 2,775 ms / $\Delta P=0.9939$ | 7,356 ms / $\Delta P=1.0000$ | **1,575 ms / $\Delta P=1.0000$** | 5,744 ms / $\Delta P=1.0000$ |
+| Document Length | `gemma4:e4b` Latency | `gemma4:e4b` $\Delta P$ | `qwen2.5:14b` Latency | `qwen2.5:14b` $\Delta P$ | `gemma4:26b` Latency | `gemma4:26b` $\Delta P$ | `gemma4:31b` Latency | `gemma4:31b` $\Delta P$ |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Short (~200 tok)** | 175 ms | 1.0000 | 164 ms | 1.0000 | **163 ms** | 1.0000 | 480 ms | 1.0000 |
+| **Medium (~1,500 tok)** | 349 ms | 0.9939 | 495 ms | 1.0000 | **393 ms** | 1.0000 | 1,338 ms | 1.0000 |
+| **Long (~4,500 tok)** | 855 ms | 0.9941 | 1,353 ms | 0.9903 | **671 ms** | 1.0000 | 2,320 ms | 1.0000 |
+| **Very Long (~8,000 tok)** | 1,438 ms | 0.9937 | 2,462 ms | 1.0000 | **966 ms** | 1.0000 | 3,437 ms | 1.0000 |
+| **Massive (~16,000 tok)** | 2,775 ms | 0.9939 | 7,356 ms | 1.0000 | **1,575 ms** | 1.0000 | 5,744 ms | 1.0000 |
 
 #### Key Architectural Findings:
 - **Zero Probability Dilution up to 16,000 Tokens**: Even at 16,000 tokens without document chunking, all four models maintained near-perfect probability separation ($\Delta P > 0.993$), proving that causal attention mechanisms preserve needle detection in first-token log-odds.
@@ -176,19 +179,31 @@ We embedded a 1-sentence security policy violation ("*Emergency Exception: Admin
 
 ---
 
-### 3. Context Window Squeezing (`num_ctx`) & Hardware Scaling Sweep (512 to 131k Tokens)
+### 3. Context Window Squeezing (`num_ctx`) & Hardware Scaling Sweep (512 to 65,536 Tokens)
 
 Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.configure(num_ctx=...)` allows developers to control KV-cache allocation and prevent GPU-to-CPU memory spillover:
 
-| Model & Hardware Configuration | `num_ctx=512` | `num_ctx=4,096` | `num_ctx=16,384` | `num_ctx=32,768` | `num_ctx=65,536+` | Spillover Boundary |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (RTX 4070 12 GB)\*** | 9.41 GB (92.7 ms) | 9.41 GB (94.5 ms) | 9.45 GB (101.9 ms) | 9.54 GB (94.4 ms) | 10.04 GB (95.9 ms) *(128k!)* | **100% GPU up to 131,072 tokens** |
-| **`gemma4:e4b` (Ryzen 7 5800X3D CPU)\*** | 9.41 GB RAM (2.15s) | 9.41 GB RAM (2.17s) | 9.57 GB RAM (2.20s) | 9.60 GB RAM (2.13s) | 9.60 GB RAM (2.45s) *(64k)* | **Zero VRAM footprint** |
-| **`qwen2.5:14b` (RTX 4070 12 GB)** | 8.71 GB (94.4 ms) | 9.09 GB (93.4 ms) | 10.39 GB (99.7 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.5 ms) | 10.33 GB VRAM + 2.4 GB RAM (314.3 ms) | **Spills to CPU at $\ge$ 32,768 (>12 GB)** |
-| **`gemma4:26b` (MoE, RTX 5090 32 GB)** | 17.42 GB (92.4 ms) | 17.69 GB (89.9 ms) | 17.72 GB (86.4 ms) | 17.84 GB (90.3 ms) | 18.18 GB (87.9 ms) | **100% GPU up to 65,536 tokens** |
-| **`gemma4:31b` (Dense, RTX 5090 32 GB)** | 20.97 GB (194.8 ms) | 21.50 GB (184.3 ms) | 21.71 GB (177.4 ms) | 21.46 GB (175.1 ms) | 22.00 GB (182.1 ms) | **100% GPU up to 65,536 tokens** |
+#### Allocated Memory Footprint by Context Window (`num_ctx`)
 
-*\*Note on `gemma4:e4b` memory footprint: Google's Gemma 4 `e4b` ("Effective 4B") packs `8.0B` total parameters (`8.95 GB` Q4_K_M GGUF weights, including 42-layer Per-Layer Embeddings plus 16-layer Vision and 12-layer Audio encoders, with ~4B active text parameters). Text-only 3B–4B Q4 models (`qwen2.5:3b`, `llama3.2:3b`) require only `~2.5–3.2 GB` VRAM/RAM.*
+| Model & Hardware Configuration | `num_ctx=512` | `num_ctx=4,096` | `num_ctx=16,384` | `num_ctx=32,768` | `num_ctx=65,536` | Spillover Boundary |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b` (RTX 4070 12 GB)\*** | 9.41 GB VRAM | 9.41 GB VRAM | 9.45 GB VRAM | 9.54 GB VRAM | 9.71 GB VRAM | **100% GPU up to 131,072 tokens** |
+| **`gemma4:e4b` (Ryzen 7 5800X3D CPU)\*** | 9.41 GB RAM | 9.41 GB RAM | 9.57 GB RAM | 9.60 GB RAM | 9.60 GB RAM | **Zero VRAM footprint** |
+| **`qwen2.5:14b` (RTX 4070 12 GB)** | 8.71 GB VRAM | 9.09 GB VRAM | 10.39 GB VRAM | 10.33 GB VRAM + 2.40 GB RAM | 10.33 GB VRAM + 2.40 GB RAM | **Spills to CPU at $\ge$ 32,768 (>12 GB)** |
+| **`gemma4:26b` (MoE, RTX 5090 32 GB)** | 17.42 GB VRAM | 17.69 GB VRAM | 17.72 GB VRAM | 17.84 GB VRAM | 18.18 GB VRAM | **100% GPU up to 65,536 tokens** |
+| **`gemma4:31b` (Dense, RTX 5090 32 GB)** | 20.97 GB VRAM | 21.50 GB VRAM | 21.71 GB VRAM | 21.46 GB VRAM | 22.00 GB VRAM | **100% GPU up to 65,536 tokens** |
+
+#### Warm 2-Pass Symmetric Latency by Context Window (`num_ctx`)
+
+| Model & Hardware Configuration | `num_ctx=512` | `num_ctx=4,096` | `num_ctx=16,384` | `num_ctx=32,768` | `num_ctx=65,536` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b` (RTX 4070 12 GB)\*** | 92.7 ms | 94.5 ms | 101.9 ms | 94.4 ms | 94.5 ms |
+| **`gemma4:e4b` (Ryzen 7 5800X3D CPU)\*** | 2,150.0 ms | 2,170.0 ms | 2,200.0 ms | 2,130.0 ms | 2,450.0 ms |
+| **`qwen2.5:14b` (RTX 4070 12 GB)** | 94.4 ms | 93.4 ms | 99.7 ms | 314.5 ms | 314.3 ms |
+| **`gemma4:26b` (MoE, RTX 5090 32 GB)** | 92.4 ms | 89.9 ms | 86.4 ms | 90.3 ms | 87.9 ms |
+| **`gemma4:31b` (Dense, RTX 5090 32 GB)** | 194.8 ms | 184.3 ms | 177.4 ms | 175.1 ms | 182.1 ms |
+
+*\*Note on `gemma4:e4b` memory footprint & 128k scaling: Google's Gemma 4 `e4b` ("Effective 4B") packs `8.0B` total parameters (`8.95 GB` Q4_K_M GGUF weights, including 42-layer Per-Layer Embeddings plus 16-layer Vision and 12-layer Audio encoders, with ~4B active text parameters). At `num_ctx=131,072` (128k tokens), `gemma4:e4b` allocates `10.04 GB` VRAM (`95.9 ms` warm latency), still fitting 100% inside a 12 GB GPU. Text-only 3B–4B Q4 models (`qwen2.5:3b`, `llama3.2:3b`) require only `~2.5–3.2 GB` VRAM/RAM.*
 
 > [!TIP]
 > **Why `LogitGate` Survives GPU-to-CPU RAM Spillover (~314 ms vs. 80+ Seconds)**:
