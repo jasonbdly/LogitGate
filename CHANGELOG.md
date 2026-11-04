@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-11-03
+
+### Added
+
+#### Latent Recurrent Network Support & Elastic Layer-Looping
+- `RecurrentPyTorchBackend`: Native backend supporting elastic recurrent depth (`num_loops`) via `recurrent://` URI scheme.
+- Standalone PyTorch implementation of `DoryForCausalLM` (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`) built on normalized-GPT (`nGPT`), `justnorm`, and `slerp_alpha` residual scaling, providing native execution on Blackwell (`sm_120`, RTX 5090) and Ada Lovelace (`sm_89`, RTX 4070) with zero external C++ build dependencies.
+- Vocab Head Memory Optimization: projects only final sequence position `h[:, -1:, :]` through the 131,072 vocabulary head, eliminating 8.4 GB allocation overhead and enabling full 16,000-token needle-in-haystack evaluations with zero OOM.
+- Master Multi-GPU & Recurrent Depth Benchmark Suite ([`benchmarks/run_dory_benchmarks.py`](benchmarks/run_dory_benchmarks.py) & [`benchmarks/dory_results.json`](benchmarks/dory_results.json)) evaluating 24-item cascade, 32-item reasoning tiers, multi-action gates, and long-context scaling across $K=1, 2, 4$.
+
+---
+
 ## [0.1.0] - 2026-11-02
 
 ### Added

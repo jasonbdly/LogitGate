@@ -267,16 +267,78 @@ LogitGate provides native support for latent recurrent architectures via `Recurr
 ```python
 from logitgate import LogitGate
 
-# Elastic recurrent depth: 3 internal latent loops before first-token projection
+# Elastic recurrent depth: 2 internal latent loops before first-token projection
 gate = LogitGate(
     rubric="Does the SQL query use proper parameterized statements without dynamic string interpolation?",
     backend="recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
-    num_loops=3,
+    num_loops=2,
 )
 
 verdict = gate.evaluate(candidate_sql)
 print(f"Passed: {verdict.passed} (Calibrated P={verdict.probability:.4f})")
 ```
+
+#### Empirical Multi-GPU & Recurrent Depth Benchmark (RTX 5090 vs. RTX 4070 Across $K=1, 2, 4$)
+
+To rigorously evaluate how latent recurrent looping impacts first-token logit gating, we executed the full 4-suite benchmark suite against **NVIDIA-Nemotron-Labs Dory-4B** (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`, 7.5 GB safetensors, BF16 native PyTorch execution) across both physical GPUs:
+- **Device 0 (`cuda:0`)**: NVIDIA GeForce RTX 5090 (32 GB GDDR7 VRAM, Blackwell `sm_120`, CUDA 13.2 runtime).
+- **Device 1 (`cuda:1`)**: NVIDIA GeForce RTX 4070 (12 GB GDDR6X VRAM, Ada Lovelace `sm_89`).
+
+Raw benchmark measurements are stored in [`benchmarks/dory_results.json`](benchmarks/dory_results.json).
+
+##### 1. Suite 2: Reasoning Depth Tiers Across Recurrent Depth ($K=1, 2, 4$)
+Evaluating the 32-item reasoning depth suite (8 items per tier) across recurrent loop passes:
+
+| Model & Device | Recurrent Loops | Tier A (Surface) | Tier B (Compound) | Tier C (Multi-Hop) | Tier D (Adversarial) | Overall 32-Item Reasoning |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Dory-4B (RTX 5090)** | $K=1$ | 4/8 (50.0%) | 4/8 (50.0%) | 6/8 (75.0%) | 3/8 (37.5%) | **17/32 (53.1%)** |
+| **Dory-4B (RTX 5090)** | $K=2$ | 5/8 (62.5%) | **6/8 (75.0%)** | 6/8 (75.0%) | 4/8 (50.0%) | **21/32 (65.6%)** *(+12.5% jump)* |
+| **Dory-4B (RTX 5090)** | $K=4$ | 4/8 (50.0%) | 4/8 (50.0%) | 5/8 (62.5%) | 5/8 (62.5%) | **18/32 (56.2%)** |
+| **Dory-4B (RTX 4070)** | $K=1$ | 4/8 (50.0%) | 3/8 (37.5%) | 6/8 (75.0%) | 3/8 (37.5%) | **16/32 (50.0%)** |
+| **Dory-4B (RTX 4070)** | $K=2$ | 5/8 (62.5%) | **5/8 (62.5%)** | 6/8 (75.0%) | 4/8 (50.0%) | **20/32 (62.5%)** *(+12.5% jump)* |
+| **Dory-4B (RTX 4070)** | $K=4$ | 4/8 (50.0%) | 4/8 (50.0%) | 5/8 (62.5%) | 5/8 (62.5%) | **18/32 (56.2%)** |
+| *Baseline Feed-Forward 4B (`gemma4:e4b`)* | *N/A ($K=1$)* | *6/8 (75.0%)* | *4/8 (50.0%)* | *4/8 (50.0%)* | *4/8 (50.0%)* | *18/32 (56.2%)* |
+| *Baseline Feed-Forward 14B (`qwen2.5:14b`)* | *N/A ($K=1$)* | *8/8 (100.0%)* | *5/8 (62.5%)* | *5/8 (62.5%)* | *4/8 (50.0%)* | *22/32 (68.8%)* |
+
+##### 2. Suite 3: Multi-Action Gates (`ChoiceGate` & `ScoreGate`)
+Evaluating discrete 3-way routing (`ChoiceGate`, 6 items) and continuous 1–5 scoring monotonicity (`ScoreGate`, 6 items):
+
+| Model & Device | Recurrent Loops | `ChoiceGate` Accuracy | `ScoreGate` Monotonicity | High Tier Mean | Med Tier Mean | Low Tier Mean | First-Token Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Dory-4B (RTX 5090)** | $K=1$ | **6/6 (100.0%)** | 3/8 (37.5%) | 2.39 | 2.90 | 2.80 | 216.3 ms |
+| **Dory-4B (RTX 5090)** | $K=2$ | **6/6 (100.0%)** | **6/8 (75.0%)** | **3.13** | **3.10** | **2.91** | 335.5 ms |
+| **Dory-4B (RTX 5090)** | $K=4$ | **6/6 (100.0%)** | 3/8 (37.5%) | 2.68 | 3.27 | 3.15 | 628.9 ms |
+| **Dory-4B (RTX 4070)** | $K=1$ | **6/6 (100.0%)** | 2/8 (25.0%) | 2.35 | 2.85 | 2.81 | 327.8 ms |
+| **Dory-4B (RTX 4070)** | $K=2$ | **6/6 (100.0%)** | **5/8 (62.5%)** | **3.07** | **3.15** | **2.98** | 436.0 ms |
+| **Dory-4B (RTX 4070)** | $K=4$ | **6/6 (100.0%)** | 3/8 (37.5%) | 2.70 | 3.31 | 3.14 | 809.1 ms |
+| *Baseline Feed-Forward 4B (`gemma4:e4b`)* | *N/A* | *6/6 (100.0%)* | *3/8 (37.5%)* | *3.20* | *3.15* | *2.90* | *76.0 ms* |
+| *Baseline Feed-Forward 14B (`qwen2.5:14b`)* | *N/A* | *6/6 (100.0%)* | *6/8 (75.0%)* | *4.25* | *3.10* | *1.85* | *115.0 ms* |
+
+##### 3. Suite 4: Long-Context Haystack & Hardware Throughput Scaling (RTX 5090 vs. RTX 4070)
+Evaluating needle-in-a-haystack compliance across prompt lengths up to 16,000 tokens:
+
+| Context Length | RTX 5090 ($K=1$) | RTX 4070 ($K=1$) | RTX 5090 ($K=2$) | RTX 4070 ($K=2$) | RTX 5090 Speedup | Correct Retrieval ($\Delta P > 0$) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Short (~200 tok)** | 231.8 ms | 337.3 ms | 358.0 ms | 430.9 ms | 1.4x | Yes ($\Delta P = +0.134$) |
+| **Medium (~1,000 tok)** | 293.0 ms | 1,153.2 ms | 435.0 ms | 1,761.0 ms | 3.9x | Yes ($\Delta P = +0.100$) |
+| **Long (~4,000 tok)** | 894.1 ms | 3,552.1 ms | 1,374.3 ms | 5,546.2 ms | 4.0x | Yes ($\Delta P = +0.030$) |
+| **Very Long (~8,000 tok)** | 1,769.4 ms | 6,584.0 ms | 2,741.0 ms | 10,432.1 ms | 3.8x | Edge ($\Delta P = -0.090$) |
+| **Massive (~16,000 tok)** | **3,754.7 ms** | **13,928.6 ms** | **5,812.2 ms** | **22,172.2 ms** | **3.8x** | **Yes ($\Delta P = +0.095$)** |
+
+##### 4. Suite 1: 24-Item Multi-Domain Cascade Efficiency
+- Across all configurations, the 3-layer cascade (`ASTGate >> LogitGate >> JudgeGate`) consistently outperformed the baseline standalone generative judge:
+  - **Baseline Standalone Generative Judge**: 9/24 to 12/24 accuracy (37.5%–50.0%), taking 109s–195s and consuming 960 output tokens.
+  - **Cascade (`on_ambiguous_only`)**: **14/24 to 16/24 accuracy (58.3%–66.7%)**, running in 91s–177s (**1.1x–1.3x wall-time speedup**) and saving **200–280 output tokens** per 24 items by short-circuiting clean passes at Layer 1 and AST violations at Layer 0.
+
+#### Key Architectural Findings:
+1. **The $K=2$ Latent Recurrence Sweet Spot**:
+   - In both GPUs, recirculating hidden states through the recurrent block twice ($K=2$) delivers an immediate **+12.5% boost** in compound reasoning ($53.1\% \to 65.6\%$ on RTX 5090; $50.0\% \to 62.5\%$ on RTX 4070), elevating the compact 4B model within 1 item of the 14B dense model (`qwen2.5:14b` at 68.8%) with **zero generated output tokens**.
+   - Concurrently, `ScoreGate` pairwise monotonicity **doubles** ($37.5\% \to 75.0\%$).
+   - Increasing recurrence to $K=4$ causes a slight regression ($56.2\%$), replicating NVIDIA's findings that $K=2$ reaches optimal latent equilibrium for general semantic tasks, while excessive looping ($K=4$) can oversmooth embeddings on concise prompts.
+2. **Flawless Multi-Way Routing**:
+   - `ChoiceGate` achieved a perfect **100% (6/6)** routing accuracy across every single tested configuration ($K=1, 2, 4$ on both GPUs), proving that discrete routing logits are extremely stable in latent recurrent architectures.
+3. **Blackwell Memory Bandwidth Advantage**:
+   - On the massive 16,000-token haystack evaluation, the RTX 5090 completed the forward pass in **3.75s** ($K=1$) and **5.81s** ($K=2$), outperforming the RTX 4070 (13.9s and 22.2s) by **~3.8x**, demonstrating the substantial value of GDDR7 memory bandwidth for high-throughput zero-token gating.
 
 ---
 

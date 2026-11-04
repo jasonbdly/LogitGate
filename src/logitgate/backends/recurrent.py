@@ -80,14 +80,24 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
 
         if self._model is None:
             target_dtype = self.torch_dtype or (torch.bfloat16 if torch.cuda.is_available() else torch.float32)
-            self._model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=target_dtype,
-                trust_remote_code=True,
-                device_map=self.device if self.device != "auto" else "auto",
-            )
-            if self.device not in ("auto", "cuda") and hasattr(self._model, "to"):
-                self._model = self._model.to(self.device)
+            if "dory" in self.model_name.lower():
+                from logitgate.backends.dory_pytorch import load_dory_model
+
+                self._model = load_dory_model(
+                    model_name_or_path=self.model_name,
+                    device=self.device if self.device != "auto" else ("cuda:0" if torch.cuda.is_available() else "cpu"),
+                    num_loops=self.num_loops,
+                    torch_dtype=target_dtype,
+                )
+            else:
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    torch_dtype=target_dtype,
+                    trust_remote_code=True,
+                    device_map=self.device if self.device != "auto" else "auto",
+                )
+                if self.device not in ("auto", "cuda") and hasattr(self._model, "to"):
+                    self._model = self._model.to(self.device)
 
         return self._model, self._tokenizer
 
@@ -121,11 +131,24 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         except (ValueError, TypeError):
             kwargs["num_loops"] = self.num_loops
 
-        outputs = model(**inputs, **kwargs)
-        if hasattr(outputs.logits, "ndim"):
-            logits = outputs.logits[0, -1, :]  # Shape: (vocab_size,)
+        try:
+            import torch
+            no_grad_ctx = torch.no_grad()
+        except ImportError:
+            from contextlib import nullcontext
+            no_grad_ctx = nullcontext()
+
+        with no_grad_ctx:
+            outputs = model(**inputs, **kwargs)
+        if hasattr(outputs, "logits"):
+            if hasattr(outputs.logits, "ndim"):
+                logits = outputs.logits[0, -1, :]
+            else:
+                logits = outputs.logits[0][-1]
+        elif hasattr(outputs, "ndim"):
+            logits = outputs[0, -1, :]
         else:
-            logits = outputs.logits[0][-1]
+            logits = outputs[0][-1]
 
         # Compute log_softmax
         try:
@@ -153,14 +176,29 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
                 return results
 
         # General top_k
+        top_k_count = max(top_k, 50)
         try:
             import torch
 
             if isinstance(log_probs, torch.Tensor):
-                top_vals, top_indices = torch.topk(log_probs, min(top_k, log_probs.size(-1)))
+                top_vals, top_indices = torch.topk(log_probs, min(top_k_count, log_probs.size(-1)))
+                seen_indices = set(top_indices.tolist())
                 for lp, idx in zip(top_vals.tolist(), top_indices.tolist()):
                     token_str = tokenizer.decode([idx])
                     results.append({"token": token_str, "logprob": float(lp)})
+
+                # Always guarantee standard candidate tokens are present so extract_token_logprob never misses them
+                guaranteed = ["A", "B", " A", " B", "1", "2", "3", "4", "5", " 1", " 2", " 3", " 4", " 5"]
+                if allowed_tokens:
+                    guaranteed.extend(allowed_tokens)
+                for g_tok in guaranteed:
+                    ids = tokenizer.encode(g_tok, add_special_tokens=False)
+                    if ids:
+                        tid = ids[-1]
+                        if tid not in seen_indices:
+                            seen_indices.add(tid)
+                            lp = float(log_probs[tid])
+                            results.append({"token": g_tok, "logprob": lp})
                 return results
         except (ImportError, AttributeError, TypeError, ValueError):
             pass
@@ -195,8 +233,13 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         except (ValueError, TypeError):
             gen_kwargs["num_loops"] = self.num_loops
 
-        outputs = model.generate(**inputs, **gen_kwargs)
-        input_len = inputs["input_ids"].shape[-1]
+        if hasattr(inputs, "__getitem__") and "input_ids" in inputs:
+            input_tensor = inputs["input_ids"]
+        else:
+            input_tensor = inputs
+
+        outputs = model.generate(input_tensor, **gen_kwargs)
+        input_len = input_tensor.shape[-1]
         generated_ids = outputs[0][input_len:]
         text = tokenizer.decode(generated_ids, skip_special_tokens=True)
         return text, len(generated_ids)

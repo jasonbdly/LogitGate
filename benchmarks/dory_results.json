@@ -1,0 +1,3054 @@
+{
+  "cuda:0": {
+    "k1": {
+      "device": "cuda:0",
+      "num_loops": 1,
+      "model_name": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+      "suite_1_multi_domain_24": {
+        "model": "dory-4b_cuda:0_k1",
+        "baseline_time_ms": 109190.4,
+        "baseline_tokens": 960,
+        "baseline_accuracy": "12/24 (50.0%)",
+        "cascade_ambig_or_fail_time_ms": 96317.1,
+        "cascade_ambig_or_fail_tokens": 800,
+        "cascade_ambig_or_fail_accuracy": "14/24 (58.3%)",
+        "cascade_ambig_only_time_ms": 91776.1,
+        "cascade_ambig_only_tokens": 760,
+        "cascade_ambig_only_accuracy": "14/24 (58.3%)",
+        "speedup_ambig_only": 1.2,
+        "tokens_saved_ambig_only": 200,
+        "layer_resolution": {
+          "l0_ast": "2/24 (8.3%)",
+          "l1_decisive": "3/24 (12.5%)",
+          "l2_escalated": "19/24 (79.2%)",
+          "l0_plus_l1_rate": "5/24 (20.8%)"
+        }
+      },
+      "suite_2_reasoning_depth_32": {
+        "tier_a": {
+          "l1_correct": 8,
+          "total": 8,
+          "l1_accuracy": "8/8 (100.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "rag_1_pass_exact",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6418,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_2_pass_paraphrase",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8005,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "support_1_pass_2fa_enforcement",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8429,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "sql_1_pass_cte_analytics",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8248,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_4_fail_scope_overgeneralization",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2642,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_5_fail_regional_extrapolation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4869,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "support_5_fail_requests_cvv_and_password",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2827,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "sql_5_fail_writable_cte_delete",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4306,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_compound": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7599,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7083,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7399,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8121,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6192,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8011,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6741,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6008,
+              "l1_correct": false,
+              "casc_correct": false
+            }
+          ]
+        },
+        "tier_b_atomic": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_escalated": 8,
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "probs": [
+                0.6314,
+                0.724,
+                0.596,
+                0.6255
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "probs": [
+                0.6374,
+                0.793,
+                0.6131,
+                0.6949
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "probs": [
+                0.6614,
+                0.6791,
+                0.5448,
+                0.6349
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "probs": [
+                0.5852,
+                0.6184,
+                0.5688,
+                0.6227
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "probs": [
+                0.6127,
+                0.6979,
+                0.6126,
+                0.6112
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "probs": [
+                0.6161,
+                0.7623,
+                0.5688,
+                0.6762
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "probs": [
+                0.6737,
+                0.8018,
+                0.6164,
+                0.7189
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "probs": [
+                0.5415,
+                0.6647,
+                0.5046,
+                0.5178
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_c": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 1,
+          "l1_false_pass_rate": "1/4 (25.0%)",
+          "l1_escalated": 5,
+          "l1_escalation_rate": "5/8 (62.5%)",
+          "casc_correct": 6,
+          "casc_accuracy": "6/8 (75.0%)",
+          "items": [
+            {
+              "id": "tier_c_1_invoice_math_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8598,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_2_invoice_math_fail",
+              "expected": false,
+              "l1_status": "passed",
+              "l1_prob": 0.8629,
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_3_binary_search_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7405,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_4_binary_search_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7419,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_5_sliding_window_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8201,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_6_sliding_window_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6159,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_7_interval_overlap_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8694,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_8_interval_overlap_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5081,
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_d": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 1,
+          "l1_false_pass_rate": "1/4 (25.0%)",
+          "l1_escalated": 6,
+          "l1_escalation_rate": "6/8 (75.0%)",
+          "casc_correct": 3,
+          "casc_accuracy": "3/8 (37.5%)",
+          "items": [
+            {
+              "id": "tier_d_1_fail_deceptive_threadsafe_cache",
+              "expected": false,
+              "l1_status": "failed",
+              "l1_prob": 0.1027,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_2_fail_math_distractor_with_audit_stamp",
+              "expected": false,
+              "l1_status": "passed",
+              "l1_prob": 0.9073,
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_3_fail_deceptive_sql_sanitizer",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6028,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_4_fail_silent_exception_swallow",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4009,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_5_pass_self_correcting_support_transcript",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6161,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_6_pass_runbook_listing_forbidden_commands",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7961,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_7_pass_allowlisted_column_sort",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4975,
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_8_pass_locked_concurrent_cache",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5343,
+              "l1_correct": true,
+              "casc_correct": false
+            }
+          ]
+        },
+        "summary_32": {
+          "cascade_compound_b": "17/32 (53.1%)",
+          "cascade_atomic_b": "17/32 (53.1%)"
+        }
+      },
+      "suite_3_choice_and_score": {
+        "choice_gate": {
+          "correct": 6,
+          "total": 6,
+          "accuracy": "6/6 (100.0%)",
+          "mean_latency_ms": 216.3,
+          "std_latency_ms": 8.1
+        },
+        "score_gate": {
+          "score_high_mean": 2.39,
+          "score_medium_mean": 2.9,
+          "score_low_mean": 2.8,
+          "monotonic_pairs": 3,
+          "total_pairs": 8,
+          "monotonicity_rate": "3/8 (37.5%)",
+          "in_band_rate": "2/6 (33.3%)",
+          "mean_latency_ms": 218.9,
+          "std_latency_ms": 1.4
+        }
+      },
+      "suite_4_diverse_haystack": [
+        {
+          "tier": "Short (~200 tok)",
+          "warm_latency_ms": 231.8,
+          "p_compliant": 0.2399,
+          "p_violating": 0.3533,
+          "delta_p": -0.1134,
+          "correct_both": false
+        },
+        {
+          "tier": "Medium (~1,500 tok)",
+          "warm_latency_ms": 293.2,
+          "p_compliant": 0.5618,
+          "p_violating": 0.4614,
+          "delta_p": 0.1004,
+          "correct_both": true
+        },
+        {
+          "tier": "Long (~4,500 tok)",
+          "warm_latency_ms": 893.6,
+          "p_compliant": 0.5031,
+          "p_violating": 0.4726,
+          "delta_p": 0.0305,
+          "correct_both": true
+        },
+        {
+          "tier": "Very Long (~8,000 tok)",
+          "warm_latency_ms": 1768.7,
+          "p_compliant": 0.3464,
+          "p_violating": 0.4695,
+          "delta_p": -0.1231,
+          "correct_both": false
+        },
+        {
+          "tier": "Massive (~16,000 tok)",
+          "warm_latency_ms": 3754.7,
+          "p_compliant": 0.5088,
+          "p_violating": 0.4643,
+          "delta_p": 0.0445,
+          "correct_both": true
+        }
+      ]
+    },
+    "k2": {
+      "device": "cuda:0",
+      "num_loops": 2,
+      "model_name": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+      "suite_1_multi_domain_24": {
+        "model": "dory-4b_cuda:0_k2",
+        "baseline_time_ms": 167813.8,
+        "baseline_tokens": 960,
+        "baseline_accuracy": "9/24 (37.5%)",
+        "cascade_ambig_or_fail_time_ms": 133320.2,
+        "cascade_ambig_or_fail_tokens": 720,
+        "cascade_ambig_or_fail_accuracy": "14/24 (58.3%)",
+        "cascade_ambig_only_time_ms": 126200.0,
+        "cascade_ambig_only_tokens": 680,
+        "cascade_ambig_only_accuracy": "14/24 (58.3%)",
+        "speedup_ambig_only": 1.3,
+        "tokens_saved_ambig_only": 280,
+        "layer_resolution": {
+          "l0_ast": "2/24 (8.3%)",
+          "l1_decisive": "5/24 (20.8%)",
+          "l2_escalated": "17/24 (70.8%)",
+          "l0_plus_l1_rate": "7/24 (29.2%)"
+        }
+      },
+      "suite_2_reasoning_depth_32": {
+        "tier_a": {
+          "l1_correct": 8,
+          "total": 8,
+          "l1_accuracy": "8/8 (100.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 6,
+          "l1_escalation_rate": "6/8 (75.0%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "rag_1_pass_exact",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7562,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_2_pass_paraphrase",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7898,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "support_1_pass_2fa_enforcement",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6872,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "sql_1_pass_cte_analytics",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.957,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_4_fail_scope_overgeneralization",
+              "expected": false,
+              "l1_status": "failed",
+              "l1_prob": 0.195,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_5_fail_regional_extrapolation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3549,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "support_5_fail_requests_cvv_and_password",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2754,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "sql_5_fail_writable_cte_delete",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3804,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_compound": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 6,
+          "casc_accuracy": "6/8 (75.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.71,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7327,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7784,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7773,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5629,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6388,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6856,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5476,
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_atomic": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_escalated": 8,
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "probs": [
+                0.6043,
+                0.6672,
+                0.6119,
+                0.72
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "probs": [
+                0.6305,
+                0.7354,
+                0.6267,
+                0.689
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "probs": [
+                0.6483,
+                0.621,
+                0.5114,
+                0.7523
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "probs": [
+                0.5699,
+                0.5848,
+                0.498,
+                0.545
+              ],
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "probs": [
+                0.5775,
+                0.604,
+                0.5787,
+                0.6061
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "probs": [
+                0.6662,
+                0.76,
+                0.6298,
+                0.693
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "probs": [
+                0.6579,
+                0.7182,
+                0.5524,
+                0.6289
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "probs": [
+                0.5685,
+                0.6676,
+                0.4862,
+                0.6454
+              ],
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_c": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 6,
+          "l1_escalation_rate": "6/8 (75.0%)",
+          "casc_correct": 6,
+          "casc_accuracy": "6/8 (75.0%)",
+          "items": [
+            {
+              "id": "tier_c_1_invoice_math_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7865,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_2_invoice_math_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.682,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_3_binary_search_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8404,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_4_binary_search_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7428,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_5_sliding_window_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8784,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_6_sliding_window_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.541,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_7_interval_overlap_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.9394,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_8_interval_overlap_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2518,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_d": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_d_1_fail_deceptive_threadsafe_cache",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2357,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_2_fail_math_distractor_with_audit_stamp",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7695,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_3_fail_deceptive_sql_sanitizer",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6343,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_4_fail_silent_exception_swallow",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3286,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_5_pass_self_correcting_support_transcript",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5379,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_6_pass_runbook_listing_forbidden_commands",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8225,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_7_pass_allowlisted_column_sort",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5418,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_8_pass_locked_concurrent_cache",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7343,
+              "l1_correct": true,
+              "casc_correct": false
+            }
+          ]
+        },
+        "summary_32": {
+          "cascade_compound_b": "21/32 (65.6%)",
+          "cascade_atomic_b": "19/32 (59.4%)"
+        }
+      },
+      "suite_3_choice_and_score": {
+        "choice_gate": {
+          "correct": 6,
+          "total": 6,
+          "accuracy": "6/6 (100.0%)",
+          "mean_latency_ms": 335.5,
+          "std_latency_ms": 12.9
+        },
+        "score_gate": {
+          "score_high_mean": 3.13,
+          "score_medium_mean": 3.1,
+          "score_low_mean": 2.91,
+          "monotonic_pairs": 6,
+          "total_pairs": 8,
+          "monotonicity_rate": "6/8 (75.0%)",
+          "in_band_rate": "2/6 (33.3%)",
+          "mean_latency_ms": 336.5,
+          "std_latency_ms": 9.5
+        }
+      },
+      "suite_4_diverse_haystack": [
+        {
+          "tier": "Short (~200 tok)",
+          "warm_latency_ms": 358.0,
+          "p_compliant": 0.4755,
+          "p_violating": 0.3417,
+          "delta_p": 0.1338,
+          "correct_both": false
+        },
+        {
+          "tier": "Medium (~1,500 tok)",
+          "warm_latency_ms": 434.8,
+          "p_compliant": 0.5367,
+          "p_violating": 0.5349,
+          "delta_p": 0.0018,
+          "correct_both": false
+        },
+        {
+          "tier": "Long (~4,500 tok)",
+          "warm_latency_ms": 1374.4,
+          "p_compliant": 0.5142,
+          "p_violating": 0.5667,
+          "delta_p": -0.0525,
+          "correct_both": false
+        },
+        {
+          "tier": "Very Long (~8,000 tok)",
+          "warm_latency_ms": 2741.2,
+          "p_compliant": 0.4146,
+          "p_violating": 0.5047,
+          "delta_p": -0.0901,
+          "correct_both": false
+        },
+        {
+          "tier": "Massive (~16,000 tok)",
+          "warm_latency_ms": 5812.2,
+          "p_compliant": 0.5423,
+          "p_violating": 0.4478,
+          "delta_p": 0.0945,
+          "correct_both": true
+        }
+      ]
+    },
+    "k4": {
+      "device": "cuda:0",
+      "num_loops": 4,
+      "model_name": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+      "suite_1_multi_domain_24": {
+        "model": "dory-4b_cuda:0_k4",
+        "baseline_time_ms": 287080.4,
+        "baseline_tokens": 960,
+        "baseline_accuracy": "11/24 (45.8%)",
+        "cascade_ambig_or_fail_time_ms": 232651.6,
+        "cascade_ambig_or_fail_tokens": 720,
+        "cascade_ambig_or_fail_accuracy": "14/24 (58.3%)",
+        "cascade_ambig_only_time_ms": 232651.6,
+        "cascade_ambig_only_tokens": 720,
+        "cascade_ambig_only_accuracy": "14/24 (58.3%)",
+        "speedup_ambig_only": 1.2,
+        "tokens_saved_ambig_only": 240,
+        "layer_resolution": {
+          "l0_ast": "2/24 (8.3%)",
+          "l1_decisive": "4/24 (16.7%)",
+          "l2_escalated": "18/24 (75.0%)",
+          "l0_plus_l1_rate": "6/24 (25.0%)"
+        }
+      },
+      "suite_2_reasoning_depth_32": {
+        "tier_a": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 7,
+          "l1_escalation_rate": "7/8 (87.5%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "rag_1_pass_exact",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7349,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_2_pass_paraphrase",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.812,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "support_1_pass_2fa_enforcement",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8207,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "sql_1_pass_cte_analytics",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.944,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_4_fail_scope_overgeneralization",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3004,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_5_fail_regional_extrapolation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4881,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "support_5_fail_requests_cvv_and_password",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6044,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "sql_5_fail_writable_cte_delete",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8117,
+              "l1_correct": false,
+              "casc_correct": false
+            }
+          ]
+        },
+        "tier_b_compound": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7005,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7524,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7532,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6991,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6153,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6442,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.634,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.496,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_atomic": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 0,
+          "l1_escalated": 8,
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "probs": [
+                0.5698,
+                0.6104,
+                0.5673,
+                0.6705
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "probs": [
+                0.6317,
+                0.6705,
+                0.5799,
+                0.7186
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "probs": [
+                0.6347,
+                0.5698,
+                0.5099,
+                0.6725
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "probs": [
+                0.5981,
+                0.5924,
+                0.5603,
+                0.629
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "probs": [
+                0.5472,
+                0.5167,
+                0.5242,
+                0.6093
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "probs": [
+                0.6815,
+                0.6936,
+                0.5686,
+                0.6553
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "probs": [
+                0.5659,
+                0.6023,
+                0.5429,
+                0.6321
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "probs": [
+                0.4866,
+                0.6078,
+                0.4605,
+                0.6615
+              ],
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_c": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 7,
+          "l1_escalation_rate": "7/8 (87.5%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "tier_c_1_invoice_math_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5741,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_2_invoice_math_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4938,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_3_binary_search_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7451,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_4_binary_search_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5664,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_5_sliding_window_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7423,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_6_sliding_window_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5472,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_7_interval_overlap_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8539,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_8_interval_overlap_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3496,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_d": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "tier_d_1_fail_deceptive_threadsafe_cache",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3685,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_2_fail_math_distractor_with_audit_stamp",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6504,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_3_fail_deceptive_sql_sanitizer",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5868,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_4_fail_silent_exception_swallow",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4019,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_5_pass_self_correcting_support_transcript",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5981,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_6_pass_runbook_listing_forbidden_commands",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7931,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_7_pass_allowlisted_column_sort",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6071,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_8_pass_locked_concurrent_cache",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7003,
+              "l1_correct": true,
+              "casc_correct": false
+            }
+          ]
+        },
+        "summary_32": {
+          "cascade_compound_b": "18/32 (56.2%)",
+          "cascade_atomic_b": "18/32 (56.2%)"
+        }
+      },
+      "suite_3_choice_and_score": {
+        "choice_gate": {
+          "correct": 6,
+          "total": 6,
+          "accuracy": "6/6 (100.0%)",
+          "mean_latency_ms": 628.9,
+          "std_latency_ms": 35.5
+        },
+        "score_gate": {
+          "score_high_mean": 2.68,
+          "score_medium_mean": 3.27,
+          "score_low_mean": 3.15,
+          "monotonic_pairs": 3,
+          "total_pairs": 8,
+          "monotonicity_rate": "3/8 (37.5%)",
+          "in_band_rate": "2/6 (33.3%)",
+          "mean_latency_ms": 616.3,
+          "std_latency_ms": 26.3
+        }
+      },
+      "suite_4_diverse_haystack": [
+        {
+          "tier": "Short (~200 tok)",
+          "warm_latency_ms": 593.0,
+          "p_compliant": 0.5688,
+          "p_violating": 0.4375,
+          "delta_p": 0.1313,
+          "correct_both": true
+        },
+        {
+          "tier": "Medium (~1,500 tok)",
+          "warm_latency_ms": 797.9,
+          "p_compliant": 0.6383,
+          "p_violating": 0.5792,
+          "delta_p": 0.0591,
+          "correct_both": false
+        },
+        {
+          "tier": "Long (~4,500 tok)",
+          "warm_latency_ms": 2533.6,
+          "p_compliant": 0.5278,
+          "p_violating": 0.5723,
+          "delta_p": -0.0445,
+          "correct_both": false
+        },
+        {
+          "tier": "Very Long (~8,000 tok)",
+          "warm_latency_ms": 4924.8,
+          "p_compliant": 0.3748,
+          "p_violating": 0.5727,
+          "delta_p": -0.1979,
+          "correct_both": false
+        },
+        {
+          "tier": "Massive (~16,000 tok)",
+          "warm_latency_ms": 10543.6,
+          "p_compliant": 0.5113,
+          "p_violating": 0.4344,
+          "delta_p": 0.0769,
+          "correct_both": true
+        }
+      ]
+    }
+  },
+  "cuda:1": {
+    "k1": {
+      "device": "cuda:1",
+      "num_loops": 1,
+      "model_name": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+      "suite_1_multi_domain_24": {
+        "model": "dory-4b_cuda:1_k1",
+        "baseline_time_ms": 135507.5,
+        "baseline_tokens": 960,
+        "baseline_accuracy": "12/24 (50.0%)",
+        "cascade_ambig_or_fail_time_ms": 131577.4,
+        "cascade_ambig_or_fail_tokens": 800,
+        "cascade_ambig_or_fail_accuracy": "14/24 (58.3%)",
+        "cascade_ambig_only_time_ms": 125874.3,
+        "cascade_ambig_only_tokens": 760,
+        "cascade_ambig_only_accuracy": "14/24 (58.3%)",
+        "speedup_ambig_only": 1.1,
+        "tokens_saved_ambig_only": 200,
+        "layer_resolution": {
+          "l0_ast": "2/24 (8.3%)",
+          "l1_decisive": "3/24 (12.5%)",
+          "l2_escalated": "19/24 (79.2%)",
+          "l0_plus_l1_rate": "5/24 (20.8%)"
+        }
+      },
+      "suite_2_reasoning_depth_32": {
+        "tier_a": {
+          "l1_correct": 8,
+          "total": 8,
+          "l1_accuracy": "8/8 (100.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "rag_1_pass_exact",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6316,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_2_pass_paraphrase",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7995,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "support_1_pass_2fa_enforcement",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8431,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "sql_1_pass_cte_analytics",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8077,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_4_fail_scope_overgeneralization",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2751,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_5_fail_regional_extrapolation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4903,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "support_5_fail_requests_cvv_and_password",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2904,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "sql_5_fail_writable_cte_delete",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3706,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_compound": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 3,
+          "casc_accuracy": "3/8 (37.5%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7758,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7202,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7342,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8075,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.593,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8046,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6957,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6169,
+              "l1_correct": false,
+              "casc_correct": false
+            }
+          ]
+        },
+        "tier_b_atomic": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_escalated": 8,
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "probs": [
+                0.6326,
+                0.7414,
+                0.5935,
+                0.6328
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "probs": [
+                0.6362,
+                0.7973,
+                0.6237,
+                0.6873
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "probs": [
+                0.6345,
+                0.6981,
+                0.5552,
+                0.628
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "probs": [
+                0.5793,
+                0.6024,
+                0.5617,
+                0.6358
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "probs": [
+                0.6032,
+                0.6905,
+                0.6128,
+                0.6163
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "probs": [
+                0.6229,
+                0.7636,
+                0.5792,
+                0.6827
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "probs": [
+                0.6521,
+                0.8133,
+                0.5948,
+                0.7177
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "probs": [
+                0.5469,
+                0.6587,
+                0.5073,
+                0.5158
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_c": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 1,
+          "l1_false_pass_rate": "1/4 (25.0%)",
+          "l1_escalated": 5,
+          "l1_escalation_rate": "5/8 (62.5%)",
+          "casc_correct": 6,
+          "casc_accuracy": "6/8 (75.0%)",
+          "items": [
+            {
+              "id": "tier_c_1_invoice_math_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8577,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_2_invoice_math_fail",
+              "expected": false,
+              "l1_status": "passed",
+              "l1_prob": 0.8771,
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_3_binary_search_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7405,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_4_binary_search_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7674,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_5_sliding_window_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8242,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_6_sliding_window_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6406,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_7_interval_overlap_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8506,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_8_interval_overlap_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5552,
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_d": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 1,
+          "l1_false_pass_rate": "1/4 (25.0%)",
+          "l1_escalated": 6,
+          "l1_escalation_rate": "6/8 (75.0%)",
+          "casc_correct": 3,
+          "casc_accuracy": "3/8 (37.5%)",
+          "items": [
+            {
+              "id": "tier_d_1_fail_deceptive_threadsafe_cache",
+              "expected": false,
+              "l1_status": "failed",
+              "l1_prob": 0.1037,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_2_fail_math_distractor_with_audit_stamp",
+              "expected": false,
+              "l1_status": "passed",
+              "l1_prob": 0.9039,
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_3_fail_deceptive_sql_sanitizer",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6182,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_4_fail_silent_exception_swallow",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3769,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_5_pass_self_correcting_support_transcript",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6339,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_6_pass_runbook_listing_forbidden_commands",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8064,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_7_pass_allowlisted_column_sort",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5028,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_8_pass_locked_concurrent_cache",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5327,
+              "l1_correct": true,
+              "casc_correct": false
+            }
+          ]
+        },
+        "summary_32": {
+          "cascade_compound_b": "16/32 (50.0%)",
+          "cascade_atomic_b": "17/32 (53.1%)"
+        }
+      },
+      "suite_3_choice_and_score": {
+        "choice_gate": {
+          "correct": 6,
+          "total": 6,
+          "accuracy": "6/6 (100.0%)",
+          "mean_latency_ms": 327.8,
+          "std_latency_ms": 40.7
+        },
+        "score_gate": {
+          "score_high_mean": 2.35,
+          "score_medium_mean": 2.85,
+          "score_low_mean": 2.81,
+          "monotonic_pairs": 2,
+          "total_pairs": 8,
+          "monotonicity_rate": "2/8 (25.0%)",
+          "in_band_rate": "2/6 (33.3%)",
+          "mean_latency_ms": 287.6,
+          "std_latency_ms": 14.1
+        }
+      },
+      "suite_4_diverse_haystack": [
+        {
+          "tier": "Short (~200 tok)",
+          "warm_latency_ms": 337.3,
+          "p_compliant": 0.2362,
+          "p_violating": 0.349,
+          "delta_p": -0.1128,
+          "correct_both": false
+        },
+        {
+          "tier": "Medium (~1,500 tok)",
+          "warm_latency_ms": 1153.3,
+          "p_compliant": 0.5617,
+          "p_violating": 0.4556,
+          "delta_p": 0.1061,
+          "correct_both": true
+        },
+        {
+          "tier": "Long (~4,500 tok)",
+          "warm_latency_ms": 3551.8,
+          "p_compliant": 0.5084,
+          "p_violating": 0.492,
+          "delta_p": 0.0164,
+          "correct_both": true
+        },
+        {
+          "tier": "Very Long (~8,000 tok)",
+          "warm_latency_ms": 6584.2,
+          "p_compliant": 0.3414,
+          "p_violating": 0.4639,
+          "delta_p": -0.1225,
+          "correct_both": false
+        },
+        {
+          "tier": "Massive (~16,000 tok)",
+          "warm_latency_ms": 13928.6,
+          "p_compliant": 0.5144,
+          "p_violating": 0.4588,
+          "delta_p": 0.0556,
+          "correct_both": true
+        }
+      ]
+    },
+    "k2": {
+      "device": "cuda:1",
+      "num_loops": 2,
+      "model_name": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+      "suite_1_multi_domain_24": {
+        "model": "dory-4b_cuda:1_k2",
+        "baseline_time_ms": 194892.9,
+        "baseline_tokens": 960,
+        "baseline_accuracy": "9/24 (37.5%)",
+        "cascade_ambig_or_fail_time_ms": 187385.1,
+        "cascade_ambig_or_fail_tokens": 720,
+        "cascade_ambig_or_fail_accuracy": "14/24 (58.3%)",
+        "cascade_ambig_only_time_ms": 177414.6,
+        "cascade_ambig_only_tokens": 680,
+        "cascade_ambig_only_accuracy": "14/24 (58.3%)",
+        "speedup_ambig_only": 1.1,
+        "tokens_saved_ambig_only": 280,
+        "layer_resolution": {
+          "l0_ast": "2/24 (8.3%)",
+          "l1_decisive": "5/24 (20.8%)",
+          "l2_escalated": "17/24 (70.8%)",
+          "l0_plus_l1_rate": "7/24 (29.2%)"
+        }
+      },
+      "suite_2_reasoning_depth_32": {
+        "tier_a": {
+          "l1_correct": 8,
+          "total": 8,
+          "l1_accuracy": "8/8 (100.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 6,
+          "l1_escalation_rate": "6/8 (75.0%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "rag_1_pass_exact",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.777,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_2_pass_paraphrase",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7672,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "support_1_pass_2fa_enforcement",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7349,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "sql_1_pass_cte_analytics",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.9599,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_4_fail_scope_overgeneralization",
+              "expected": false,
+              "l1_status": "failed",
+              "l1_prob": 0.1728,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_5_fail_regional_extrapolation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3772,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "support_5_fail_requests_cvv_and_password",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2386,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "sql_5_fail_writable_cte_delete",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4443,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_compound": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6988,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7252,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7802,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7757,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5857,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6264,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7172,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5412,
+              "l1_correct": false,
+              "casc_correct": false
+            }
+          ]
+        },
+        "tier_b_atomic": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_escalated": 8,
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "probs": [
+                0.5896,
+                0.6897,
+                0.5948,
+                0.7141
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "probs": [
+                0.6227,
+                0.7375,
+                0.6152,
+                0.6945
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "probs": [
+                0.6379,
+                0.6338,
+                0.5,
+                0.7439
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "probs": [
+                0.552,
+                0.5784,
+                0.4827,
+                0.5299
+              ],
+              "l1_correct": false,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "probs": [
+                0.5937,
+                0.6091,
+                0.5639,
+                0.5992
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "probs": [
+                0.6636,
+                0.755,
+                0.6208,
+                0.7001
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "probs": [
+                0.6427,
+                0.7059,
+                0.5537,
+                0.6264
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "probs": [
+                0.549,
+                0.6543,
+                0.4792,
+                0.6596
+              ],
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_c": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 6,
+          "l1_escalation_rate": "6/8 (75.0%)",
+          "casc_correct": 6,
+          "casc_accuracy": "6/8 (75.0%)",
+          "items": [
+            {
+              "id": "tier_c_1_invoice_math_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7846,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_2_invoice_math_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6786,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_3_binary_search_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8177,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_4_binary_search_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7499,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_5_sliding_window_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.8756,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_6_sliding_window_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5559,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_7_interval_overlap_pass",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.9322,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_8_interval_overlap_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2339,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_d": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_d_1_fail_deceptive_threadsafe_cache",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.2279,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_2_fail_math_distractor_with_audit_stamp",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7778,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_3_fail_deceptive_sql_sanitizer",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6535,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_4_fail_silent_exception_swallow",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3262,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_5_pass_self_correcting_support_transcript",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5623,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_6_pass_runbook_listing_forbidden_commands",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8277,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_7_pass_allowlisted_column_sort",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.525,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_8_pass_locked_concurrent_cache",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7219,
+              "l1_correct": true,
+              "casc_correct": false
+            }
+          ]
+        },
+        "summary_32": {
+          "cascade_compound_b": "20/32 (62.5%)",
+          "cascade_atomic_b": "19/32 (59.4%)"
+        }
+      },
+      "suite_3_choice_and_score": {
+        "choice_gate": {
+          "correct": 6,
+          "total": 6,
+          "accuracy": "6/6 (100.0%)",
+          "mean_latency_ms": 436.0,
+          "std_latency_ms": 24.4
+        },
+        "score_gate": {
+          "score_high_mean": 3.07,
+          "score_medium_mean": 3.15,
+          "score_low_mean": 2.98,
+          "monotonic_pairs": 5,
+          "total_pairs": 8,
+          "monotonicity_rate": "5/8 (62.5%)",
+          "in_band_rate": "2/6 (33.3%)",
+          "mean_latency_ms": 410.5,
+          "std_latency_ms": 10.2
+        }
+      },
+      "suite_4_diverse_haystack": [
+        {
+          "tier": "Short (~200 tok)",
+          "warm_latency_ms": 430.9,
+          "p_compliant": 0.4978,
+          "p_violating": 0.3523,
+          "delta_p": 0.1455,
+          "correct_both": false
+        },
+        {
+          "tier": "Medium (~1,500 tok)",
+          "warm_latency_ms": 1761.1,
+          "p_compliant": 0.5311,
+          "p_violating": 0.5183,
+          "delta_p": 0.0128,
+          "correct_both": false
+        },
+        {
+          "tier": "Long (~4,500 tok)",
+          "warm_latency_ms": 5546.3,
+          "p_compliant": 0.5252,
+          "p_violating": 0.5638,
+          "delta_p": -0.0386,
+          "correct_both": false
+        },
+        {
+          "tier": "Very Long (~8,000 tok)",
+          "warm_latency_ms": 10432.1,
+          "p_compliant": 0.4092,
+          "p_violating": 0.5076,
+          "delta_p": -0.0984,
+          "correct_both": false
+        },
+        {
+          "tier": "Massive (~16,000 tok)",
+          "warm_latency_ms": 22172.2,
+          "p_compliant": 0.5424,
+          "p_violating": 0.456,
+          "delta_p": 0.0864,
+          "correct_both": true
+        }
+      ]
+    },
+    "k4": {
+      "device": "cuda:1",
+      "num_loops": 4,
+      "model_name": "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
+      "suite_1_multi_domain_24": {
+        "model": "dory-4b_cuda:1_k4",
+        "baseline_time_ms": 362668.2,
+        "baseline_tokens": 960,
+        "baseline_accuracy": "11/24 (45.8%)",
+        "cascade_ambig_or_fail_time_ms": 297453.8,
+        "cascade_ambig_or_fail_tokens": 720,
+        "cascade_ambig_or_fail_accuracy": "16/24 (66.7%)",
+        "cascade_ambig_only_time_ms": 297453.8,
+        "cascade_ambig_only_tokens": 720,
+        "cascade_ambig_only_accuracy": "16/24 (66.7%)",
+        "speedup_ambig_only": 1.2,
+        "tokens_saved_ambig_only": 240,
+        "layer_resolution": {
+          "l0_ast": "2/24 (8.3%)",
+          "l1_decisive": "4/24 (16.7%)",
+          "l2_escalated": "18/24 (75.0%)",
+          "l0_plus_l1_rate": "6/24 (25.0%)"
+        }
+      },
+      "suite_2_reasoning_depth_32": {
+        "tier_a": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 7,
+          "l1_escalation_rate": "7/8 (87.5%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "rag_1_pass_exact",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7502,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "rag_2_pass_paraphrase",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8103,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "support_1_pass_2fa_enforcement",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8459,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "sql_1_pass_cte_analytics",
+              "expected": true,
+              "l1_status": "passed",
+              "l1_prob": 0.9083,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_4_fail_scope_overgeneralization",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3199,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "rag_5_fail_regional_extrapolation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.4922,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "support_5_fail_requests_cvv_and_password",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5842,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "sql_5_fail_writable_cte_delete",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8149,
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_compound": {
+          "l1_correct": 4,
+          "total": 8,
+          "l1_accuracy": "4/8 (50.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6836,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7442,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7172,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6727,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6144,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6099,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5933,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5056,
+              "l1_correct": false,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_b_atomic": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 0,
+          "l1_escalated": 8,
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_b_pass_1",
+              "expected": true,
+              "probs": [
+                0.5476,
+                0.6081,
+                0.5701,
+                0.6603
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_2",
+              "expected": true,
+              "probs": [
+                0.6272,
+                0.6793,
+                0.5865,
+                0.7289
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_3",
+              "expected": true,
+              "probs": [
+                0.6496,
+                0.5807,
+                0.5003,
+                0.6909
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_pass_4",
+              "expected": true,
+              "probs": [
+                0.6205,
+                0.6069,
+                0.5514,
+                0.6475
+              ],
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_b_fail_1_mutable_list_default",
+              "expected": false,
+              "probs": [
+                0.5419,
+                0.5378,
+                0.5243,
+                0.6107
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_2_missing_docstring_args",
+              "expected": false,
+              "probs": [
+                0.6563,
+                0.6878,
+                0.5797,
+                0.6522
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_3_missing_return_annotation",
+              "expected": false,
+              "probs": [
+                0.5513,
+                0.574,
+                0.5303,
+                0.6553
+              ],
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_b_fail_4_bare_except_and_mutable_dict",
+              "expected": false,
+              "probs": [
+                0.4908,
+                0.6339,
+                0.4661,
+                0.6609
+              ],
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_c": {
+          "l1_correct": 5,
+          "total": 8,
+          "l1_accuracy": "5/8 (62.5%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 4,
+          "casc_accuracy": "4/8 (50.0%)",
+          "items": [
+            {
+              "id": "tier_c_1_invoice_math_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5714,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_2_invoice_math_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5233,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_3_binary_search_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.7486,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_4_binary_search_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5664,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_5_sliding_window_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.758,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_6_sliding_window_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5252,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_c_7_interval_overlap_pass",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8499,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_c_8_interval_overlap_fail",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.395,
+              "l1_correct": true,
+              "casc_correct": true
+            }
+          ]
+        },
+        "tier_d": {
+          "l1_correct": 6,
+          "total": 8,
+          "l1_accuracy": "6/8 (75.0%)",
+          "l1_false_pass": 0,
+          "l1_false_pass_rate": "0/4 (0.0%)",
+          "l1_escalated": 8,
+          "l1_escalation_rate": "8/8 (100.0%)",
+          "casc_correct": 5,
+          "casc_accuracy": "5/8 (62.5%)",
+          "items": [
+            {
+              "id": "tier_d_1_fail_deceptive_threadsafe_cache",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3659,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_2_fail_math_distractor_with_audit_stamp",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6651,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_3_fail_deceptive_sql_sanitizer",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.5796,
+              "l1_correct": false,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_4_fail_silent_exception_swallow",
+              "expected": false,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.3808,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_5_pass_self_correcting_support_transcript",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6147,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_6_pass_runbook_listing_forbidden_commands",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.8052,
+              "l1_correct": true,
+              "casc_correct": false
+            },
+            {
+              "id": "tier_d_7_pass_allowlisted_column_sort",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.6202,
+              "l1_correct": true,
+              "casc_correct": true
+            },
+            {
+              "id": "tier_d_8_pass_locked_concurrent_cache",
+              "expected": true,
+              "l1_status": "ambiguous",
+              "l1_prob": 0.688,
+              "l1_correct": true,
+              "casc_correct": false
+            }
+          ]
+        },
+        "summary_32": {
+          "cascade_compound_b": "18/32 (56.2%)",
+          "cascade_atomic_b": "18/32 (56.2%)"
+        }
+      },
+      "suite_3_choice_and_score": {
+        "choice_gate": {
+          "correct": 6,
+          "total": 6,
+          "accuracy": "6/6 (100.0%)",
+          "mean_latency_ms": 809.1,
+          "std_latency_ms": 61.6
+        },
+        "score_gate": {
+          "score_high_mean": 2.7,
+          "score_medium_mean": 3.31,
+          "score_low_mean": 3.14,
+          "monotonic_pairs": 3,
+          "total_pairs": 8,
+          "monotonicity_rate": "3/8 (37.5%)",
+          "in_band_rate": "2/6 (33.3%)",
+          "mean_latency_ms": 832.9,
+          "std_latency_ms": 60.6
+        }
+      },
+      "suite_4_diverse_haystack": [
+        {
+          "tier": "Short (~200 tok)",
+          "warm_latency_ms": 843.0,
+          "p_compliant": 0.5827,
+          "p_violating": 0.4542,
+          "delta_p": 0.1285,
+          "correct_both": true
+        },
+        {
+          "tier": "Medium (~1,500 tok)",
+          "warm_latency_ms": 3008.6,
+          "p_compliant": 0.6305,
+          "p_violating": 0.5846,
+          "delta_p": 0.0459,
+          "correct_both": false
+        },
+        {
+          "tier": "Long (~4,500 tok)",
+          "warm_latency_ms": 9520.2,
+          "p_compliant": 0.5389,
+          "p_violating": 0.5723,
+          "delta_p": -0.0334,
+          "correct_both": false
+        },
+        {
+          "tier": "Very Long (~8,000 tok)",
+          "warm_latency_ms": 17856.1,
+          "p_compliant": 0.3671,
+          "p_violating": 0.5754,
+          "delta_p": -0.2083,
+          "correct_both": false
+        },
+        {
+          "tier": "Massive (~16,000 tok)",
+          "warm_latency_ms": 37875.1,
+          "p_compliant": 0.514,
+          "p_violating": 0.4344,
+          "delta_p": 0.0796,
+          "correct_both": true
+        }
+      ]
+    }
+  }
+}
