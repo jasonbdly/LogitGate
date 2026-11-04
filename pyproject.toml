@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logitgate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -83,3 +83,6 @@ logitgate = "logitgate.integrations.pytest_plugin"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+logitgate = ["py.typed"]

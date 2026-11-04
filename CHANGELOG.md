@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.0] - 2026-11-03
+## [0.2.0] - 2026-11-04
 
 ### Added
+
+#### Hardened 32-Item Adversarial Multi-Action Benchmark Suite
+- 32-Item Adversarial Benchmark Suite ([`benchmarks/data/adversarial_choice_and_score_32.json`](benchmarks/data/adversarial_choice_and_score_32.json) & [`benchmarks/run_adversarial_choice_score.py`](benchmarks/run_adversarial_choice_score.py)):
+  - 16 `ChoiceGate` adversarial items across 4 stress vectors: 6-way scaling, adversarial keyword decoys, strict priority hierarchy conflicts, and architectural scope boundaries.
+  - 16 `ScoreGate` items spanning 5 discrete code tiers (Tier 5 Flawless $\to$ Tier 4 Sub-optimal Complexity $\to$ Tier 3 Code Smells $\to$ Tier 2 Latent Concurrency/TOCTOU Defects $\to$ Tier 1 Catastrophic Flaws).
+  - Multi-sample ($N=5$) with untimed warm-up pass evaluated across full 9-configuration matrix (CPU, RTX 4070, RTX 5090), measuring exact pairwise monotonicity, Spearman rank correlation $\rho$, and score dynamic range $\Delta(S_5 - S_1)$.
+  - Published empirical dataset and verified results in [`benchmarks/adversarial_choice_score_results.json`](benchmarks/adversarial_choice_score_results.json).
+
+#### In-Process `llama.cpp` Format, Quantization & Thread Scaling Benchmark Suite
+- Master CPU Format & Thread Scaling Runner ([`benchmarks/run_cpu_format_runtime_benchmarks.py`](benchmarks/run_cpu_format_runtime_benchmarks.py) & [`benchmarks/cpu_format_runtime_results.json`](benchmarks/cpu_format_runtime_results.json)):
+  - Native in-process `llama.cpp` (`LlamaCppBackend`) benchmarked against HTTP daemon architecture on AMD Ryzen 9 9955HX3D (16-core / 32-thread with 128MB 3D V-Cache).
+  - Evaluates `Q8_0` (1.26 GB) vs. `Q4_K_M` (940 MB) vs. `Q4_K_M` (1.93 GB) across 1B, 1.5B, and 3B parameter scales.
+  - Full CPU thread scaling sweep ($n=1, 2, 4, 8, 16$) demonstrating memory bus saturation and establishing the 2-thread optimum (112ms single forward pass) for single-token logit extraction.
 
 #### Latent Recurrent Network Support & Elastic Layer-Looping
 - `RecurrentPyTorchBackend`: Native backend supporting elastic recurrent depth (`num_loops`) via `recurrent://` URI scheme.

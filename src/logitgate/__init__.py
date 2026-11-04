@@ -52,7 +52,7 @@ from logitgate.models import (
 )
 from logitgate.snapshot import VerdictSnapshot
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "KNOWN_MODEL_TEMPERATURES",
