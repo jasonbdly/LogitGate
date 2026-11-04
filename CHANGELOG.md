@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vocab Head Memory Optimization: projects only final sequence position `h[:, -1:, :]` through the 131,072 vocabulary head, eliminating 8.4 GB allocation overhead and enabling full 16,000-token needle-in-haystack evaluations with zero OOM.
 - Master Multi-GPU & Recurrent Depth Benchmark Suite ([`benchmarks/run_dory_benchmarks.py`](benchmarks/run_dory_benchmarks.py) & [`benchmarks/dory_results.json`](benchmarks/dory_results.json)) evaluating 24-item cascade, 32-item reasoning tiers, multi-action gates, and long-context scaling across $K=1, 2, 4$.
 
+#### Compact Models & CPU-Bound CI/CD Evaluation Suite
+- Master CPU Benchmark Runner ([`benchmarks/run_cpu_benchmarks.py`](benchmarks/run_cpu_benchmarks.py) & [`benchmarks/cpu_results.json`](benchmarks/cpu_results.json)) evaluating `llama3.2:1b`, `llama3.2:3b`, `qwen2.5-coder:1.5b`, and `qwen2.5-coder:3b` in pure CPU mode (`options={"num_gpu": 0}`).
+- Verified 5.8x speedup on 2-pass debiased gating and 67% RAM reduction on `llama3.2:3b` (3.18 GB RAM, 642 ms 2-pass latency, 71.9% reasoning accuracy) compared to dense 4B models on CPU.
+- Verified 42.3 ms single-pass gating on `qwen2.5-coder:1.5b` with 1.39 GB RAM footprint and 100% routing accuracy.
+
 ---
 
 ## [0.1.0] - 2026-11-02

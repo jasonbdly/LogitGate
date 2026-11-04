@@ -69,19 +69,25 @@ Empirical measurements gathered on local inference across 5 distinct model archi
 | Model Configuration | Model Family | Compute Device | Single-Pass Latency ($N=5$) | 2-Pass Symmetric Latency ($N=5$) | 4-Rubric Batch Total ($N=5$) | Per-Rubric Batch Latency ($N=5$) | 24-Item Multi-Domain Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`gemma4:e4b`** | 4B General Model | GPU (RTX 4070) | **40.5 ± 6.0 ms** | **112.6 ± 4.6 ms** | **584.9 ± 51.8 ms** | **146.2 ± 12.9 ms** | **23/24 (95.8%)** |
-| **`gemma4:e4b`** | 4B General Model | Pure CPU-Only (0 GPU) | **173.0 ± 2.4 ms** | **3,710.5 ± 82.1 ms** | **20,949.5 ± 182.5 ms** | **5,237.4 ± 45.6 ms** | **23/24 (95.8%)** |
 | **`qwen2.5:14b`** | 14B General Model | GPU (RTX 4070) | **36.8 ± 6.5 ms** | **90.0 ± 4.1 ms** | **450.1 ± 18.8 ms** | **112.5 ± 4.7 ms** | **23/24 (95.8%)** |
 | **`qwen2.5-coder:14b`** | 14B Code Model | GPU (RTX 4070) | **36.5 ± 6.3 ms** | **90.9 ± 3.3 ms** | **447.4 ± 3.9 ms** | **111.8 ± 1.0 ms** | **23/24 (95.8%)** |
+| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | Pure CPU (0 GPU, 1.4 GB) | **42.3 ± 1.4 ms** | **330.4 ± 63.5 ms** | **1,834.5 ± 75.6 ms** | **458.6 ± 18.9 ms** | **14/24 (58.3%)** |
+| **`llama3.2:1b`** | 1B General Model | Pure CPU (0 GPU, 1.8 GB) | **46.9 ± 1.6 ms** | **459.2 ± 86.0 ms** | **2,665.1 ± 82.9 ms** | **666.3 ± 20.7 ms** | **15/24 (62.5%)** |
+| **`qwen2.5-coder:3b`** | 3B Code Model | Pure CPU (0 GPU, 2.4 GB) | **69.1 ± 2.8 ms** | **625.7 ± 113.9 ms** | **3,626.6 ± 155.8 ms** | **906.7 ± 39.0 ms** | **19/24 (79.2%)** |
+| **`llama3.2:3b`** | 3B General Model | Pure CPU (0 GPU, 3.2 GB) | **74.8 ± 0.8 ms** | **642.7 ± 113.6 ms** | **3,699.9 ± 116.8 ms** | **925.0 ± 29.2 ms** | **19/24 (79.2%)** |
+| *`gemma4:e4b` (Baseline)* | *4B General Model* | *Pure CPU (0 GPU, 9.6 GB)* | *173.0 ± 2.4 ms* | *3,710.5 ± 82.1 ms* | *20,949.5 ± 182.5 ms* | *5,237.4 ± 45.6 ms* | *23/24 (95.8%)* |
 
 ### Benchmark Analysis & Insights:
-1. **Single-Pass Latency (~36–41 ms on GPU)**:
+1. **Single-Pass Latency (~36–41 ms on GPU, ~42–75 ms on CPU)**:
    - Evaluates a rubric in a single forward pass without autoregressive decoding. Over **35x faster** than waiting for an LLM to generate 150 words of critique.
-2. **2-Pass Symmetric Debiasing (~90–113 ms on GPU)**:
-   - Runs both forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes to eliminate pretraining token prior bias. The second pass hits the KV-cache, running in ~40–55 ms.
-3. **Multi-Rubric Batching (~112–146 ms per rubric)**:
+   - On a CPU-only runner, compact 1B–3B models execute single-pass triage in **42–75 ms**, beating dense 4B CPU models by **2.3x–4.1x**.
+2. **2-Pass Symmetric Debiasing (~90–113 ms on GPU, ~330–640 ms on CPU)**:
+   - Runs both forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes to eliminate pretraining token prior bias. The second pass hits the KV-cache.
+   - On CPU, `llama3.2:3b` and `qwen2.5-coder:3b` evaluate symmetric debiasing in **~625–642 ms**—almost **6x faster than dense 4B models (3,710 ms)**.
+3. **Multi-Rubric Batching (~112–146 ms per rubric on GPU, ~450–925 ms on CPU)**:
    - `evaluate_batch` reuses the candidate prefix across all rubrics, avoiding redundant prompt re-evaluations and preventing KV-cache stampedes on the inference server.
-4. **Pure CPU-Only Operation (Zero GPU)**:
-   - On a machine with **0 GPUs** (`options={"num_gpu": 0}`), warm single-pass logit evaluation (`preset="fast_triage"`) completes in **173.0 ± 2.4 ms** (`51.3 s` total across the 24-item suite including cold candidate prefills), while full 2-pass symmetric debiasing (`preset="balanced"`) takes `3.7s–4.3s` per item.
+4. **Pure CPU-Only Memory Footprint (1.4 GB to 3.2 GB)**:
+   - Shifting from dense 4B models (`9.61 GB RAM`) to compact distilled models (`1.39 GB – 3.18 GB RAM`) frees up 65%–85% of host memory on CI runners while reducing wall-clock gating time by up to 83%.
 
 ---
 
@@ -112,6 +118,33 @@ Simulating a free 0-GPU GitHub Actions runner using `gemma4:e4b` on pure CPU (`n
 | **`LogitGate(preset="fast_triage") >> JudgeGate(max_tokens=60)`** | **22.0 s** | **60** | **10/10 (100%)** | **98.6%** | **16.50x** |
 
 *Key finding*: Why did naive token-capping (`Baseline B`, `max_tokens=150`) fail with 20% accuracy? Because modern reasoning models (`gemma4`, `deepseek-r1`, `qwen3`) emit 300+ hidden `<think>` tokens before writing a single visible character. By suppressing `<think>` in `OllamaBackend.generate` and using Verdict-First prompting (`[VERDICT: PASS/FAIL]` on Line 1 for short caps $\le 80$ tokens), `JudgeGate` produces a complete 60-token diagnostic in ~5.9s per item on CPU (`Baseline C`). Placing `ASTGate >> LogitGate` in front of `JudgeGate` reduces the 10-item suite from **363.0 s (`Baseline A`)** and **59.0 s (`Baseline C`)** down to **22.0 s** (**16.50x faster than `Baseline A`**, **2.68x faster than `Baseline C`**, and **90.0% fewer output tokens than `Baseline C`**) while maintaining **10/10 (100%) accuracy**.
+
+#### Compact Models for CPU-Bound Automated Testing (1B–3B vs. 4B Baseline)
+
+To determine the optimal model configuration for resource-constrained CI runners (e.g. GitHub Actions, GitLab CI, or local developer pre-commit hooks with zero GPU acceleration), we benchmarked four alternative compact models in pure CPU-only mode (`options={"num_gpu": 0}`) on an AMD Ryzen 7 5800X3D CPU across the complete benchmark suites.
+
+Raw benchmark outputs are stored in [`benchmarks/cpu_results.json`](benchmarks/cpu_results.json):
+
+| Model Configuration | Model Family | Host RAM | Single-Pass Triage ($N=5$) | 2-Pass Symmetric ($N=5$) | 4-Rubric Batch Total ($N=5$) | Suite 1 Cascade Acc | Suite 2 Reasoning (32 Items) | `ChoiceGate` Routing | `ScoreGate` Monotonicity |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | **1.39 GB** | **42.3 ± 1.4 ms** | **330.4 ± 63.5 ms** | **1,834.5 ± 75.6 ms** | 14/24 (58.3%) | 16/32 (50.0%) | **6/6 (100.0%)** | **8/8 (100.0%)** |
+| **`llama3.2:1b`** | 1B General Model | **1.76 GB** | **46.9 ± 1.6 ms** | **459.2 ± 86.0 ms** | **2,665.1 ± 82.9 ms** | 15/24 (62.5%) | 18/32 (56.2%) | 4/6 (66.7%) | 4/8 (50.0%) |
+| **`qwen2.5-coder:3b`** | 3B Code Model | **2.44 GB** | **69.1 ± 2.8 ms** | **625.7 ± 113.9 ms** | **3,626.6 ± 155.8 ms** | **19/24 (79.2%)** | 18/32 (56.2%) | **6/6 (100.0%)** | **8/8 (100.0%)** |
+| **`llama3.2:3b`** | 3B General Model | **3.18 GB** | **74.8 ± 0.8 ms** | **642.7 ± 113.6 ms** | **3,699.9 ± 116.8 ms** | **19/24 (79.2%)** | **23/32 (71.9%)** | **6/6 (100.0%)** | **8/8 (100.0%)** |
+| *`gemma4:e4b` (Baseline)* | *4B General Model* | *9.61 GB* | *173.0 ± 2.4 ms* | *3,710.5 ± 82.1 ms* | *20,949.5 ± 182.5 ms* | *23/24 (95.8%)* | *18/32 (56.2%)* | *6/6 (100.0%)* | *3/8 (37.5%)* |
+
+##### Key Insights for CPU-Bound Automated Testing:
+1. **The CI/CD Champion (`llama3.2:3b`)**:
+   - Reduces RAM consumption by **67%** (from 9.61 GB down to 3.18 GB), easily fitting inside standard 4 GB/7 GB GitHub Actions free runners.
+   - Runs 2-pass symmetric debiased gating in **642.7 ms** (**5.8x faster** than the 4B baseline at 3.7 s).
+   - Achieves the highest 32-item reasoning accuracy of any tested model (**23/32, 71.9%**), surpassing even 14B models on GPU (68.8%) thanks to Meta's aggressive distillation.
+   - Delivers flawless **100% (6/6)** `ChoiceGate` routing and **100% (8/8)** `ScoreGate` pairwise rank monotonicity ($H=3.69 > M=2.92 > L=2.34$).
+2. **The Micro-Gate Champion (`qwen2.5-coder:1.5b`)**:
+   - Microscopic **1.39 GB RAM footprint**, ideal for pre-commit git hooks and resource-constrained Docker test containers.
+   - Executes single-pass triage in **42.3 ms** and 2-pass debiasing in **330.4 ms** on pure CPU.
+   - Delivers a perfect **100% (6/6)** `ChoiceGate` routing and **100% (8/8)** `ScoreGate` monotonicity on code/incident rubrics.
+3. **The Multi-Rubric Batching Advantage**:
+   - On CPU, running 4 rubrics via `evaluate_batch` takes **1.8 s** on `qwen2.5-coder:1.5b` and **3.7 s** on `llama3.2:3b` (vs **20.9 s** on `gemma4:e4b`), avoiding the CPU memory bus saturation of redundant prefill passes.
 
 ---
 
