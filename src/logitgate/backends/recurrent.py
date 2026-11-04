@@ -67,8 +67,8 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             return self._model, self._tokenizer
 
         try:
-            import torch  # type: ignore[import-not-found]
-            from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore[import-not-found]
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
         except ImportError as err:
             raise ImportError(
                 "PyTorch and Transformers are required for RecurrentPyTorchBackend. "

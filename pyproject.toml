@@ -67,7 +67,15 @@ asyncio_default_fixture_loop_scope = "function"
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["deepeval.*", "langgraph.*", "llama_cpp.*"]
+module = [
+    "deepeval.*",
+    "langgraph.*",
+    "llama_cpp.*",
+    "torch.*",
+    "transformers.*",
+    "huggingface_hub.*",
+    "safetensors.*",
+]
 ignore_missing_imports = true
 
 [project.entry-points.pytest11]

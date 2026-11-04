@@ -10,15 +10,14 @@ Dory is a normalized latent-recurrent language model (nGPT backbone) featuring:
 
 from __future__ import annotations
 
-import math
 import os
 import time
 from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 EPS = 1e-6
 
