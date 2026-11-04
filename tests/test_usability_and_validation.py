@@ -250,7 +250,7 @@ def test_judge_gate_validation():
     """JudgeGate validates trigger modes and rubric."""
     # Invalid trigger mode
     with pytest.raises(ValueError, match="Invalid trigger 'unsupported_mode'"):
-        JudgeGate(trigger="unsupported_mode")  # type: ignore
+        JudgeGate(trigger="unsupported_mode")
 
     # Whitespace-only rubric
     with pytest.raises(ValueError, match="rubric cannot be empty or whitespace"):
@@ -404,7 +404,7 @@ def test_logit_gate_presets():
     assert gate_bal.symmetric_debiasing is True
 
     with pytest.raises(ValueError, match="Invalid preset"):
-        LogitGate(rubric="Test rubric", preset="invalid_preset")  # type: ignore
+        LogitGate(rubric="Test rubric", preset="invalid_preset")
 
 
 def test_contract_gate_json_schema_and_length():

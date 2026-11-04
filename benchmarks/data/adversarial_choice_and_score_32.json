@@ -1,0 +1,346 @@
+{
+  "choice_gate_items": [
+    {
+      "id": "choice_adv_1_db_vs_app",
+      "category": "6_way_scaling",
+      "question": "Assign this operational production incident to the primary engineering on-call rotation.",
+      "options": {
+        "A": "Security Operations & Incident Response",
+        "B": "Database Reliability & Schema Performance",
+        "C": "Infrastructure Networking & Cloud Topology",
+        "D": "Finance Operations & Billing Settlements",
+        "E": "Core Backend Application & Workflow Logic",
+        "F": "Frontend Web & Design System Components"
+      },
+      "expected_choice": "B",
+      "candidate": "PagerDuty Alert #8102: The `/v1/orders/export` endpoint is failing for 34% of enterprise accounts with `QueryCanceledError: canceling statement due to statement timeout (30000ms)` during peak sales. The database read replica CPU reached 99.4% due to an unindexed sequential scan across 18 million rows on `orders.created_at`."
+    },
+    {
+      "id": "choice_adv_2_infra_tls_vs_security",
+      "category": "6_way_scaling",
+      "question": "Assign this operational production incident to the primary engineering on-call rotation.",
+      "options": {
+        "A": "Security Operations & Incident Response",
+        "B": "Database Reliability & Schema Performance",
+        "C": "Infrastructure Networking & Cloud Topology",
+        "D": "Finance Operations & Billing Settlements",
+        "E": "Core Backend Application & Workflow Logic",
+        "F": "Frontend Web & Design System Components"
+      },
+      "expected_choice": "C",
+      "candidate": "CertManager Alert: The wildcard TLS certificate for `*.api.curtain.internal` expires in 36 hours. Automated renewal is failing because the DNS-01 ACME challenge cannot reach the private Route53 hosted zone due to an incorrect VPC peering route table association in us-east-1."
+    },
+    {
+      "id": "choice_adv_3_billing_seat_vs_app_logic",
+      "category": "6_way_scaling",
+      "question": "Assign this operational production incident to the primary engineering on-call rotation.",
+      "options": {
+        "A": "Security Operations & Incident Response",
+        "B": "Database Reliability & Schema Performance",
+        "C": "Infrastructure Networking & Cloud Topology",
+        "D": "Finance Operations & Billing Settlements",
+        "E": "Core Backend Application & Workflow Logic",
+        "F": "Frontend Web & Design System Components"
+      },
+      "expected_choice": "D",
+      "candidate": "Customer Ticket #7712: An enterprise customer downgraded their plan from 100 seats to 60 seats last month. Although our backend account webhook successfully marked the seats inactive, their automated invoice charged them for 100 seats ($5,000 instead of $3,000). They need a prorated invoice credit of $2,000 applied to their billing account."
+    },
+    {
+      "id": "choice_adv_4_sec_vs_infra",
+      "category": "6_way_scaling",
+      "question": "Assign this operational production incident to the primary engineering on-call rotation.",
+      "options": {
+        "A": "Security Operations & Incident Response",
+        "B": "Database Reliability & Schema Performance",
+        "C": "Infrastructure Networking & Cloud Topology",
+        "D": "Finance Operations & Billing Settlements",
+        "E": "Core Backend Application & Workflow Logic",
+        "F": "Frontend Web & Design System Components"
+      },
+      "expected_choice": "A",
+      "candidate": "Security Alert: AWS GuardDuty triggered high-severity finding `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration`. Production IAM access keys were utilized from a known Tor exit node in Eastern Europe to invoke `s3:GetObject` on the customer telemetry bucket."
+    },
+    {
+      "id": "choice_adv_5_billing_decoy_with_security_vocabulary",
+      "category": "adversarial_keyword_decoy",
+      "question": "Classify the operational department that must resolve this customer ticket.",
+      "options": {
+        "A": "Security Operations (Intrusion detection, token compromise, vulnerability response)",
+        "B": "Finance & Billing Operations (Invoice dispute, subscription pricing, refund adjustment)",
+        "C": "Technical App Support (Bug reproduction, customer login assistance)"
+      },
+      "expected_choice": "B",
+      "candidate": "Ticket #9110: URGENT SECURITY AUDIT VULNERABILITY ALERT. In accordance with Section 8.4 of our PCI-DSS security compliance mandate, our security auditor has flagged that your automated payment gateway incorrectly charged our corporate card $8,400 for 40 seats instead of our contracted enterprise rate of $5,000. Please void this transaction and re-issue the corrected invoice credit immediately."
+    },
+    {
+      "id": "choice_adv_6_security_decoy_with_billing_words",
+      "category": "adversarial_keyword_decoy",
+      "question": "Classify the operational department that must resolve this customer ticket.",
+      "options": {
+        "A": "Security Operations (Intrusion detection, token compromise, vulnerability response)",
+        "B": "Finance & Billing Operations (Invoice dispute, subscription pricing, refund adjustment)",
+        "C": "Technical App Support (Bug reproduction, customer login assistance)"
+      },
+      "expected_choice": "A",
+      "candidate": "Ticket #9111: While reviewing our monthly billing receipts and accounting ledger this morning, our accountant noticed that someone accessed our organization account settings from an unrecognized device in Romania at 03:20 UTC and swapped our vendor bank wire transfer details and payout routing numbers to divert outgoing account disbursements."
+    },
+    {
+      "id": "choice_adv_7_feature_request_masquerading_as_bug",
+      "category": "adversarial_keyword_decoy",
+      "question": "Classify this ticket into the proper engineering triage queue.",
+      "options": {
+        "A": "Defect Remediation (Code regression, crashing bug, broken behavior)",
+        "B": "Product Enhancement (New capability, requested feature, scope addition)",
+        "C": "Documentation Clarification (Existing behavior questions, guide updates)"
+      },
+      "expected_choice": "B",
+      "candidate": "Ticket #9112: CRITICAL REGRESSION: The `/v2/analytics/export` endpoint is completely broken and unusable for our data warehouse team because it only supports CSV and JSON formats. Our analytics pipeline strictly requires Apache Parquet format with snappy compression. This blocking defect must be resolved immediately."
+    },
+    {
+      "id": "choice_adv_8_bug_masquerading_as_feature_request",
+      "category": "adversarial_keyword_decoy",
+      "question": "Classify this ticket into the proper engineering triage queue.",
+      "options": {
+        "A": "Defect Remediation (Code regression, crashing bug, broken behavior)",
+        "B": "Product Enhancement (New capability, requested feature, scope addition)",
+        "C": "Documentation Clarification (Existing behavior questions, guide updates)"
+      },
+      "expected_choice": "A",
+      "candidate": "Ticket #9113: It would be really great if the login system could support returning HTTP 200 when a user enters valid credentials. Currently, whenever users type their correct email and password on the production login screen, the server crashes with `NullPointerException in AuthService.java:184` and returns HTTP 500."
+    },
+    {
+      "id": "choice_adv_9_priority_outage_over_security",
+      "category": "priority_hierarchy_conflict",
+      "question": "Assign the primary priority level according to policy: Outage/Data Loss (Tier 1) > Security Vulnerability (Tier 2) > Core API Bug (Tier 3) > UI/Cosmetic (Tier 4).",
+      "options": {
+        "A": "Tier 1: Critical Reliability & Outage (System down, unrecoverable data corruption)",
+        "B": "Tier 2: Security & Vulnerability (Credential leak, auth bypass, compliance failure)",
+        "C": "Tier 3: Core API Defect (Functional regression without outage)",
+        "D": "Tier 4: Cosmetic & UI (Visual misalignment, styling)"
+      },
+      "expected_choice": "A",
+      "candidate": "An engineer attempted an emergency patch for a low-severity TLS cipher vulnerability (CVE-2023-4412). However, the proxy configuration failed syntax validation and crashed upon reload, resulting in 100% of production traffic across all regions returning HTTP 502 Bad Gateway."
+    },
+    {
+      "id": "choice_adv_10_priority_security_over_api_defect",
+      "category": "priority_hierarchy_conflict",
+      "question": "Assign the primary priority level according to policy: Outage/Data Loss (Tier 1) > Security Vulnerability (Tier 2) > Core API Bug (Tier 3) > UI/Cosmetic (Tier 4).",
+      "options": {
+        "A": "Tier 1: Critical Reliability & Outage (System down, unrecoverable data corruption)",
+        "B": "Tier 2: Security & Vulnerability (Credential leak, auth bypass, compliance failure)",
+        "C": "Tier 3: Core API Defect (Functional regression without outage)",
+        "D": "Tier 4: Cosmetic & UI (Visual misalignment, styling)"
+      },
+      "expected_choice": "B",
+      "candidate": "The user profile avatar upload endpoint fails with HTTP 400 when users upload PNG files. Debugging showed that passing a malformed header allows an unauthenticated remote caller to trigger directory traversal and read `/etc/shadow` and local environment variables."
+    },
+    {
+      "id": "choice_adv_11_priority_data_corruption_over_ui",
+      "category": "priority_hierarchy_conflict",
+      "question": "Assign the primary priority level according to policy: Outage/Data Loss (Tier 1) > Security Vulnerability (Tier 2) > Core API Bug (Tier 3) > UI/Cosmetic (Tier 4).",
+      "options": {
+        "A": "Tier 1: Critical Reliability & Outage (System down, unrecoverable data corruption)",
+        "B": "Tier 2: Security & Vulnerability (Credential leak, auth bypass, compliance failure)",
+        "C": "Tier 3: Core API Defect (Functional regression without outage)",
+        "D": "Tier 4: Cosmetic & UI (Visual misalignment, styling)"
+      },
+      "expected_choice": "A",
+      "candidate": "In the new dark-mode checklist UI theme, clicking the delete icon triggers a race condition in the JavaScript state manager that sends an unparameterized bulk purge command to the backend, wiping all task history and completed items across the entire workspace."
+    },
+    {
+      "id": "choice_adv_12_priority_core_defect_over_cosmetic",
+      "category": "priority_hierarchy_conflict",
+      "question": "Assign the primary priority level according to policy: Outage/Data Loss (Tier 1) > Security Vulnerability (Tier 2) > Core API Bug (Tier 3) > UI/Cosmetic (Tier 4).",
+      "options": {
+        "A": "Tier 1: Critical Reliability & Outage (System down, unrecoverable data corruption)",
+        "B": "Tier 2: Security & Vulnerability (Credential leak, auth bypass, compliance failure)",
+        "C": "Tier 3: Core API Defect (Functional regression without outage)",
+        "D": "Tier 4: Cosmetic & UI (Visual misalignment, styling)"
+      },
+      "expected_choice": "C",
+      "candidate": "The invoice download button in the customer portal is rendered 6 pixels to the left of the container boundary, and when clicked by customers with more than 10 line items, the backend PDF generator raises an unhandled array index exception, generating an empty 0-byte file."
+    },
+    {
+      "id": "choice_adv_13_arch_local_atomic",
+      "category": "architectural_scope",
+      "question": "Select the appropriate architectural boundary classification for this engineering scope.",
+      "options": {
+        "A": "Local Atomic Change (Single service, in-memory, no schema migration or RPC break)",
+        "B": "Contract & RPC Breaking Change (Alters public API schema or inter-service protobufs)",
+        "C": "Storage & Schema Evolution (Modifies persistent database tables, columns, or indexes)",
+        "D": "Distributed Infrastructure Topology (Changes event brokers, clustering, or deployment mesh)"
+      },
+      "expected_choice": "A",
+      "candidate": "Scope: Add an in-memory thread-safe LRU cache inside the existing `CurrencyConverter` class in the Billing service to memoize exchange rate computations for up to 60 seconds without altering database tables or external API contracts."
+    },
+    {
+      "id": "choice_adv_14_arch_contract_break",
+      "category": "architectural_scope",
+      "question": "Select the appropriate architectural boundary classification for this engineering scope.",
+      "options": {
+        "A": "Local Atomic Change (Single service, in-memory, no schema migration or RPC break)",
+        "B": "Contract & RPC Breaking Change (Alters public API schema or inter-service protobufs)",
+        "C": "Storage & Schema Evolution (Modifies persistent database tables, columns, or indexes)",
+        "D": "Distributed Infrastructure Topology (Changes event brokers, clustering, or deployment mesh)"
+      },
+      "expected_choice": "B",
+      "candidate": "Scope: Deprecate and remove the `user_id: int` field from the public `/v1/orders` JSON payload and replace it with `customer_uuid: str`, requiring all frontend mobile clients, third-party webhook consumers, and client SDKs to migrate."
+    },
+    {
+      "id": "choice_adv_15_arch_storage_partitioning",
+      "category": "architectural_scope",
+      "question": "Select the appropriate architectural boundary classification for this engineering scope.",
+      "options": {
+        "A": "Local Atomic Change (Single service, in-memory, no schema migration or RPC break)",
+        "B": "Contract & RPC Breaking Change (Alters public API schema or inter-service protobufs)",
+        "C": "Storage & Schema Evolution (Modifies persistent database tables, columns, or indexes)",
+        "D": "Distributed Infrastructure Topology (Changes event brokers, clustering, or deployment mesh)"
+      },
+      "expected_choice": "C",
+      "candidate": "Scope: Convert the unpartitioned 400-million row `audit_events` PostgreSQL table into monthly declarative range-partitioned tables with automated partition creation triggers and composite partial indexes."
+    },
+    {
+      "id": "choice_adv_16_arch_distributed_kafka",
+      "category": "architectural_scope",
+      "question": "Select the appropriate architectural boundary classification for this engineering scope.",
+      "options": {
+        "A": "Local Atomic Change (Single service, in-memory, no schema migration or RPC break)",
+        "B": "Contract & RPC Breaking Change (Alters public API schema or inter-service protobufs)",
+        "C": "Storage & Schema Evolution (Modifies persistent database tables, columns, or indexes)",
+        "D": "Distributed Infrastructure Topology (Changes event brokers, clustering, or deployment mesh)"
+      },
+      "expected_choice": "D",
+      "candidate": "Scope: Replace synchronous intra-service HTTP calls with a 3-broker Apache Kafka cluster, deploying consumer groups across 3 Kubernetes availability zones with dead-letter queue topics and schema registry enforcement."
+    }
+  ],
+  "score_gate_items": [
+    {
+      "id": "score_adv_1_tier5_lru_cache",
+      "tier": "tier_5_flawless",
+      "tier_rank": 5,
+      "expected_band": [4.4, 5.0],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "from collections import OrderedDict\nfrom threading import RLock\nfrom typing import Any, Optional\n\nclass ThreadSafeLRUCache:\n    \"\"\"Thread-safe O(1) LRU cache with capacity bounding.\"\"\"\n    def __init__(self, capacity: int) -> None:\n        if capacity <= 0:\n            raise ValueError('Capacity must be positive')\n        self._capacity = capacity\n        self._lock = RLock()\n        self._data: OrderedDict[str, Any] = OrderedDict()\n\n    def get(self, key: str, default: Optional[Any] = None) -> Any:\n        with self._lock:\n            if key not in self._data:\n                return default\n            self._data.move_to_end(key)\n            return self._data[key]\n\n    def put(self, key: str, value: Any) -> None:\n        with self._lock:\n            if key in self._data:\n                self._data.move_to_end(key)\n            self._data[key] = value\n            if len(self._data) > self._capacity:\n                self._data.popitem(last=False)\n"
+    },
+    {
+      "id": "score_adv_2_tier5_retry_stream_hasher",
+      "tier": "tier_5_flawless",
+      "tier_rank": 5,
+      "expected_band": [4.4, 5.0],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "import hashlib\nfrom pathlib import Path\nfrom typing import BinaryIO\n\ndef compute_file_sha256(file_path: Path, chunk_size: int = 65536) -> str:\n    \"\"\"Streams a file in fixed chunks to compute SHA-256 with bounded memory.\"\"\"\n    if not file_path.is_file():\n        raise FileNotFoundError(f'Target file does not exist: {file_path}')\n    if chunk_size <= 0:\n        raise ValueError('Chunk size must be positive')\n    hasher = hashlib.sha256()\n    with file_path.open('rb') as handle:\n        while chunk := handle.read(chunk_size):\n            hasher.update(chunk)\n    return hasher.hexdigest()\n"
+    },
+    {
+      "id": "score_adv_3_tier5_token_bucket",
+      "tier": "tier_5_flawless",
+      "tier_rank": 5,
+      "expected_band": [4.4, 5.0],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "import time\nfrom threading import Lock\n\nclass TokenBucketRateLimiter:\n    \"\"\"Thread-safe token bucket rate limiter using monotonic clock.\"\"\"\n    def __init__(self, capacity: float, refill_rate_per_sec: float) -> None:\n        if capacity <= 0 or refill_rate_per_sec <= 0:\n            raise ValueError('Capacity and refill rate must be positive')\n        self.capacity = float(capacity)\n        self.tokens = float(capacity)\n        self.refill_rate = float(refill_rate_per_sec)\n        self.last_update = time.monotonic()\n        self.lock = Lock()\n\n    def consume(self, amount: float = 1.0) -> bool:\n        with self.lock:\n            now = time.monotonic()\n            elapsed = now - self.last_update\n            self.last_update = now\n            self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_rate)\n            if self.tokens >= amount:\n                self.tokens -= amount\n                return True\n            return False\n"
+    },
+    {
+      "id": "score_adv_4_tier4_lru_linear_scan",
+      "tier": "tier_4_suboptimal_complexity",
+      "tier_rank": 4,
+      "expected_band": [3.4, 4.3],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "from threading import Lock\nfrom typing import Any, Optional\n\nclass BasicLRUCache:\n    \"\"\"Thread-safe LRU cache, but uses list for order tracking (O(N) eviction complexity).\"\"\"\n    def __init__(self, capacity: int) -> None:\n        self.capacity = capacity\n        self.lock = Lock()\n        self.store: dict[str, Any] = {}\n        self.order: list[str] = []\n\n    def get(self, key: str) -> Optional[Any]:\n        with self.lock:\n            if key not in self.store:\n                return None\n            self.order.remove(key)  # Linear O(N) search across list\n            self.order.append(key)\n            return self.store[key]\n\n    def put(self, key: str, value: Any) -> None:\n        with self.lock:\n            if key in self.store:\n                self.order.remove(key)  # Linear O(N) scan\n            elif len(self.store) >= self.capacity:\n                oldest = self.order.pop(0)  # Linear O(N) shift\n                del self.store[oldest]\n            self.store[key] = value\n            self.order.append(key)\n"
+    },
+    {
+      "id": "score_adv_5_tier4_dedup_quadratic",
+      "tier": "tier_4_suboptimal_complexity",
+      "tier_rank": 4,
+      "expected_band": [3.4, 4.3],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "from typing import Sequence, TypeVar\n\nT = TypeVar('T')\n\ndef deduplicate_preserve_order(items: Sequence[T]) -> list[T]:\n    \"\"\"Deduplicates items preserving order, but checks list inclusion with O(N^2) complexity.\"\"\"\n    seen: list[T] = []\n    for item in items:\n        if item not in seen:  # O(N) list search on every iteration instead of set lookup\n            seen.append(item)\n    return seen\n"
+    },
+    {
+      "id": "score_adv_6_tier4_redundant_string_copies",
+      "tier": "tier_4_suboptimal_complexity",
+      "tier_rank": 4,
+      "expected_band": [3.4, 4.3],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "def parse_access_logs(raw_lines: list[str]) -> list[dict[str, str]]:\n    \"\"\"Parses lines safely, but performs redundant string conversions in hot loop.\"\"\"\n    results: list[dict[str, str]] = []\n    for line in raw_lines:\n        cleaned = str(line.strip().replace('\\r', '').replace('\\t', ' '))\n        parts = [str(p) for p in cleaned.split(' ') if str(p)]\n        if len(parts) >= 3:\n            results.append({'ip': str(parts[0]), 'method': str(parts[1]), 'path': str(parts[2])})\n    return results\n"
+    },
+    {
+      "id": "score_adv_7_tier3_mutable_default",
+      "tier": "tier_3_code_smells",
+      "tier_rank": 3,
+      "expected_band": [2.5, 3.4],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "def fetch_user_orders(user_id: int, filters: dict = {}, limit: int = 50) -> list[dict]:\n    # WARNING: filters has a mutable default dict shared across all function calls\n    filters['user_id'] = user_id\n    filters['active'] = True\n    return execute_query('SELECT * FROM orders WHERE user_id = :user_id', filters, limit=limit)\n"
+    },
+    {
+      "id": "score_adv_8_tier3_missing_timeout",
+      "tier": "tier_3_code_smells",
+      "tier_rank": 3,
+      "expected_band": [2.5, 3.4],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "import urllib.request\n\ndef query_upstream_health(endpoint_url: str) -> bool:\n    try:\n        # No timeout set: socket read can hang indefinitely if upstream stalls\n        resp = urllib.request.urlopen(endpoint_url)\n        return resp.status == 200\n    except Exception:\n        # Swallows all exceptions silently without logging or metric recording\n        return False\n"
+    },
+    {
+      "id": "score_adv_9_tier3_unclosed_fd",
+      "tier": "tier_3_code_smells",
+      "tier_rank": 3,
+      "expected_band": [2.5, 3.4],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "def load_config_properties(file_path: str) -> dict[str, str]:\n    # Opens file without context manager or try/finally; leaks FD if parse error occurs\n    f = open(file_path, 'r')\n    props = {}\n    for line in f:\n        if '=' in line:\n            k, v = line.strip().split('=', 1)\n            props[k] = v\n    f.close()\n    return props\n"
+    },
+    {
+      "id": "score_adv_10_tier3_global_mutation",
+      "tier": "tier_3_code_smells",
+      "tier_rank": 3,
+      "expected_band": [2.5, 3.4],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "_SESSION_CACHE = {}\n\ndef store_session(session_id: str, data: dict) -> None:\n    # Mutates global state directly without thread safety lock\n    global _SESSION_CACHE\n    _SESSION_CACHE[session_id] = data\n"
+    },
+    {
+      "id": "score_adv_11_tier2_toctou_race",
+      "tier": "tier_2_latent_defects",
+      "tier_rank": 2,
+      "expected_band": [1.6, 2.5],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "from pathlib import Path\nimport time\n\ndef write_file_if_not_exists(target_path: Path, payload: bytes) -> bool:\n    \"\"\"Cleanly typed function with subtle TOCTOU race condition.\"\"\"\n    if not target_path.exists():\n        # Context switch between check and open allows another thread/process to create it\n        time.sleep(0.001)\n        with target_path.open('wb') as handle:\n            handle.write(payload)\n        return True\n    return False\n"
+    },
+    {
+      "id": "score_adv_12_tier2_naive_timezone_dst",
+      "tier": "tier_2_latent_defects",
+      "tier_rank": 2,
+      "expected_band": [1.6, 2.5],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "from datetime import datetime, timedelta\n\ndef calculate_billing_cycle_seconds(start_time: str) -> float:\n    \"\"\"Calculates cycle duration using naive local datetime, failing across daylight saving transitions.\"\"\"\n    start = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')\n    now = datetime.now()  # Naive local time instead of UTC; causes silent hour shift on DST boundary\n    return (now - start).total_seconds()\n"
+    },
+    {
+      "id": "score_adv_13_tier2_untrusted_pickle",
+      "tier": "tier_2_latent_defects",
+      "tier_rank": 2,
+      "expected_band": [1.6, 2.5],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "import pickle\nfrom typing import Any\n\ndef deserialize_client_state(raw_bytes: bytes) -> Any:\n    \"\"\"Validates payload is non-empty bytes, but unpickles untrusted payload leading to arbitrary code execution.\"\"\"\n    if not isinstance(raw_bytes, bytes) or len(raw_bytes) == 0:\n        raise ValueError('Invalid payload bytes')\n    return pickle.loads(raw_bytes)  # Critical vulnerability: unpickling untrusted input\n"
+    },
+    {
+      "id": "score_adv_14_tier1_sql_injection",
+      "tier": "tier_1_catastrophic",
+      "tier_rank": 1,
+      "expected_band": [1.0, 1.8],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "def authenticate_user(db_cursor, username: str, password_hash: str) -> bool:\n    # Raw SQL injection via direct string formatting\n    sql = f\"SELECT id FROM accounts WHERE username = '{username}' AND pass = '{password_hash}'\"\n    db_cursor.execute(sql)\n    return db_cursor.fetchone() is not None\n"
+    },
+    {
+      "id": "score_adv_15_tier1_command_injection",
+      "tier": "tier_1_catastrophic",
+      "tier_rank": 1,
+      "expected_band": [1.0, 1.8],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "import os\n\ndef convert_media_file(uploaded_filename: str) -> None:\n    # Command injection via unquoted shell execution\n    os.system('ffmpeg -i ' + uploaded_filename + ' -vn output.mp3')\n"
+    },
+    {
+      "id": "score_adv_16_tier1_swallowed_financial_panic",
+      "tier": "tier_1_catastrophic",
+      "tier_rank": 1,
+      "expected_band": [1.0, 1.8],
+      "rubric": "Rate the engineering quality, safety, and production-readiness of this Python code on an integer scale from 1 (broken/unsafe) to 5 (flawless, robust, optimal complexity, typed):",
+      "candidate": "def execute_wire_transfer(ledger, sender_id: str, receiver_id: str, amount_cents: int) -> bool:\n    try:\n        ledger.debit(sender_id, amount_cents)\n        ledger.credit(receiver_id, amount_cents)\n    except BaseException:\n        # Swallows BaseException (including system exit) and reports transfer succeeded!\n        return True\n    return True\n"
+    }
+  ]
+}

@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-import os
 import statistics
 import sys
 import time
@@ -71,7 +70,7 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
         is_corr = (v.passed == item["expected"])
         if is_corr:
             base_correct += 1
-        print(f"  [{idx:02d}/24] {item['id']:<38} Exp={str(item['expected']):<5} Judge={str(v.passed):<5} "
+        print(f"  [{idx:02d}/24] {item['id']:<38} Exp={item['expected']!s:<5} Judge={v.passed!s:<5} "
               f"[{'OK' if is_corr else 'ERR'}] ({dt_ms:6.1f}ms, {v.total_tokens_generated} tok)", flush=True)
     base_time_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -226,7 +225,7 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
                 "l1_correct": l1_pass == item["expected"],
                 "casc_correct": casc_pass == item["expected"],
             })
-            print(f"  [{tier_name}] {item['id']:<35} Exp={str(item['expected']):<5} P={round(p, 2):<4} "
+            print(f"  [{tier_name}] {item['id']:<35} Exp={item['expected']!s:<5} P={round(p, 2):<4} "
                   f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}", flush=True)
 
         return {
@@ -292,7 +291,7 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
             "l1_correct": l1_pass == item["expected"],
             "casc_correct": casc_pass == item["expected"],
         })
-        print(f"  [tier_b_atomic] {item['id']:<35} Exp={str(item['expected']):<5} Probs={[round(p, 2) for p in probs]} "
+        print(f"  [tier_b_atomic] {item['id']:<35} Exp={item['expected']!s:<5} Probs={[round(p, 2) for p in probs]} "
               f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}", flush=True)
 
     n_b = len(TIER_B_8_ITEMS)
@@ -452,21 +451,22 @@ def main() -> None:
 
     for dev in args.devices:
         dev_results: dict[str, Any] = {}
-        print(f"\n=======================================================", flush=True)
+        print("\n=======================================================", flush=True)
         print(f"  LOADING MODEL ON DEVICE: {dev}", flush=True)
-        print(f"=======================================================", flush=True)
+        print("=======================================================", flush=True)
+
+        from transformers import AutoTokenizer
 
         from logitgate.backends.dory_pytorch import load_dory_model
-        from transformers import AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
         model = load_dory_model(args.model_name, device=dev, num_loops=2)
 
         for k in args.loops:
             label = f"dory-4b_{dev}_k{k}"
-            print(f"\n-------------------------------------------------------", flush=True)
+            print("\n-------------------------------------------------------", flush=True)
             print(f"  BENCHMARKING: {label} (Device={dev}, num_loops={k})", flush=True)
-            print(f"-------------------------------------------------------", flush=True)
+            print("-------------------------------------------------------", flush=True)
 
             backend = RecurrentPyTorchBackend(
                 model_name=args.model_name,

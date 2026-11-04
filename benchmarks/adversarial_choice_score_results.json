@@ -1,0 +1,407 @@
+{
+  "llama3.2:1b_cpu": {
+    "model": "llama3.2:1b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 1.76,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "50.0% \u00b1 0.0%",
+      "accuracy_percentage": 50.0,
+      "permutation_stability": "15/16 (93.8%)",
+      "category_breakdown": {
+        "6_way_scaling": "10/20 (50.0%)",
+        "adversarial_keyword_decoy": "10/20 (50.0%)",
+        "priority_hierarchy_conflict": "10/20 (50.0%)",
+        "architectural_scope": "10/20 (50.0%)"
+      },
+      "latency_ms": "1005.2 \u00b1 310.1 ms",
+      "mean_latency_ms": 1005.2
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.22,
+        "tier_4_suboptimal_complexity": 3.2,
+        "tier_3_code_smells": 3.0,
+        "tier_2_latent_defects": 3.07,
+        "tier_1_catastrophic": 2.56
+      },
+      "dynamic_range": 0.66,
+      "adjacent_monotonicity": "29/42 (69.0%)",
+      "adjacent_monotonicity_rate": 69.0,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "6/9 (66.7%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "10/12 (83.3%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "5/12 (41.7%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
+      },
+      "all_pairs_monotonicity": "81/102 (79.4%)",
+      "spearman_rho": 0.6688,
+      "latency_ms": "602.6 \u00b1 276.7 ms",
+      "mean_latency_ms": 602.6
+    }
+  },
+  "llama3.2:3b_cpu": {
+    "model": "llama3.2:3b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 3.18,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "75.0% \u00b1 0.0%",
+      "accuracy_percentage": 75.0,
+      "permutation_stability": "15/16 (93.8%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "10/20 (50.0%)",
+        "architectural_scope": "15/20 (75.0%)"
+      },
+      "latency_ms": "1422.5 \u00b1 441.3 ms",
+      "mean_latency_ms": 1422.5
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.63,
+        "tier_4_suboptimal_complexity": 3.05,
+        "tier_3_code_smells": 2.55,
+        "tier_2_latent_defects": 2.54,
+        "tier_1_catastrophic": 2.05
+      },
+      "dynamic_range": 1.58,
+      "adjacent_monotonicity": "33/42 (78.6%)",
+      "adjacent_monotonicity_rate": 78.6,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "4/12 (33.3%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
+      },
+      "all_pairs_monotonicity": "91/102 (89.2%)",
+      "spearman_rho": 0.8487,
+      "latency_ms": "872.1 \u00b1 401.0 ms",
+      "mean_latency_ms": 872.1
+    }
+  },
+  "qwen2.5-coder:1.5b_cpu": {
+    "model": "qwen2.5-coder:1.5b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 1.39,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "61.2% \u00b1 2.8%",
+      "accuracy_percentage": 61.2,
+      "permutation_stability": "13/16 (81.2%)",
+      "category_breakdown": {
+        "6_way_scaling": "19/20 (95.0%)",
+        "adversarial_keyword_decoy": "5/20 (25.0%)",
+        "priority_hierarchy_conflict": "5/20 (25.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "644.8 \u00b1 278.4 ms",
+      "mean_latency_ms": 644.8
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.28,
+        "tier_4_suboptimal_complexity": 3.08,
+        "tier_3_code_smells": 3.03,
+        "tier_2_latent_defects": 3.02,
+        "tier_1_catastrophic": 3.02
+      },
+      "dynamic_range": 0.26,
+      "adjacent_monotonicity": "28/42 (66.7%)",
+      "adjacent_monotonicity_rate": 66.7,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "7/12 (58.3%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
+      },
+      "all_pairs_monotonicity": "76/102 (74.5%)",
+      "spearman_rho": 0.5683,
+      "latency_ms": "434.7 \u00b1 192.1 ms",
+      "mean_latency_ms": 434.7
+    }
+  },
+  "qwen2.5-coder:3b_cpu": {
+    "model": "qwen2.5-coder:3b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 2.44,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "75.0% \u00b1 0.0%",
+      "accuracy_percentage": 75.0,
+      "permutation_stability": "14/16 (87.5%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "5/20 (25.0%)",
+        "priority_hierarchy_conflict": "15/20 (75.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "1265.0 \u00b1 568.2 ms",
+      "mean_latency_ms": 1265.0
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.61,
+        "tier_4_suboptimal_complexity": 2.99,
+        "tier_3_code_smells": 2.85,
+        "tier_2_latent_defects": 3.04,
+        "tier_1_catastrophic": 2.78
+      },
+      "dynamic_range": 0.83,
+      "adjacent_monotonicity": "28/42 (66.7%)",
+      "adjacent_monotonicity_rate": 66.7,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "9/12 (75.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "2/12 (16.7%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
+      },
+      "all_pairs_monotonicity": "77/102 (75.5%)",
+      "spearman_rho": 0.6013,
+      "latency_ms": "838.3 \u00b1 399.8 ms",
+      "mean_latency_ms": 838.3
+    }
+  },
+  "gemma4:e4b_cpu": {
+    "model": "gemma4:e4b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 9.57,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "93.8% \u00b1 0.0%",
+      "accuracy_percentage": 93.8,
+      "permutation_stability": "16/16 (100.0%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "20/20 (100.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "4186.4 \u00b1 1619.0 ms",
+      "mean_latency_ms": 4186.4
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 4.66,
+        "tier_4_suboptimal_complexity": 2.73,
+        "tier_3_code_smells": 2.01,
+        "tier_2_latent_defects": 1.7,
+        "tier_1_catastrophic": 1.0
+      },
+      "dynamic_range": 3.66,
+      "adjacent_monotonicity": "33/42 (78.6%)",
+      "adjacent_monotonicity_rate": 78.6,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
+      },
+      "all_pairs_monotonicity": "93/102 (91.2%)",
+      "spearman_rho": 0.8907,
+      "latency_ms": "6028.0 \u00b1 1678.2 ms",
+      "mean_latency_ms": 6028.0
+    }
+  },
+  "gemma4:e4b_gpu1": {
+    "model": "gemma4:e4b",
+    "hardware": "GPU 1 (16GB)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 3.25,
+      "vram_gb": 3.25
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "93.8% \u00b1 0.0%",
+      "accuracy_percentage": 93.8,
+      "permutation_stability": "16/16 (100.0%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "20/20 (100.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "137.4 \u00b1 20.8 ms",
+      "mean_latency_ms": 137.4
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 4.58,
+        "tier_4_suboptimal_complexity": 2.74,
+        "tier_3_code_smells": 2.02,
+        "tier_2_latent_defects": 1.69,
+        "tier_1_catastrophic": 1.01
+      },
+      "dynamic_range": 3.57,
+      "adjacent_monotonicity": "33/42 (78.6%)",
+      "adjacent_monotonicity_rate": 78.6,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
+      },
+      "all_pairs_monotonicity": "93/102 (91.2%)",
+      "spearman_rho": 0.8907,
+      "latency_ms": "165.0 \u00b1 24.1 ms",
+      "mean_latency_ms": 165.0
+    }
+  },
+  "qwen2.5:14b_gpu1": {
+    "model": "qwen2.5:14b",
+    "hardware": "GPU 1 (16GB)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 10.39,
+      "vram_gb": 10.39
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "87.5% \u00b1 0.0%",
+      "accuracy_percentage": 87.5,
+      "permutation_stability": "16/16 (100.0%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "15/20 (75.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "141.1 \u00b1 27.2 ms",
+      "mean_latency_ms": 141.1
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 4.62,
+        "tier_4_suboptimal_complexity": 2.98,
+        "tier_3_code_smells": 2.67,
+        "tier_2_latent_defects": 2.19,
+        "tier_1_catastrophic": 1.0
+      },
+      "dynamic_range": 3.62,
+      "adjacent_monotonicity": "34/42 (81.0%)",
+      "adjacent_monotonicity_rate": 81.0,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "9/12 (75.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "7/12 (58.3%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "9/9 (100.0%)"
+      },
+      "all_pairs_monotonicity": "93/102 (91.2%)",
+      "spearman_rho": 0.8764,
+      "latency_ms": "130.1 \u00b1 17.6 ms",
+      "mean_latency_ms": 130.1
+    }
+  },
+  "qwen2.5-coder:14b_gpu1": {
+    "model": "qwen2.5-coder:14b",
+    "hardware": "GPU 1 (16GB)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 10.39,
+      "vram_gb": 10.39
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "87.5% \u00b1 0.0%",
+      "accuracy_percentage": 87.5,
+      "permutation_stability": "16/16 (100.0%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "15/20 (75.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "156.7 \u00b1 33.6 ms",
+      "mean_latency_ms": 156.7
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 4.43,
+        "tier_4_suboptimal_complexity": 2.63,
+        "tier_3_code_smells": 2.08,
+        "tier_2_latent_defects": 1.98,
+        "tier_1_catastrophic": 1.16
+      },
+      "dynamic_range": 3.27,
+      "adjacent_monotonicity": "32/42 (76.2%)",
+      "adjacent_monotonicity_rate": 76.2,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "4/12 (33.3%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "7/9 (77.8%)"
+      },
+      "all_pairs_monotonicity": "92/102 (90.2%)",
+      "spearman_rho": 0.8787,
+      "latency_ms": "131.7 \u00b1 17.6 ms",
+      "mean_latency_ms": 131.7
+    }
+  },
+  "gemma4:31b_gpu0": {
+    "model": "gemma4:31b",
+    "hardware": "GPU 0 (32GB)",
+    "base_url": "http://localhost:11434",
+    "residency": {
+      "ram_gb": 2.93,
+      "vram_gb": 2.93
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "100.0% \u00b1 0.0%",
+      "accuracy_percentage": 100.0,
+      "permutation_stability": "16/16 (100.0%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "20/20 (100.0%)",
+        "priority_hierarchy_conflict": "20/20 (100.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "357.8 \u00b1 31.5 ms",
+      "mean_latency_ms": 357.8
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 5.0,
+        "tier_4_suboptimal_complexity": 2.33,
+        "tier_3_code_smells": 1.72,
+        "tier_2_latent_defects": 1.33,
+        "tier_1_catastrophic": 1.0
+      },
+      "dynamic_range": 4.0,
+      "adjacent_monotonicity": "33/42 (78.6%)",
+      "adjacent_monotonicity_rate": 78.6,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "10/12 (83.3%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "8/12 (66.7%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
+      },
+      "all_pairs_monotonicity": "90/102 (88.2%)",
+      "spearman_rho": 0.9096,
+      "latency_ms": "407.1 \u00b1 72.3 ms",
+      "mean_latency_ms": 407.1
+    }
+  }
+}

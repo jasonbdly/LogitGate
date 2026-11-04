@@ -1,6 +1,6 @@
 # LogitGate (`logitgate`)
 
-[![Release: v0.1.0](https://img.shields.io/badge/release-v0.1.0-blue.svg)](CHANGELOG.md)
+[![Release: v0.2.0](https://img.shields.io/badge/release-v0.2.0-blue.svg)](CHANGELOG.md)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.10–3.15](https://img.shields.io/badge/python-3.10--3.15-blue.svg)](https://www.python.org/downloads/)
 [![PEP 561 Typed](https://img.shields.io/badge/typing-PEP%20561-blueviolet.svg)](src/logitgate/py.typed)
@@ -146,6 +146,36 @@ Raw benchmark outputs are stored in [`benchmarks/cpu_results.json`](benchmarks/c
 3. **The Multi-Rubric Batching Advantage**:
    - On CPU, running 4 rubrics via `evaluate_batch` takes **1.8 s** on `qwen2.5-coder:1.5b` and **3.7 s** on `llama3.2:3b` (vs **20.9 s** on `gemma4:e4b`), avoiding the CPU memory bus saturation of redundant prefill passes.
 
+##### In-Process `llama.cpp` vs. Ollama Daemon & CPU Thread Scaling Benchmark
+
+To determine whether native in-process embedding (`LlamaCppBackend` via `llama-cpp-python`) or background HTTP daemons (Ollama) offer better ergonomics and performance for CPU-only CI environments, we conducted a head-to-head benchmark across 3 compact GGUF models on an AMD Ryzen 9 9955HX3D (16-Core / 32-Thread with 128 MB 3D V-Cache).
+
+Raw benchmark outputs are stored in [`benchmarks/cpu_format_runtime_results.json`](benchmarks/cpu_format_runtime_results.json):
+
+| Model & Quantization | Disk Size | Cold Load | Host RAM (RSS) | Single-Pass (In-Process) | Single-Pass (Ollama Daemon) | 2-Pass Debiased (In-Process) | 2-Pass Debiased (Ollama Daemon) | 4-Rubric Batch (In-Process) | 4-Rubric Batch (Ollama Daemon) | ChoiceGate (16 Items) | ScoreGate Spearman $\rho$ |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`llama3.2:1b` (Q8_0)** | 1.26 GB | **1.24 s** | 1,405 MB | 114.5 ± 8.4 ms | **56.0 ± 2.8 ms** | 604.3 ± 154.0 ms | **502.3 ± 96.0 ms** | 3,111.5 ± 415.5 ms | **2,900.2 ± 208.3 ms** | 8/16 (50.0%) | 0.6793 vs. 0.6688 |
+| **`qwen2.5-coder:1.5b` (Q4_K_M)** | **940 MB** | **1.42 s** | **1,008 MB** | 128.0 ± 8.2 ms | **48.7 ± 1.8 ms** | 619.7 ± 99.0 ms | **362.3 ± 62.6 ms** | 3,541.6 ± 614.6 ms | **2,060.4 ± 156.7 ms** | **11/16 (68.8%)** vs. 9/16 | 0.6013 vs. 0.5683 |
+| **`llama3.2:3b` (Q4_K_M)** | 1.93 GB | 3.22 s | 2,367 MB | 105.9 ± 3.7 ms | **80.9 ± 5.2 ms** | 815.8 ± 173.1 ms | **693.4 ± 125.2 ms** | 4,399.4 ± 340.1 ms | **4,111.7 ± 279.3 ms** | **12/16 (75.0%)** | **0.8487 vs. 0.8487** |
+
+##### CPU Thread Scaling Sweep (`llama3.2:3b`, Native In-Process `llama.cpp`):
+
+| Thread Allocation | Single-Pass Triage ($N=5$) | 2-Pass Symmetric Debiasing ($N=5$) | 4-Rubric Batch Total ($N=5$) | Per-Rubric Batch Time |
+| :---: | :---: | :---: | :---: | :---: |
+| **$n\_threads = 1$** | 124.0 ± 4.6 ms | **893.1 ± 98.2 ms** | **4,883.7 ± 279.7 ms** | 1,220.9 ms |
+| **$n\_threads = 2$** | **112.6 ± 6.5 ms** | 953.5 ± 82.3 ms | 4,905.9 ± 421.6 ms | 1,226.5 ms |
+| **$n\_threads = 4$** | 117.7 ± 8.4 ms | 992.8 ± 117.7 ms | 5,047.7 ± 768.6 ms | 1,261.9 ms |
+| **$n\_threads = 8$** | 133.8 ± 9.9 ms | 924.2 ± 170.9 ms | 5,152.2 ± 834.6 ms | 1,288.1 ms |
+| **$n\_threads = 16$** | 118.4 ± 9.3 ms | 993.0 ± 90.2 ms | 5,180.3 ± 1514.6 ms | 1,295.1 ms |
+
+##### Key Architectural Findings on CPU Execution:
+1. **Zero Daemon Overhead & Instant Cold Startup**:
+   - In-process `llama.cpp` initializes directly inside your Python process in **1.2 to 3.2 seconds**, consuming only **1.0 GB to 2.4 GB RAM** without needing to launch, configure, or port-manage an external HTTP background daemon.
+2. **Identical Logit Fidelity Across Runtimes**:
+   - The continuous scoring correlation on `llama3.2:3b` was **identical to 4 decimal places** between native `llama.cpp` and Ollama daemon ($\rho = 0.8487$, with 12/16 ChoiceGate accuracy). On `qwen2.5-coder:1.5b`, in-process execution even resolved two additional keyword decoy cases ($11/16$ vs $9/16$).
+3. **Memory-Bandwidth Saturation (The 2-Thread Optimum)**:
+   - For single-token logit probing, CPU computation is strictly memory-bandwidth bound (reading ~1.9 GB of weights per forward pass from system RAM). Allocating more than **2 to 4 threads** provides zero speedup because the memory bus saturates, while higher thread counts introduce thread synchronization and cache-line invalidation overhead.
+
 ---
 
 ### 3. Empirical Layer Resolution Breakdown (24-Item Multi-Domain Suite)
@@ -163,7 +193,9 @@ Evaluated across the 24-item multi-domain benchmark suite ([`benchmarks/data/mul
 
 ### 4. `ChoiceGate` (Multi-Way Routing) & `ScoreGate` (Continuous 1–5 Scoring) Benchmarks
 
-Evaluated on the 12-item routing and scoring suite ([`benchmarks/data/choice_and_score_12.json`](benchmarks/data/choice_and_score_12.json), comprising 6 three-way operational/architectural routing cases with cross-domain distractors and 6 continuous 1–5 rubric scoring cases across High, Medium, and Low quality tiers):
+#### Initial Baseline (12-Item Suite)
+
+Evaluated on the baseline 12-item routing and scoring suite ([`benchmarks/data/choice_and_score_12.json`](benchmarks/data/choice_and_score_12.json), comprising 6 three-way operational/architectural routing cases with orthogonal categories and 6 continuous 1–5 rubric scoring cases across High, Medium, and Low quality extremes):
 
 | Model Architecture | `ChoiceGate` Accuracy (2-Pass) | `ChoiceGate` Latency ($N=5$) | `ScoreGate` Mean (High Tier) | `ScoreGate` Mean (Medium Tier) | `ScoreGate` Mean (Low Tier) | `ScoreGate` Pairwise Rank Accuracy | `ScoreGate` Latency ($N=5$) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -172,6 +204,68 @@ Evaluated on the 12-item routing and scoring suite ([`benchmarks/data/choice_and
 | **`qwen2.5-coder:14b` (14B Code)** | **6/6 (100.0%)** | 297.4 ± 4.3 ms | 4.28 | 2.61 | 1.43 | **6/6 (100.0%)** | 451.2 ± 14.5 ms |
 | **`gemma4:26b` (26B MoE, ~4B act)** | **6/6 (100.0%)** | **104.0 ± 1.1 ms** | 5.00 | 1.98 | 1.00 | **6/6 (100.0%)** | **139.1 ± 2.3 ms** |
 | **`gemma4:31b` (31B Dense)** | **6/6 (100.0%)** | 237.2 ± 3.8 ms | 5.00 | 1.64 | 1.00 | **6/6 (100.0%)** | 349.1 ± 4.7 ms |
+
+---
+
+#### Hardened Stress Testing: Multi-Action Failure Boundaries (32-Item Adversarial Suite, $N=5$ Trials)
+
+> [!IMPORTANT]
+> **Why the 12-Item Baseline Was Insufficient**: The initial 12-item suite relied on orthogonal routing categories (e.g. Billing vs. Security Operations) and cartoonish quality extremes (e.g. pristine production code vs. remote code execution). Every model achieved 100% accuracy, masking real failure boundaries.
+>
+> To discover where first-token probability gating actually breaks down, we constructed a hardened 32-item adversarial dataset ([`benchmarks/data/adversarial_choice_and_score_32.json`](benchmarks/data/adversarial_choice_and_score_32.json)) with zero shortcut capability, evaluated across **9 model & hardware configurations** with 1 untimed warm-up pass and $N=5$ sequential timed trials per item (`benchmarks/run_adversarial_choice_score.py`). Raw benchmark results are stored in [`benchmarks/adversarial_choice_score_results.json`](benchmarks/adversarial_choice_score_results.json).
+
+##### Adversarial Dataset Architecture (32 Items):
+1. **`ChoiceGate` (16 Adversarial Items across 4 Stress Vectors)**:
+   - **Vector 1: 6-Way Fine-Grained Operational Scaling (4 items)**: Dispatches complex production incidents across 6 distinct engineering rotations (SecOps, DB Reliability, Infra/TLS, Billing Disputes, Core App Logic, Frontend UI).
+   - **Vector 2: Adversarial Keyword Decoys & Lexical Traps (4 items)**: Heavy security terminology embedded inside billing invoices, critical database crashes described casually, and feature requests masquerading as high-severity operational regressions.
+   - **Vector 3: Strict Multi-Domain Priority Hierarchy (4 items)**: Production scenarios with multi-category overlap governed by strict policy precedence (Tier 1 Outage > Tier 2 Security Breach > Tier 3 Core App Defect > Tier 4 UX/Formatting).
+   - **Vector 4: Architectural Scope Boundaries (4 items)**: In-memory atomic cache vs. public API/RPC breaking contract vs. database range partitioning vs. distributed Kafka cluster.
+2. **`ScoreGate` (16 Items across 5 Discrete Code Quality Tiers)**:
+   - **Tier 5 (Flawless, 3 items)**: Thread-safe $O(1)$ LRU cache with `OrderedDict` & `RLock`, streaming chunked SHA-256 hasher, monotonic token bucket rate limiter. Expected band: `[4.4, 5.0]`.
+   - **Tier 4 (Clean but Sub-optimal Complexity, 3 items)**: Functionally correct and cleanly typed code, but with $O(N)$ list search in LRU cache, $O(N^2)$ quadratic deduplication, redundant byte copies. Expected band: `[3.2, 4.2]`.
+   - **Tier 3 (Functional with Code Smells, 4 items)**: Mutable default dict argument (`filters={}`), missing network socket timeouts with bare exception catch, unclosed file descriptors, global un-locked state mutation. Expected band: `[2.4, 3.2]`.
+   - **Tier 2 (Latent Critical Defects & TOCTOU Traps, 3 items)**: Time-of-Check to Time-of-Use file race condition, naive local datetime failing across daylight saving transitions, unpickling untrusted payload. Expected band: `[1.6, 2.5]`.
+   - **Tier 1 (Catastrophic Flaws, 3 items)**: Direct raw SQL string interpolation, unquoted shell command execution, financial wire transfer swallowing `BaseException` and returning false success. Expected band: `[1.0, 1.8]`.
+
+##### Master Empirical Results Across CPU, GPU 1, and GPU 0 Configurations ($N=5$ Trials):
+
+| Model & Hardware Configuration | Host Footprint | `ChoiceGate` Acc ($N=5$) | Order Stability | Choice Latency ($N=5$) | Score T5 (Flawless) | Score T4 (Complexity) | Score T3 (Smells) | Score T2 (TOCTOU) | Score T1 (Fatal) | Adjacent Monotonicity | Spearman $\rho$ | Dynamic Range | Score Latency ($N=5$) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`llama3.2:1b` (Pure CPU)** | 1.76 GB RAM | **50.0% ± 0.0%** | 15/16 (93.8%) | 1005.2 ± 310.1 ms | 3.22 | 3.20 | 3.00 | 3.07 | 2.56 | 29/42 (69.0%) | **0.6688** | 0.66 | 602.6 ± 276.7 ms |
+| **`qwen2.5-coder:1.5b` (Pure CPU)** | 1.39 GB RAM | **61.2% ± 2.8%** | 13/16 (81.2%) | **644.8 ± 278.4 ms** | 3.28 | 3.08 | 3.03 | 3.02 | 3.02 | 28/42 (66.7%) | **0.5683** | 0.26 | **434.7 ± 192.1 ms** |
+| **`llama3.2:3b` (Pure CPU)** | 3.18 GB RAM | **75.0% ± 0.0%** | 15/16 (93.8%) | 1422.5 ± 441.3 ms | 3.63 | 3.05 | 2.55 | 2.54 | 2.05 | 33/42 (78.6%) | **0.8487** | 1.58 | 872.1 ± 401.0 ms |
+| **`qwen2.5-coder:3b` (Pure CPU)** | 2.44 GB RAM | **75.0% ± 0.0%** | 14/16 (87.5%) | 1265.0 ± 568.2 ms | 3.61 | 2.99 | 2.85 | 3.04 | 2.78 | 28/42 (66.7%) | **0.6013** | 0.83 | 838.3 ± 399.8 ms |
+| **`gemma4:e4b` (Pure CPU)** | 9.57 GB RAM | **93.8% ± 0.0%** | **16/16 (100%)** | 4186.4 ± 1619.0 ms | 4.66 | 2.73 | 2.01 | 1.70 | 1.00 | 33/42 (78.6%) | **0.8907** | 3.66 | 6028.0 ± 1678.2 ms |
+| **`gemma4:e4b` (GPU 1, 16GB)** | 3.25 GB VRAM | **93.8% ± 0.0%** | **16/16 (100%)** | **137.4 ± 20.8 ms** | 4.58 | 2.74 | 2.02 | 1.69 | 1.01 | 33/42 (78.6%) | **0.8907** | 3.57 | 165.0 ± 24.1 ms |
+| **`qwen2.5:14b` (GPU 1, 16GB)** | 10.39 GB VRAM | **87.5% ± 0.0%** | **16/16 (100%)** | 141.1 ± 27.2 ms | 4.62 | 2.98 | 2.67 | 2.19 | 1.00 | 34/42 (81.0%) | **0.8764** | 3.62 | **130.1 ± 17.6 ms** |
+| **`qwen2.5-coder:14b` (GPU 1, 16GB)** | 10.39 GB VRAM | **87.5% ± 0.0%** | **16/16 (100%)** | 156.7 ± 33.6 ms | 4.43 | 2.63 | 2.08 | 1.98 | 1.16 | 32/42 (76.2%) | **0.8787** | 3.27 | 131.7 ± 17.6 ms |
+| **`gemma4:31b` (GPU 0, 32GB)** | 2.93 GB VRAM | **100.0% ± 0.0%** | **16/16 (100%)** | 357.8 ± 31.5 ms | 5.00 | 2.33 | 1.72 | 1.33 | 1.00 | 33/42 (78.6%) | **0.9096** | **4.00** | 407.1 ± 72.3 ms |
+
+##### Category Breakdown for `ChoiceGate` Routing:
+
+| Model & Hardware Configuration | 6-Way Operational Scaling (4 items) | Adversarial Keyword Decoys (4 items) | Priority Hierarchy Conflicts (4 items) | Architectural Scope (4 items) | Total Accuracy |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`llama3.2:1b` (Pure CPU)** | 10/20 (50.0%) | 10/20 (50.0%) | 10/20 (50.0%) | 10/20 (50.0%) | **50.0% ± 0.0%** |
+| **`qwen2.5-coder:1.5b` (Pure CPU)** | 19/20 (95.0%) | 5/20 (25.0%) | 5/20 (25.0%) | **20/20 (100.0%)** | **61.2% ± 2.8%** |
+| **`llama3.2:3b` (Pure CPU)** | **20/20 (100.0%)** | 15/20 (75.0%) | 10/20 (50.0%) | 15/20 (75.0%) | **75.0% ± 0.0%** |
+| **`qwen2.5-coder:3b` (Pure CPU)** | **20/20 (100.0%)** | 5/20 (25.0%) | 15/20 (75.0%) | **20/20 (100.0%)** | **75.0% ± 0.0%** |
+| **`gemma4:e4b` (Pure CPU / GPU 1)** | **20/20 (100.0%)** | 15/20 (75.0%) | **20/20 (100.0%)** | **20/20 (100.0%)** | **93.8% ± 0.0%** |
+| **`qwen2.5:14b` (GPU 1)** | **20/20 (100.0%)** | 15/20 (75.0%) | 15/20 (75.0%) | **20/20 (100.0%)** | **87.5% ± 0.0%** |
+| **`qwen2.5-coder:14b` (GPU 1)** | **20/20 (100.0%)** | 15/20 (75.0%) | 15/20 (75.0%) | **20/20 (100.0%)** | **87.5% ± 0.0%** |
+| **`gemma4:31b` (GPU 0)** | **20/20 (100.0%)** | **20/20 (100.0%)** | **20/20 (100.0%)** | **20/20 (100.0%)** | **100.0% ± 0.0%** |
+
+##### Key Scientific Findings from the Hardened Suite:
+1. **Shattering the 100% Ceiling Effect**:
+   - The hardened adversarial suite completely exposes the true limits of compact and mid-sized models. Where the 12-item baseline reported 100% across the board, `llama3.2:1b` drops to **50.0%**, `qwen2.5-coder:1.5b` drops to **61.2%**, and the 14B models plateau at **87.5%**.
+2. **The TOCTOU Inversion Bug in Compact Code Models**:
+   - On `ScoreGate`, `qwen2.5-coder:3b` exhibits a critical failure mode: it scores Tier 2 code (3.04) **higher** than Tier 4 code (2.99) and Tier 3 code (2.85). Because Tier 2 code is cleanly typed and well-formatted, the 3B model is blinded by surface appearance and fails to spot the latent TOCTOU concurrency race or daylight-saving timezone bug.
+3. **Severe Score Compression in Sub-3B Models**:
+   - `qwen2.5-coder:1.5b` exhibits extreme score compression ($\Delta = 0.26$), collapsing all 5 tiers into the narrow band between 3.02 and 3.28 ($\rho = 0.5683$). It cannot differentiate between a flawless LRU cache and a catastrophic SQL injection via first-token logits alone.
+4. **`llama3.2:3b` Outperforms `qwen2.5-coder:3b` on Continuous Scoring**:
+   - For CPU-only CI deployments, `llama3.2:3b` achieves a **Spearman $\rho = 0.8487$** with a healthy dynamic range of **1.58** ($T5=3.63 \to T1=2.05$), preserving strictly monotonic ordering across all adjacent tiers without the inversion bugs seen in Qwen Coder 3B.
+5. **Cross-Card Scaling: GPU 1 (16GB) vs. GPU 0 (32GB)**:
+   - On GPU 1, `gemma4:e4b` achieves **93.8%** ChoiceGate accuracy in **137.4 ms** (30x faster than CPU at 4.2 s).
+   - On GPU 0 (RTX 5090 32GB), **`gemma4:31b` is the only model to achieve a flawless 100.0% on `ChoiceGate`**, successfully untangling all adversarial keyword decoys and multi-domain priority conflicts, with a near-perfect **Spearman $\rho = 0.9096$** spanning the complete 1.00 to 5.00 score range.
 
 ---
 

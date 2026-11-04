@@ -32,6 +32,13 @@ SCORE_GATE_6_ITEMS: list[dict[str, Any]] = [
     for item in _CHOICE_SCORE_DATA["score_gate_items"]
 ]
 
+_ADV_CHOICE_SCORE_DATA: dict[str, Any] = _load_json("adversarial_choice_and_score_32.json")
+ADVERSARIAL_CHOICE_16_ITEMS: list[dict[str, Any]] = _ADV_CHOICE_SCORE_DATA["choice_gate_items"]
+ADVERSARIAL_SCORE_16_ITEMS: list[dict[str, Any]] = [
+    {**item, "expected_band": tuple(item["expected_band"])}
+    for item in _ADV_CHOICE_SCORE_DATA["score_gate_items"]
+]
+
 _HAYSTACK_DATA: dict[str, Any] = _load_json("haystack_handbook.json")
 HAYSTACK_RUBRIC: str = _HAYSTACK_DATA["rubric"]
 NEEDLE_COMPLIANT: str = _HAYSTACK_DATA["needle_compliant"]
@@ -49,6 +56,10 @@ def load_reasoning_tiers_32() -> list[dict[str, Any]]:
 
 def load_choice_and_score_12() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return list(CHOICE_GATE_6_ITEMS), list(SCORE_GATE_6_ITEMS)
+
+
+def load_adversarial_choice_and_score_32() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    return list(ADVERSARIAL_CHOICE_16_ITEMS), list(ADVERSARIAL_SCORE_16_ITEMS)
 
 
 def load_haystack_handbook() -> dict[str, Any]:

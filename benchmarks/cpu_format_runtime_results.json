@@ -1,0 +1,262 @@
+{
+  "hardware": "AMD Ryzen 9 9955HX3D (16-Core / 32-Thread, 128MB L3 3D V-Cache)",
+  "models": {
+    "llama3.2:1b": {
+      "metadata": {
+        "name": "llama3.2:1b",
+        "gguf_path": "/tmp/models/llama3.2-1b-q8_0.gguf",
+        "quant": "Q8_0",
+        "params": "1.2B",
+        "filesize_mb": 1260
+      },
+      "in_process_llamacpp": {
+        "load_time_s": 1.24,
+        "ram_used_mb": 1405.4,
+        "latencies": {
+          "single_pass_ms": "114.5 \u00b1 8.4 ms",
+          "single_pass_mean_ms": 114.5,
+          "two_pass_ms": "604.3 \u00b1 154.0 ms",
+          "two_pass_mean_ms": 604.3,
+          "four_rubric_batch_ms": "3111.5 \u00b1 415.5 ms",
+          "four_rubric_batch_mean_ms": 3111.5,
+          "per_rubric_batch_ms": "777.9 \u00b1 103.9 ms"
+        },
+        "adversarial_suite": {
+          "choice_gate_accuracy": "8/16 (50.0%)",
+          "choice_gate_acc_pct": 50.0,
+          "choice_gate_latency_ms": 1128.2,
+          "score_gate_tier_means": {
+            "tier_5_flawless": 3.19,
+            "tier_4_suboptimal_complexity": 3.12,
+            "tier_3_code_smells": 2.83,
+            "tier_2_latent_defects": 2.99,
+            "tier_1_catastrophic": 2.57
+          },
+          "score_gate_adjacent_monotonicity": "27/42 (64.3%)",
+          "score_gate_spearman_rho": 0.6793,
+          "score_gate_dynamic_range": 0.62,
+          "score_gate_latency_ms": 1106.1
+        }
+      },
+      "ollama_http_daemon": {
+        "latencies": {
+          "single_pass_ms": "56.0 \u00b1 2.8 ms",
+          "single_pass_mean_ms": 56.0,
+          "two_pass_ms": "502.3 \u00b1 96.0 ms",
+          "two_pass_mean_ms": 502.3,
+          "four_rubric_batch_ms": "2900.2 \u00b1 208.3 ms",
+          "four_rubric_batch_mean_ms": 2900.2,
+          "per_rubric_batch_ms": "725.0 \u00b1 52.1 ms"
+        },
+        "adversarial_suite": {
+          "choice_gate_accuracy": "8/16 (50.0%)",
+          "choice_gate_acc_pct": 50.0,
+          "choice_gate_latency_ms": 1443.9,
+          "score_gate_tier_means": {
+            "tier_5_flawless": 3.22,
+            "tier_4_suboptimal_complexity": 3.2,
+            "tier_3_code_smells": 3.0,
+            "tier_2_latent_defects": 3.07,
+            "tier_1_catastrophic": 2.56
+          },
+          "score_gate_adjacent_monotonicity": "29/42 (69.0%)",
+          "score_gate_spearman_rho": 0.6688,
+          "score_gate_dynamic_range": 0.66,
+          "score_gate_latency_ms": 1223.4
+        },
+        "in_process_speedup": {
+          "single_pass": 0.49,
+          "two_pass": 0.83,
+          "four_rubric_batch": 0.93
+        }
+      }
+    },
+    "qwen2.5-coder:1.5b": {
+      "metadata": {
+        "name": "qwen2.5-coder:1.5b",
+        "gguf_path": "/tmp/models/qwen2.5-coder-1.5b-q4_k_m.gguf",
+        "quant": "Q4_K_M",
+        "params": "1.5B",
+        "filesize_mb": 940
+      },
+      "in_process_llamacpp": {
+        "load_time_s": 1.42,
+        "ram_used_mb": 1008.7,
+        "latencies": {
+          "single_pass_ms": "128.0 \u00b1 8.2 ms",
+          "single_pass_mean_ms": 128.0,
+          "two_pass_ms": "619.7 \u00b1 99.0 ms",
+          "two_pass_mean_ms": 619.7,
+          "four_rubric_batch_ms": "3541.6 \u00b1 614.6 ms",
+          "four_rubric_batch_mean_ms": 3541.6,
+          "per_rubric_batch_ms": "885.4 \u00b1 153.6 ms"
+        },
+        "adversarial_suite": {
+          "choice_gate_accuracy": "11/16 (68.8%)",
+          "choice_gate_acc_pct": 68.8,
+          "choice_gate_latency_ms": 1253.3,
+          "score_gate_tier_means": {
+            "tier_5_flawless": 3.27,
+            "tier_4_suboptimal_complexity": 3.08,
+            "tier_3_code_smells": 3.02,
+            "tier_2_latent_defects": 3.01,
+            "tier_1_catastrophic": 3.01
+          },
+          "score_gate_adjacent_monotonicity": "29/42 (69.0%)",
+          "score_gate_spearman_rho": 0.6013,
+          "score_gate_dynamic_range": 0.26,
+          "score_gate_latency_ms": 1144.9
+        }
+      },
+      "ollama_http_daemon": {
+        "latencies": {
+          "single_pass_ms": "48.7 \u00b1 1.8 ms",
+          "single_pass_mean_ms": 48.7,
+          "two_pass_ms": "362.3 \u00b1 62.6 ms",
+          "two_pass_mean_ms": 362.3,
+          "four_rubric_batch_ms": "2060.4 \u00b1 156.7 ms",
+          "four_rubric_batch_mean_ms": 2060.4,
+          "per_rubric_batch_ms": "515.1 \u00b1 39.2 ms"
+        },
+        "adversarial_suite": {
+          "choice_gate_accuracy": "9/16 (56.2%)",
+          "choice_gate_acc_pct": 56.2,
+          "choice_gate_latency_ms": 985.5,
+          "score_gate_tier_means": {
+            "tier_5_flawless": 3.28,
+            "tier_4_suboptimal_complexity": 3.07,
+            "tier_3_code_smells": 3.03,
+            "tier_2_latent_defects": 3.02,
+            "tier_1_catastrophic": 3.02
+          },
+          "score_gate_adjacent_monotonicity": "28/42 (66.7%)",
+          "score_gate_spearman_rho": 0.5683,
+          "score_gate_dynamic_range": 0.26,
+          "score_gate_latency_ms": 866.9
+        },
+        "in_process_speedup": {
+          "single_pass": 0.38,
+          "two_pass": 0.58,
+          "four_rubric_batch": 0.58
+        }
+      }
+    },
+    "llama3.2:3b": {
+      "metadata": {
+        "name": "llama3.2:3b",
+        "gguf_path": "/tmp/models/llama3.2-3b-q4_k_m.gguf",
+        "quant": "Q4_K_M",
+        "params": "3.2B",
+        "filesize_mb": 1930
+      },
+      "in_process_llamacpp": {
+        "load_time_s": 3.22,
+        "ram_used_mb": 2367.7,
+        "latencies": {
+          "single_pass_ms": "105.9 \u00b1 3.7 ms",
+          "single_pass_mean_ms": 105.9,
+          "two_pass_ms": "815.8 \u00b1 173.1 ms",
+          "two_pass_mean_ms": 815.8,
+          "four_rubric_batch_ms": "4399.4 \u00b1 340.1 ms",
+          "four_rubric_batch_mean_ms": 4399.4,
+          "per_rubric_batch_ms": "1099.9 \u00b1 85.0 ms"
+        },
+        "adversarial_suite": {
+          "choice_gate_accuracy": "12/16 (75.0%)",
+          "choice_gate_acc_pct": 75.0,
+          "choice_gate_latency_ms": 1859.1,
+          "score_gate_tier_means": {
+            "tier_5_flawless": 3.62,
+            "tier_4_suboptimal_complexity": 2.98,
+            "tier_3_code_smells": 2.53,
+            "tier_2_latent_defects": 2.54,
+            "tier_1_catastrophic": 2.08
+          },
+          "score_gate_adjacent_monotonicity": "33/42 (78.6%)",
+          "score_gate_spearman_rho": 0.8487,
+          "score_gate_dynamic_range": 1.54,
+          "score_gate_latency_ms": 1881.3
+        }
+      },
+      "ollama_http_daemon": {
+        "latencies": {
+          "single_pass_ms": "80.9 \u00b1 5.2 ms",
+          "single_pass_mean_ms": 80.9,
+          "two_pass_ms": "693.4 \u00b1 125.2 ms",
+          "two_pass_mean_ms": 693.4,
+          "four_rubric_batch_ms": "4111.7 \u00b1 279.3 ms",
+          "four_rubric_batch_mean_ms": 4111.7,
+          "per_rubric_batch_ms": "1027.9 \u00b1 69.8 ms"
+        },
+        "adversarial_suite": {
+          "choice_gate_accuracy": "12/16 (75.0%)",
+          "choice_gate_acc_pct": 75.0,
+          "choice_gate_latency_ms": 2036.5,
+          "score_gate_tier_means": {
+            "tier_5_flawless": 3.62,
+            "tier_4_suboptimal_complexity": 3.05,
+            "tier_3_code_smells": 2.55,
+            "tier_2_latent_defects": 2.54,
+            "tier_1_catastrophic": 2.06
+          },
+          "score_gate_adjacent_monotonicity": "33/42 (78.6%)",
+          "score_gate_spearman_rho": 0.8487,
+          "score_gate_dynamic_range": 1.56,
+          "score_gate_latency_ms": 1760.7
+        },
+        "in_process_speedup": {
+          "single_pass": 0.76,
+          "two_pass": 0.85,
+          "four_rubric_batch": 0.93
+        }
+      }
+    }
+  },
+  "thread_scaling": {
+    "threads_1": {
+      "single_pass_ms": "124.0 \u00b1 4.6 ms",
+      "single_pass_mean_ms": 124.0,
+      "two_pass_ms": "893.1 \u00b1 98.2 ms",
+      "two_pass_mean_ms": 893.1,
+      "four_rubric_batch_ms": "4883.7 \u00b1 279.7 ms",
+      "four_rubric_batch_mean_ms": 4883.7,
+      "per_rubric_batch_ms": "1220.9 \u00b1 69.9 ms"
+    },
+    "threads_2": {
+      "single_pass_ms": "112.6 \u00b1 6.5 ms",
+      "single_pass_mean_ms": 112.6,
+      "two_pass_ms": "953.5 \u00b1 82.3 ms",
+      "two_pass_mean_ms": 953.5,
+      "four_rubric_batch_ms": "4905.9 \u00b1 421.6 ms",
+      "four_rubric_batch_mean_ms": 4905.9,
+      "per_rubric_batch_ms": "1226.5 \u00b1 105.4 ms"
+    },
+    "threads_4": {
+      "single_pass_ms": "117.7 \u00b1 8.4 ms",
+      "single_pass_mean_ms": 117.7,
+      "two_pass_ms": "992.8 \u00b1 117.7 ms",
+      "two_pass_mean_ms": 992.8,
+      "four_rubric_batch_ms": "5047.7 \u00b1 768.6 ms",
+      "four_rubric_batch_mean_ms": 5047.7,
+      "per_rubric_batch_ms": "1261.9 \u00b1 192.1 ms"
+    },
+    "threads_8": {
+      "single_pass_ms": "133.8 \u00b1 9.9 ms",
+      "single_pass_mean_ms": 133.8,
+      "two_pass_ms": "924.2 \u00b1 170.9 ms",
+      "two_pass_mean_ms": 924.2,
+      "four_rubric_batch_ms": "5152.2 \u00b1 834.6 ms",
+      "four_rubric_batch_mean_ms": 5152.2,
+      "per_rubric_batch_ms": "1288.0 \u00b1 208.7 ms"
+    },
+    "threads_16": {
+      "single_pass_ms": "118.4 \u00b1 9.3 ms",
+      "single_pass_mean_ms": 118.4,
+      "two_pass_ms": "993.0 \u00b1 90.2 ms",
+      "two_pass_mean_ms": 993.0,
+      "four_rubric_batch_ms": "5180.3 \u00b1 1514.6 ms",
+      "four_rubric_batch_mean_ms": 5180.3,
+      "per_rubric_batch_ms": "1295.1 \u00b1 378.7 ms"
+    }
+  }
+}

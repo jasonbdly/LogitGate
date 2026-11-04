@@ -12,3 +12,4 @@ release_notes.md
 *.pyc
 .coverage
 htmlcov/
+*.log
