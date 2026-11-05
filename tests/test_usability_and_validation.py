@@ -820,3 +820,114 @@ def test_model_temperature_no_false_reverse_substring_matches():
     assert get_model_temperature("llama3.2:1b") == 1.10
     assert get_model_temperature("gemma4:e4b") == 0.95
 
+
+def test_backend_strips_internal_eval_kwargs():
+    """OpenAICompatBackend and OllamaBackend sanitize internal LogitGate kwargs before sending HTTP payloads."""
+    import json
+    from typing import Any
+
+    import httpx
+
+    from logitgate.backends.ollama import OllamaBackend
+    from logitgate.backends.openai_compat import OpenAICompatBackend
+
+    # 1. OllamaBackend
+    ollama_captured: list[dict[str, Any]] = []
+
+    def ollama_handler(request: httpx.Request) -> httpx.Response:
+        ollama_captured.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "role": "assistant",
+                    "content": "A",
+                    "logprobs": [{"top_logprobs": [{"token": "A", "logprob": -0.05}]}],
+                }
+            },
+        )
+
+    ollama = OllamaBackend(client=httpx.Client(transport=httpx.MockTransport(ollama_handler)))
+    ollama.query_top_logprobs(
+        "prompt",
+        save_on_fail=True,
+        snapshot_dir="/tmp/snapshots",
+        test_name="unit_test",
+        rubric_override="custom rubric",
+    )
+    ollama.generate(
+        "prompt",
+        save_on_fail=True,
+        snapshot_dir="/tmp/snapshots",
+        test_name="unit_test",
+        rubric_override="custom rubric",
+    )
+
+    for payload in ollama_captured:
+        assert "save_on_fail" not in payload
+        assert "snapshot_dir" not in payload
+        assert "test_name" not in payload
+        assert "rubric_override" not in payload
+        if "options" in payload:
+            assert "save_on_fail" not in payload["options"]
+            assert "snapshot_dir" not in payload["options"]
+            assert "test_name" not in payload["options"]
+            assert "rubric_override" not in payload["options"]
+
+    # 2. OpenAICompatBackend
+    openai_captured: list[dict[str, Any]] = []
+
+    def openai_handler(request: httpx.Request) -> httpx.Response:
+        openai_captured.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "A"},
+                        "logprobs": {"content": [{"top_logprobs": [{"token": "A", "logprob": -0.05}]}]},
+                    }
+                ]
+            },
+        )
+
+    openai = OpenAICompatBackend(client=httpx.Client(transport=httpx.MockTransport(openai_handler)))
+    openai.query_top_logprobs(
+        "prompt",
+        save_on_fail=True,
+        snapshot_dir="/tmp/snapshots",
+        test_name="unit_test",
+        rubric_override="custom rubric",
+    )
+    openai.generate(
+        "prompt",
+        save_on_fail=True,
+        snapshot_dir="/tmp/snapshots",
+        test_name="unit_test",
+        rubric_override="custom rubric",
+    )
+
+    for payload in openai_captured:
+        assert "save_on_fail" not in payload
+        assert "snapshot_dir" not in payload
+        assert "test_name" not in payload
+        assert "rubric_override" not in payload
+
+
+def test_readme_no_raw_mermaid_for_pypi_rendering():
+    """README.md avoids raw mermaid code blocks so PyPI (pypi.org) renders clean visual box diagrams."""
+    from pathlib import Path
+
+    readme_path = Path(__file__).resolve().parent.parent / "README.md"
+    readme_content = readme_path.read_text(encoding="utf-8")
+
+    # PyPI does not execute client-side JavaScript (mermaid.js) and displays ```mermaid as raw code text
+    assert "```mermaid" not in readme_content, (
+        "README.md contains raw ```mermaid code fences which break visual rendering on PyPI! "
+        "Use universal Unicode box-drawing diagrams instead."
+    )
+    assert "┌──" in readme_content and "└──" in readme_content, (
+        "README.md must contain the universal Unicode architecture diagram."
+    )
+
+
