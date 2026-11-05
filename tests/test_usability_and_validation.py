@@ -725,3 +725,37 @@ def test_base_gate_callable_and_from_verdict(tmp_path, monkeypatch):
     ret = main(["eval", "--rubric", "Check CLI env", "--candidate", "hello world", "--json"])
     assert ret == 0
 
+
+@pytest.mark.asyncio
+async def test_backend_context_managers_and_exceptions():
+    """Verify backend context manager protocols and custom exception hierarchy."""
+    from logitgate import (
+        BackendError,
+        CalibrationError,
+        ConfigurationError,
+        ContractViolationError,
+        LogitGateError,
+        StubBackend,
+    )
+
+    # 1. Verify exception hierarchy and backward compatibility
+    assert issubclass(ConfigurationError, (LogitGateError, ValueError))
+    assert issubclass(CalibrationError, (LogitGateError, ValueError))
+    assert issubclass(ContractViolationError, (LogitGateError, ValueError))
+    assert issubclass(BackendError, (LogitGateError, RuntimeError))
+
+    try:
+        raise ConfigurationError("Bad configuration")
+    except ValueError as exc:
+        assert str(exc) == "Bad configuration"
+
+    # 2. Synchronous context manager
+    with StubBackend(default_prob=0.92) as backend:
+        res = backend.query_top_logprobs("test prompt")
+        assert len(res) == 2
+
+    # 3. Asynchronous context manager
+    async with StubBackend(default_prob=0.92) as async_backend:
+        res_async = await async_backend.aquery_top_logprobs("test async prompt")
+        assert len(res_async) == 2
+

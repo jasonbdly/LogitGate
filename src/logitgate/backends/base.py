@@ -7,6 +7,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from typing_extensions import Self
+
 
 def strip_reasoning_blocks(text: str) -> str:
     """Strips <think>...</think> reasoning traces from model responses."""
@@ -40,6 +42,24 @@ class LogitBackend(abc.ABC):
             None, self.query_top_logprobs, prompt, top_k, allowed_tokens
         )
 
+    def close(self) -> None:
+        """Closes any underlying network connections or resources."""
+
+    async def aclose(self) -> None:
+        """Asynchronously closes any underlying network connections or resources."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.aclose()
+
 
 class GenerativeBackend(abc.ABC):
     """Abstract base class for generative reasoning & diagnostics."""
@@ -52,6 +72,24 @@ class GenerativeBackend(abc.ABC):
         """Async variant of generate."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.generate(prompt, max_tokens=max_tokens, **kwargs))
+
+    def close(self) -> None:
+        """Closes any underlying network connections or resources."""
+
+    async def aclose(self) -> None:
+        """Asynchronously closes any underlying network connections or resources."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.aclose()
 
 
 class StubBackend(LogitBackend, GenerativeBackend):

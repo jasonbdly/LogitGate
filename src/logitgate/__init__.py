@@ -38,6 +38,13 @@ from logitgate.debiasing.softmax import (
     compute_normalized_probabilities,
     extract_token_logprob,
 )
+from logitgate.exceptions import (
+    BackendError,
+    CalibrationError,
+    ConfigurationError,
+    ContractViolationError,
+    LogitGateError,
+)
 from logitgate.gates.ast_gate import ASTGate, ContractGate
 from logitgate.gates.base import BaseGate
 from logitgate.gates.judge_gate import JudgeGate
@@ -57,11 +64,15 @@ __version__ = "0.2.0"
 __all__ = [
     "KNOWN_MODEL_TEMPERATURES",
     "ASTGate",
+    "BackendError",
     "BaseGate",
+    "CalibrationError",
     "CalibrationResult",
     "Cascade",
     "ChoiceGate",
+    "ConfigurationError",
     "ContractGate",
+    "ContractViolationError",
     "DecisionStatus",
     "GenerativeBackend",
     "JudgeGate",
@@ -70,6 +81,7 @@ __all__ = [
     "LogitBackend",
     "LogitGate",
     "LogitGateDefaults",
+    "LogitGateError",
     "LogitGateMetric",
     "LogitGateSystemOneModel",
     "OllamaBackend",
