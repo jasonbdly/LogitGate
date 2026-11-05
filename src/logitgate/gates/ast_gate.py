@@ -18,11 +18,17 @@ def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
     Validates that task dependencies exist and contain no cycles.
     Returns error message if invalid, None if acyclic and all dependencies exist.
     """
+    if not isinstance(tasks, list):
+        return f"Expected list of tasks for DAG check, got {type(tasks).__name__}"
+
     task_ids = set()
     for t in tasks:
+        if not isinstance(t, dict):
+            return f"Expected task node to be dict, got {type(t).__name__}"
         tid = t.get("id") or t.get("task_id")
-        if tid:
-            task_ids.add(str(tid))
+        if not tid:
+            return f"Task node missing required 'id' or 'task_id': {t}"
+        task_ids.add(str(tid))
 
     adj: dict[str, list[str]] = {tid: [] for tid in task_ids}
     in_degree: dict[str, int] = {tid: 0 for tid in task_ids}
@@ -410,7 +416,11 @@ class ASTGate(BaseGate):
         # 3. Forbidden Patterns
         if self.forbidden_patterns:
             for pattern in self.forbidden_patterns:
-                if re.search(pattern, candidate_str):
+                try:
+                    matched = bool(re.search(pattern, candidate_str))
+                except re.error:
+                    matched = pattern in candidate_str
+                if matched:
                     latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Forbidden pattern matched: '{pattern}'"
                     trace = LayerTrace(
@@ -432,7 +442,13 @@ class ASTGate(BaseGate):
         # 4. Required Sections
         if self.required_sections:
             for section in self.required_sections:
-                if section not in candidate_str and not re.search(section, candidate_str):
+                has_section = section in candidate_str
+                if not has_section:
+                    try:
+                        has_section = bool(re.search(section, candidate_str))
+                    except re.error:
+                        has_section = False
+                if not has_section:
                     latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Missing required section: '{section}'"
                     trace = LayerTrace(

@@ -103,14 +103,14 @@ def get_model_temperature(
                 cached = json.load(f)
             if isinstance(cached, dict):
                 for k, v in cached.items():
-                    if k.lower() == m_lower or k.lower() in m_lower or m_lower in k.lower():
+                    if k.lower() == m_lower or k.lower() in m_lower:
                         return float(v)
         except (OSError, ValueError, TypeError):
             cached = None
 
     # 2. KNOWN_MODEL_TEMPERATURES
     for k, v in KNOWN_MODEL_TEMPERATURES.items():
-        if k.lower() == m_lower or k.lower() in m_lower or m_lower in k.lower():
+        if k.lower() == m_lower or k.lower() in m_lower:
             return v
 
     # 3. Default

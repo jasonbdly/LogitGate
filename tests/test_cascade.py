@@ -112,3 +112,53 @@ async def test_cascade_async_evaluation():
     assert verdict.passed is True
     assert verdict.status == DecisionStatus.PASSED
     assert verdict.triggered_layer == "LogitGate"
+
+
+def test_cascade_multiple_logit_gates_and_semantics():
+    """Chaining multiple LogitGates enforces AND semantics where all gates must pass."""
+    b1 = StubBackend(default_prob=0.95)
+    b2 = StubBackend(default_prob=0.05)
+
+    g1 = LogitGate("Rule 1", backend=b1)
+    g2 = LogitGate("Rule 2", backend=b2)
+
+    cascade = g1 >> g2
+    verdict = cascade.evaluate("candidate text")
+
+    assert verdict.passed is False
+    assert verdict.status == DecisionStatus.FAILED
+    assert verdict.triggered_layer == "LogitGate"
+    assert len(b1.prompt_log) > 0
+    assert len(b2.prompt_log) > 0
+
+
+def test_cascade_middle_gate_failure():
+    """Failure at an intermediate non-logit gate halts and fails the cascade."""
+    from logitgate.gates.logit_gate import ScoreGate
+
+    # ScoreGate fails (returns score 1.0 < 3.5)
+    score_backend = StubBackend(logprob_responses=[[{"token": "1", "logprob": 0.0}]])
+    score_gate = ScoreGate("Quality", threshold=3.5, backend=score_backend)
+    ast_gate = ASTGate(syntax=True)
+
+    cascade = score_gate >> ast_gate
+    verdict = cascade.evaluate("def valid_python(): pass")
+
+    assert verdict.passed is False
+    assert verdict.status == DecisionStatus.FAILED
+    assert verdict.triggered_layer == "ScoreGate"
+
+
+def test_cascade_preserves_explicit_judge_rubric():
+    """Explicit rubric in JudgeGate is preserved rather than overwritten by upstream LogitGate."""
+    logit_b = StubBackend(default_prob=0.50)  # ambiguous
+    judge_b = StubBackend(diagnostic_text="[VERDICT: PASS] All requirements satisfied.")
+
+    logit_gate = LogitGate("Upstream Logit Rubric", backend=logit_b)
+    judge_gate = JudgeGate(rubric="Explicit Custom Judge Rubric", backend=judge_b, trigger="always")
+
+    cascade = logit_gate >> judge_gate
+    cascade.evaluate("candidate text")
+
+    assert len(judge_b.prompt_log) == 1
+    assert "Explicit Custom Judge Rubric" in judge_b.prompt_log[0]

@@ -9,6 +9,7 @@ import httpx
 
 from logitgate.backends.base import GenerativeBackend, resolve_generative_backend
 from logitgate.config import get_default_backend, get_default_model
+from logitgate.exceptions import ConfigurationError
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
@@ -48,9 +49,9 @@ class JudgeGate(BaseGate):
     ) -> None:
         valid_triggers = {"on_ambiguous_or_fail", "on_ambiguous_only", "always"}
         if trigger not in valid_triggers:
-            raise ValueError(f"Invalid trigger '{trigger}'. Must be one of {sorted(valid_triggers)}")
+            raise ConfigurationError(f"Invalid trigger '{trigger}'. Must be one of {sorted(valid_triggers)}")
         if rubric is not None and not rubric.strip():
-            raise ValueError("rubric cannot be empty or whitespace")
+            raise ConfigurationError("rubric cannot be empty or whitespace")
 
         effective_backend = (
             get_default_backend() if (backend is None or backend == "default") else backend
@@ -75,7 +76,7 @@ class JudgeGate(BaseGate):
         return f"JudgeGate(rubric={rubric_repr}, trigger='{self.trigger}'{max_tok_str}, backend={self.backend!r})"
 
     def _compile_prompt(self, candidate: Any, rubric_override: str | None = None) -> str:
-        effective_rubric = (rubric_override or self.rubric or "Evaluate if the artifact complies with standards.").strip()
+        effective_rubric = (self.rubric or rubric_override or "Evaluate if the artifact complies with standards.").strip()
         if self.max_tokens is not None and self.max_tokens <= 80:
             return (
                 f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
@@ -178,10 +179,11 @@ class JudgeGate(BaseGate):
         return False, DecisionStatus.FAILED, 0.0
 
     async def _aparse_verdict(self, text: str) -> tuple[bool, DecisionStatus, float | None]:
-        # 1. Standard / Markdown tag check
-        match = re.search(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE)
-        if match:
-            tag = match.group(1).upper()
+        # 1. Standard / Markdown tag check (matches [VERDICT: PASS], **[VERDICT: PASS]**, Verdict: PASS, etc.)
+        # Use the final occurrence so step-by-step reasoning concluding with [VERDICT: ...] is authoritative.
+        matches = list(re.finditer(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", text, re.IGNORECASE))
+        if matches:
+            tag = matches[-1].group(1).upper()
             if tag == "PASS":
                 return True, DecisionStatus.PASSED, 1.0
             return False, DecisionStatus.FAILED, 0.0
@@ -199,13 +201,31 @@ class JudgeGate(BaseGate):
             except (json.JSONDecodeError, ValueError, TypeError, KeyError):
                 data = None
 
-        # 3. Candidate lines check
+        # 3. Eating Our Own Dogfood: Asynchronous LogitGate probe
+        from logitgate.backends.base import LogitBackend, StubBackend
+        if isinstance(self.backend, LogitBackend) and not (isinstance(self.backend, StubBackend) and self.backend.logprob_responses is None):
+            try:
+                from logitgate.gates.logit_gate import LogitGate
+                probe_gate = LogitGate(
+                    rubric="Based on this review critique, did the candidate artifact satisfy all requirements and PASS the evaluation without any defects or errors?",
+                    backend=self.backend,
+                    model=self.model,
+                    symmetric_debiasing=False,
+                )
+                pv = await probe_gate.aevaluate(text)
+                if pv.probability is not None:
+                    is_pass = (pv.probability >= 0.5)
+                    return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
+            except (ValueError, RuntimeError, OSError, httpx.HTTPError):
+                pv = None
+
+        # 4. Explicit keyword heuristic on candidate lines (last non-empty line first, then first line)
         lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
         candidate_lines = []
         if lines:
-            candidate_lines.append(lines[0])
+            candidate_lines.append(lines[-1])
             if len(lines) > 1:
-                candidate_lines.append(lines[-1])
+                candidate_lines.append(lines[0])
 
         def sanitize_negations(s: str) -> str:
             neg_pattern = r"\b(not|no|without|never|doesn't|does\s+not|did\s+not|didn't|zero)\s+(?:any\s+|to\s+)?(?:fail|failed|failure|failures|reject|rejected)\b"
@@ -229,24 +249,6 @@ class JudgeGate(BaseGate):
                     if p_match.start() < f_match.start():
                         return True, DecisionStatus.PASSED, 1.0
                     return False, DecisionStatus.FAILED, 0.0
-
-        # 4. Eating Our Own Dogfood: Asynchronous LogitGate probe
-        from logitgate.backends.base import LogitBackend, StubBackend
-        if isinstance(self.backend, LogitBackend) and not (isinstance(self.backend, StubBackend) and self.backend.logprob_responses is None):
-            try:
-                from logitgate.gates.logit_gate import LogitGate
-                probe_gate = LogitGate(
-                    rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
-                    backend=self.backend,
-                    model=self.model,
-                    symmetric_debiasing=False,
-                )
-                pv = await probe_gate.aevaluate(text)
-                if pv.probability is not None:
-                    is_pass = (pv.probability >= 0.5)
-                    return is_pass, DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED, pv.probability
-            except (ValueError, RuntimeError, OSError, httpx.HTTPError):
-                pv = None
 
         # 5. Full text fallback heuristic
         sanitized_full = sanitize_negations(text)

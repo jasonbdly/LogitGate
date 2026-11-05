@@ -12,6 +12,8 @@ from logitgate.backends.base import (
     strip_reasoning_blocks,
 )
 
+EXCLUDED_INTERNAL_KWARGS = {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
+
 
 class OpenAICompatBackend(LogitBackend, GenerativeBackend):
     """
@@ -106,7 +108,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         if logit_bias is not None:
             payload["logit_bias"] = logit_bias
         for k, v in kwargs.items():
-            if k not in payload and k != "logit_bias":
+            if k not in payload and k != "logit_bias" and k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
         return payload
 
@@ -167,7 +169,8 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        payload.update(kwargs)
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
+        payload.update(filtered_kwargs)
         resp = self.client.post(url, json=payload, headers=self._headers())
         resp.raise_for_status()
         data = resp.json()
@@ -185,7 +188,8 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        payload.update(kwargs)
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
+        payload.update(filtered_kwargs)
         resp = await self.async_client.post(url, json=payload, headers=self._headers())
         resp.raise_for_status()
         data = resp.json()

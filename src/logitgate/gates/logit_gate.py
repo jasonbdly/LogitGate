@@ -19,6 +19,7 @@ from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
     extract_token_logprob,
 )
+from logitgate.exceptions import ConfigurationError
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
@@ -78,7 +79,7 @@ class LogitGate(BaseGate):
                 default_fail = 0.20
                 default_sym = False
             else:
-                raise ValueError(
+                raise ConfigurationError(
                     f"Invalid preset '{preset}'. Must be one of ['strict', 'balanced', 'fast_triage']"
                 )
         else:
@@ -97,13 +98,13 @@ class LogitGate(BaseGate):
         )
 
         if not rubric or not rubric.strip():
-            raise ValueError("rubric cannot be empty or whitespace")
+            raise ConfigurationError("rubric cannot be empty or whitespace")
         if not (0.0 <= effective_pass_thresh <= 1.0):
-            raise ValueError(f"pass_threshold must be between 0.0 and 1.0, got {effective_pass_thresh}")
+            raise ConfigurationError(f"pass_threshold must be between 0.0 and 1.0, got {effective_pass_thresh}")
         if not (0.0 <= effective_fail_thresh <= 1.0):
-            raise ValueError(f"fail_threshold must be between 0.0 and 1.0, got {effective_fail_thresh}")
+            raise ConfigurationError(f"fail_threshold must be between 0.0 and 1.0, got {effective_fail_thresh}")
         if effective_pass_thresh <= effective_fail_thresh:
-            raise ValueError(
+            raise ConfigurationError(
                 f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
             )
 
@@ -135,7 +136,7 @@ class LogitGate(BaseGate):
                 effective_temp = model_temp if model_temp != 1.0 else LogitGateDefaults.logit_temperature
 
         if effective_temp <= 0.0:
-            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+            raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
 
         self.rubric = rubric.strip()
         self.preset = preset
@@ -230,7 +231,14 @@ class LogitGate(BaseGate):
             )
         else:
             l2, p2 = None, None
-            calibrated_prob = p1
+            temp = max(self.logit_temperature, 1e-6)
+            scaled_lo = l1 / temp
+            if scaled_lo > 50.0:
+                calibrated_prob = 1.0
+            elif scaled_lo < -50.0:
+                calibrated_prob = 0.0
+            else:
+                calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
         latency = (time.perf_counter() - t0) * 1000.0
 
@@ -302,7 +310,14 @@ class LogitGate(BaseGate):
             top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
             l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
             l2, p2 = None, None
-            calibrated_prob = p1
+            temp = max(self.logit_temperature, 1e-6)
+            scaled_lo = l1 / temp
+            if scaled_lo > 50.0:
+                calibrated_prob = 1.0
+            elif scaled_lo < -50.0:
+                calibrated_prob = 0.0
+            else:
+                calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
         latency = (time.perf_counter() - t0) * 1000.0
 
@@ -380,7 +395,14 @@ class LogitGate(BaseGate):
                 )
             else:
                 l2, p2 = None, None
-                calibrated_prob = p1
+                temp = max(self.logit_temperature, 1e-6)
+                scaled_lo = l1 / temp
+                if scaled_lo > 50.0:
+                    calibrated_prob = 1.0
+                elif scaled_lo < -50.0:
+                    calibrated_prob = 0.0
+                else:
+                    calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
             latency = (time.perf_counter() - t0) * 1000.0
 
@@ -463,7 +485,14 @@ class LogitGate(BaseGate):
                 top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
                 l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
                 l2, p2 = None, None
-                calibrated_prob = p1
+                temp = max(self.logit_temperature, 1e-6)
+                scaled_lo = l1 / temp
+                if scaled_lo > 50.0:
+                    calibrated_prob = 1.0
+                elif scaled_lo < -50.0:
+                    calibrated_prob = 0.0
+                else:
+                    calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
             latency = (time.perf_counter() - t0) * 1000.0
 
@@ -545,11 +574,16 @@ class ChoiceGate(BaseGate):
             LogitGateDefaults.logit_temperature if logit_temperature is None else logit_temperature
         )
         if not question or not question.strip():
-            raise ValueError("question cannot be empty or whitespace")
+            raise ConfigurationError("question cannot be empty or whitespace")
         if not options or len(options) < 2:
-            raise ValueError(f"ChoiceGate requires at least 2 options, got {len(options) if options else 0}")
+            raise ConfigurationError(f"ChoiceGate requires at least 2 options, got {len(options) if options else 0}")
+        invalid_keys = [k for k in options if len(str(k).strip()) != 1]
+        if invalid_keys:
+            raise ConfigurationError(
+                f"ChoiceGate option keys must be single characters (e.g. 'A', 'B', 'C'), got: {invalid_keys}"
+            )
         if effective_temp <= 0.0:
-            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+            raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
 
         effective_backend = (
             get_default_backend() if (backend is None or backend == "default") else backend
@@ -755,15 +789,15 @@ class ScoreGate(BaseGate):
             LogitGateDefaults.logit_temperature if logit_temperature is None else logit_temperature
         )
         if not rubric or not rubric.strip():
-            raise ValueError("rubric cannot be empty or whitespace")
+            raise ConfigurationError("rubric cannot be empty or whitespace")
         if min_score >= max_score:
-            raise ValueError(f"min_score ({min_score}) must be strictly less than max_score ({max_score})")
+            raise ConfigurationError(f"min_score ({min_score}) must be strictly less than max_score ({max_score})")
         if threshold < min_score or threshold > max_score:
-            raise ValueError(
+            raise ConfigurationError(
                 f"threshold ({threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
             )
         if effective_temp <= 0.0:
-            raise ValueError(f"logit_temperature must be positive, got {effective_temp}")
+            raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
 
         effective_backend = (
             get_default_backend() if (backend is None or backend == "default") else backend

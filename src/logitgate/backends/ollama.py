@@ -12,6 +12,8 @@ from logitgate.backends.base import (
 )
 from logitgate.config import LogitGateDefaults
 
+EXCLUDED_INTERNAL_KWARGS = {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
+
 
 class OllamaBackend(LogitBackend, GenerativeBackend):
     """
@@ -113,7 +115,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         for k, v in kwargs.items():
             if k == "options" and isinstance(v, dict):
                 payload["options"].update(v)
-            elif k not in payload:
+            elif k not in payload and k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
         return payload
 
@@ -184,7 +186,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         for k, v in kwargs.items():
             if k == "options" and isinstance(v, dict):
                 payload["options"].update(v)
-            else:
+            elif k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
         resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
         if resp.status_code == 400 and think_val:
@@ -249,7 +251,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         for k, v in kwargs.items():
             if k == "options" and isinstance(v, dict):
                 payload["options"].update(v)
-            else:
+            elif k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
         resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
         if resp.status_code == 400 and think_val:

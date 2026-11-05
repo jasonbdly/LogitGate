@@ -759,3 +759,64 @@ async def test_backend_context_managers_and_exceptions():
         res_async = await async_backend.aquery_top_logprobs("test async prompt")
         assert len(res_async) == 2
 
+
+def test_choice_gate_rejects_multi_character_keys():
+    """ChoiceGate raises ConfigurationError when option keys are not single characters."""
+    from logitgate.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="must be single characters"):
+        ChoiceGate("Question?", options={"billing": "Billing", "auth": "Auth"})
+
+
+@pytest.mark.asyncio
+async def test_judge_gate_sync_async_verdict_parsing_parity():
+    """JudgeGate evaluate and aevaluate both parse reason-then-verdict tags identically."""
+    text = (
+        "1. Requirement A: verified.\n"
+        "2. Note: Initial check thought [VERDICT: FAIL] might apply due to line 4.\n"
+        "3. Recalculation confirms compliance.\n"
+        "[VERDICT: PASS]"
+    )
+    judge = JudgeGate(backend=StubBackend(diagnostic_text=text))
+    sync_verdict = judge.evaluate("code")
+    async_verdict = await judge.aevaluate("code")
+
+    assert sync_verdict.passed is True
+    assert async_verdict.passed is True
+    assert sync_verdict.status == async_verdict.status
+
+
+def test_ast_gate_unescaped_regex_and_dag_malformed_nodes():
+    """ASTGate cleanly handles unescaped regex characters and malformed DAG nodes without unhandled crashes."""
+    gate = ASTGate(required_sections=["## Section (v2.0)"])
+    v = gate.evaluate("Plain text without the section")
+    assert v.passed is False
+    assert "Missing required section" in v.reason
+
+    dag_gate = ASTGate(acyclic_dag=True)
+    v_dag = dag_gate.evaluate([{"dependencies": ["a"]}])
+    assert v_dag.passed is False
+    assert "missing required 'id'" in v_dag.reason
+
+
+def test_logit_gate_single_pass_temperature_scaling():
+    """LogitGate with symmetric_debiasing=False applies logit_temperature."""
+    backend = StubBackend(default_prob=0.70)
+    gate_t1 = LogitGate("Rule", backend=backend, symmetric_debiasing=False, logit_temperature=1.0)
+    gate_t_low = LogitGate("Rule", backend=backend, symmetric_debiasing=False, logit_temperature=0.2)
+
+    v1 = gate_t1.evaluate("x")
+    v_low = gate_t_low.evaluate("x")
+
+    assert v1.probability == 0.7
+    assert v_low.probability is not None and v_low.probability > 0.95
+
+
+def test_model_temperature_no_false_reverse_substring_matches():
+    """get_model_temperature avoids reverse substring matches (e.g. 'a' matching 'gemma4:e4b')."""
+    from logitgate.debiasing.permutation import get_model_temperature
+
+    assert get_model_temperature("a") == 1.0
+    assert get_model_temperature("llama3.2:1b") == 1.10
+    assert get_model_temperature("gemma4:e4b") == 0.95
+
