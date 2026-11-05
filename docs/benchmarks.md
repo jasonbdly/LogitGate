@@ -318,13 +318,13 @@ In traditional LLM-as-a-judge frameworks, evaluators often ask for a verdict bef
 1. **Reason-Then-Verdict Prompting**: On standard calls, `JudgeGate` instructs the model to verify each requirement or calculation step-by-step in 2–4 concise bullet points first, and emit `[VERDICT: PASS]` or `[VERDICT: FAIL]` on the concluding line (matching the final tag via `re.finditer`). For ultra-short CPU caps (`max_tokens <= 80`), it switches to Verdict-First on Line 1 so the tag is never truncated.
 2. **Self-Healing 1-Token Logit Probe**: If an upstream model omits the explicit `[VERDICT: ...]` tag or JSON field, **`JudgeGate` runs a 1-token `LogitGate` probe on its own generated critique text** before falling back to heuristics:
    ```python
-   # Inside JudgeGate._parse_verdict:
-   probe_gate = LogitGate(
-       rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
-       backend=self.backend,
-       symmetric_debiasing=False,
-   )
-   is_pass = probe_gate.evaluate(critique_text).probability >= 0.5
+# Inside JudgeGate._parse_verdict:
+probe_gate = LogitGate(
+    rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
+    backend=self.backend,
+    symmetric_debiasing=False,
+)
+is_pass = probe_gate.evaluate(critique_text).probability >= 0.5
    ```
 3. **Negation-Safe Line Fallback**: If the backend does not implement `LogitBackend`, it falls back to negation-safe parsing of concluding lines.
 
