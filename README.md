@@ -67,6 +67,8 @@ pip install "logitgate[all]"         # All integrations
 
 ## 30-Second Quickstart
 
+### 1. Single Atomic Rubric (3-Layer Cascaded Fast Path)
+
 ```python
 from logitgate import ASTGate, LogitGate, JudgeGate
 
@@ -76,7 +78,7 @@ cascade = (
     ASTGate(syntax=True)
     # Layer 1: First-token debiased logit gate (~40-90ms, 0 CoT tokens)
     >> LogitGate(
-        rubric="Function must calculate Fibonacci numbers recursively and handle n <= 0.",
+        rubric="Does the function calculate Fibonacci numbers using recursion?",
         pass_threshold=0.85,
         fail_threshold=0.20,
     )
@@ -102,6 +104,32 @@ print(f"Latency: {verdict.total_latency_ms:.1f}ms")    # ~86ms
 print(f"Tokens Generated: {verdict.total_tokens_generated}")  # 0 tokens!
 ```
 
+### 2. Multi-Rubric Batching (Prefix-Preserved KV-Cache Reuse)
+
+When verifying multiple criteria against a candidate artifact, **do not combine them into a single monolithic compound rubric** (which dilutes logit signals and conflates orthogonal requirements). Instead, evaluate isolated atomic rubrics in a single batch using `evaluate_batch`. 
+
+The candidate code is anchored at Token 0, sharing 95–99% of prefix tokens in KV cache across all checks:
+
+```python
+from logitgate import LogitGate
+
+# Best Practice: Keep rubrics atomic — evaluate multiple criteria via evaluate_batch
+rubrics = [
+    "Does the function calculate Fibonacci numbers recursively?",
+    "Does the function explicitly handle non-positive inputs (n <= 0)?",
+    "Does the function include parameter and return type annotations?",
+]
+
+gate = LogitGate("Base rubric")
+
+# Evaluates all 3 rubrics in a single batch reusing the shared KV-cache prefix
+verdicts = gate.evaluate_batch(candidate_code, rubrics)
+
+for rubric, v in zip(rubrics, verdicts):
+    status = "PASS" if v.passed else "FAIL"
+    print(f"[{status}] P={v.probability:.4f} | {rubric}")
+```
+
 ---
 
 ## Core Gates Quick Reference
@@ -112,7 +140,7 @@ print(f"Tokens Generated: {verdict.total_tokens_generated}")  # 0 tokens!
 | **`ContractGate`** | Layer 0 | **< 0.1 ms** | 0 | General-domain contract validation: Pydantic models, JSON Schemas, length bounds, required sections. |
 | **`LogitGate`** | Layer 1 | **~40–110 ms** | 0 | Calibrated binary classification from first-token logits using symmetric log-odds debiasing ($\bar{L} = \frac{L_1 + L_2}{2T}$). |
 | **`ChoiceGate`** | Layer 1 | **~40–120 ms** | 0 | Discrete K-ary routing and intent classification across arbitrary string options with permutation averaging. |
-| **`ScoreGate`** | Layer 1 | **~50–160 ms** | 0 | Continuous probability-weighted rubric scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with inverted scale debiasing. |
+| **`ScoreGate`** | Layer 1 | **~50–160 ms** | 0 | Continuous probability-weighted rubric scoring (𝔼[S] = Σ s · P(s)) with inverted scale debiasing. |
 | **`JudgeGate`** | Layer 2 | **1.5–5.0 s** | 60–300 | Generative System-2 reasoning judge with reason-then-verdict parsing and self-healing 1-token logit probes. |
 | **`Cascade`** | 0 $\to$ 2 | **~40–120 ms\*** | 0\* | Chained pipeline (`gate_a >> gate_b`). Fast passes short-circuit Layer 2 entirely. |
 
@@ -214,7 +242,7 @@ print(f"Probabilities: {verdict.choice_probabilities}")
 ```
 
 ### Continuous Rubric Scoring (`ScoreGate`)
-Calculates a smooth expected score ($\mathbb{E}[S] \in [1.0, 5.0]$) using first-token softmax weights:
+Calculates a smooth expected score (𝔼[S] ∈ [1.0, 5.0]) using first-token softmax weights:
 
 ```python
 from logitgate import ScoreGate
