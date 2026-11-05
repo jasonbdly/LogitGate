@@ -6,26 +6,18 @@ This document provides a comprehensive architectural breakdown of the **LogitGat
 
 ## 3-Layer Cascaded Router Architecture
 
-```
-                 Candidate Artifact
-                         │
-                         ▼
-┌──────────────────────────────────────────────────┐
-│                   Layer 0:                       │   Syntax / DAG Cycle / Forbidden Import
-│                   ASTGate                        ├─────────────────────────────────────────► [FAIL: no LLM call, ~0.04ms]
-└────────────────────────┬─────────────────────────┘
-                         │ Passed
-                         ▼
-┌──────────────────────────────────────────────────┐   P >= pass_threshold (>= 0.85)
-│                   Layer 1:                       ├─────────────────────────────────────────► [PASS: 0 CoT tokens, ~40–120ms]
-│                  LogitGate                       │
-└────────────────────────┬─────────────────────────┘   P <= fail_threshold (<= 0.20)
-                         │ Ambiguous                   └─────────────────────────────────────► [FAIL: 0 CoT tokens, ~40–120ms]
-                         ▼
-┌──────────────────────────────────────────────────┐
-│                   Layer 2:                       │   Escalated Generative Critique
-│                  JudgeGate                       ├─────────────────────────────────────────► [Actionable Diagnostic Report]
-└──────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    artifact["Candidate Artifact"] --> L0["Layer 0: ASTGate / ContractGate"]
+    
+    L0 -->|"Syntax / DAG / Forbidden Import"| F0["FAIL: 0 LLM calls (sub-0.1ms)"]
+    L0 -->|"Passed"| L1["Layer 1: LogitGate"]
+    
+    L1 -->|"P >= pass_threshold (>= 0.85)"| P1["PASS: 0 CoT tokens (~40–120ms)"]
+    L1 -->|"P <= fail_threshold (<= 0.20)"| F1["FAIL: 0 CoT tokens (~40–120ms)"]
+    L1 -->|"0.20 < P < 0.85 (Ambiguous)"| L2["Layer 2: JudgeGate"]
+    
+    L2 -->|"Escalated Critique"| R2["Actionable Diagnostic Report"]
 ```
 
 ### Layer Execution Breakdown

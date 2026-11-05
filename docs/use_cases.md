@@ -203,21 +203,13 @@ When evaluating complex systems, users often wonder whether to write one large p
 #### The Best Practice: Candidate-Prefix Isolated Batching
 LogitGate solves both problems via **Candidate-Prefix Isolated Batching** (`compile_batch_binary_prompt(..., query_first=False)`):
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Token 0: Shared Static Prefix (95–99% of prompt tokens)     │
-│ [CANDIDATE ARTIFACT]                                        │
-│ {candidate}                                                 │  ◄── KV-Cached ONCE
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-       ┌───────────────────────┼───────────────────────┐
-       ▼                       ▼                       ▼
-┌──────────────┐        ┌──────────────┐        ┌──────────────┐
-│ Isolated     │        │ Isolated     │        │ Isolated     │
-│ Suffix #1    │        │ Suffix #2    │        │ Suffix #K    │
-│ Rubric #1    │        │ Rubric #2    │        │ Rubric #K    │
-│ Mapping P1/P2│        │ Mapping P1/P2│        │ Mapping P1/P2│
-└──────────────┘        └──────────────┘        └──────────────┘
+```mermaid
+flowchart TD
+    prefix["Token 0: Shared Static Prefix (95–99% of prompt tokens)<br/><b>[CANDIDATE ARTIFACT]</b> {candidate}<br/><i>(KV-Cached ONCE in Attention Memory)</i>"]
+    
+    prefix --> S1["Isolated Suffix #1<br/>Rubric #1<br/>Mapping P1 / P2"]
+    prefix --> S2["Isolated Suffix #2<br/>Rubric #2<br/>Mapping P1 / P2"]
+    prefix --> SK["Isolated Suffix #K<br/>Rubric #K<br/>Mapping P1 / P2"]
 ```
 
 - **Candidate Anchored at Token 0**: The candidate artifact (500 to 10,000+ tokens) forms the shared static root prefix across all $K$ rubrics and both forward/reverse debiasing passes ($2K$ forward passes total).
