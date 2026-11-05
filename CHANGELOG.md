@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-11-04
+
+### Fixed
+
+#### Cascade Pipeline Routing & Intermediate Failure Handling
+- Restored multi-gate sequential pipeline execution in `Cascade.evaluate` and `Cascade.aevaluate`. When a `LogitGate` passes, it only short-circuits its immediately paired downstream `JudgeGate` rather than terminating the entire cascade prematurely, allowing subsequent independent validation gates to execute.
+- Resolved intermediate non-logit gate failure short-circuiting: failures in intermediate non-logit gates (e.g. `ASTGate`, `ScoreGate`) now correctly abort downstream gate evaluation and return an immediate failure verdict instead of continuing down the chain.
+- Corrected `skip_indices` calculation in `Cascade` so downstream judge gates paired with a passed or decisively failed logit gate are skipped cleanly.
+- Cascade configuration now raises `ConfigurationError` when initialized with empty gates.
+
+#### JudgeGate Async & Sync Parity
+- Aligned async verdict parsing (`_aparse_verdict`) to match sync parsing (`_parse_verdict`) by extracting the final occurrence of `<verdict>...</verdict>` (Reason-Then-Verdict pattern).
+- Aligned candidate lines extraction and dogfood probe gate precedence across synchronous and asynchronous judge paths.
+- Preserved explicit custom `JudgeGate` rubrics when chained inside a `Cascade`, preventing upstream `LogitGate` rubrics from silently overriding explicit downstream rubrics.
+- Enforced `ConfigurationError` validation for invalid trigger values and blank/whitespace rubrics.
+
+#### Deterministic ASTGate Hardening
+- Hardened `_detect_dag_cycle` against malformed task graph nodes, requiring non-empty dictionary entries with valid `id` or `task_id` attributes.
+- Protected regex compilation in `required_sections` and `forbidden_patterns` with explicit syntax error handling, preventing crashes from unescaped punctuation or regex special characters (e.g., `(v2.0)`).
+
+#### Calibrated Logit & Multi-Choice Debiasing
+- Applied temperature scaling across all single-pass triage evaluation paths (`symmetric_debiasing=False`) in `LogitGate.evaluate`, `aevaluate`, `evaluate_batch`, and `aevaluate_batch`.
+- Added single-character key validation to `ChoiceGate` initialization (`ConfigurationError`), preventing multi-character label mismatches against subword tokenizers.
+- Updated configuration validation across `LogitGate`, `ChoiceGate`, and `ScoreGate` to consistently raise `ConfigurationError` (subclass of `ValueError`).
+- Fixed reverse-substring matching in `get_model_temperature` to prevent single-character model aliases (e.g., `"a"`) from unintentionally matching unrelated model identifiers.
+
+#### Backend Kwarg Sanitization
+- Filtered out internal LogitGate evaluation kwargs (`save_on_fail`, `snapshot_dir`, `test_name`, `rubric_override`) before dispatching payloads to remote HTTP endpoints in `OpenAICompatBackend` and `OllamaBackend`, preventing HTTP 400 Bad Request responses.
+
+---
+
 ## [0.2.0] - 2026-11-04
 
 ### Added
