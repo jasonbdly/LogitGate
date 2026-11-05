@@ -14,7 +14,10 @@ from logitgate.debiasing.inversion import (
     compile_choice_prompt,
     compile_score_prompt,
 )
-from logitgate.debiasing.permutation import combine_symmetric_log_odds
+from logitgate.debiasing.permutation import (
+    combine_symmetric_log_odds,
+    compute_shannon_entropy,
+)
 from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
     extract_token_logprob,
@@ -213,6 +216,7 @@ class LogitGate(BaseGate):
         top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
         l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
 
+        temp = max(self.logit_temperature, 1e-6)
         if self.symmetric_debiasing:
             # Pass 2: A=Fail, B=Pass (prefix identical in prompt cache)
             prompt2 = compile_binary_prompt(
@@ -229,9 +233,12 @@ class LogitGate(BaseGate):
                 reverse_log_odds=l2,
                 logit_temperature=self.logit_temperature,
             )
+            pos_bias = 0.5 * abs(l1 - l2)
+            log_odds_pass = (l1 + l2) / (2.0 * temp)
         else:
             l2, p2 = None, None
-            temp = max(self.logit_temperature, 1e-6)
+            pos_bias = None
+            log_odds_pass = l1 / temp
             scaled_lo = l1 / temp
             if scaled_lo > 50.0:
                 calibrated_prob = 1.0
@@ -240,6 +247,7 @@ class LogitGate(BaseGate):
             else:
                 calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
+        shannon_entropy = compute_shannon_entropy(calibrated_prob)
         latency = (time.perf_counter() - t0) * 1000.0
 
         if calibrated_prob >= self.pass_threshold:
@@ -261,7 +269,15 @@ class LogitGate(BaseGate):
             reverse_prob=round(p2, 4) if p2 is not None else None,
             forward_log_odds=round(l1, 4),
             reverse_log_odds=round(l2, 4) if l2 is not None else None,
+            positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
+            log_odds_pass=round(log_odds_pass, 4),
+            shannon_entropy=round(shannon_entropy, 4),
             tokens_generated=0,
+            metadata={
+                "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
+                "log_odds_pass": round(log_odds_pass, 4),
+                "shannon_entropy": round(shannon_entropy, 4),
+            },
         )
 
         verdict = Verdict(
@@ -287,6 +303,7 @@ class LogitGate(BaseGate):
             query_first=self.query_first,
         )
 
+        temp = max(self.logit_temperature, 1e-6)
         if self.symmetric_debiasing:
             prompt2 = compile_binary_prompt(
                 rubric=self.rubric,
@@ -306,11 +323,14 @@ class LogitGate(BaseGate):
                 reverse_log_odds=l2,
                 logit_temperature=self.logit_temperature,
             )
+            pos_bias = 0.5 * abs(l1 - l2)
+            log_odds_pass = (l1 + l2) / (2.0 * temp)
         else:
             top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
             l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
             l2, p2 = None, None
-            temp = max(self.logit_temperature, 1e-6)
+            pos_bias = None
+            log_odds_pass = l1 / temp
             scaled_lo = l1 / temp
             if scaled_lo > 50.0:
                 calibrated_prob = 1.0
@@ -319,6 +339,7 @@ class LogitGate(BaseGate):
             else:
                 calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
+        shannon_entropy = compute_shannon_entropy(calibrated_prob)
         latency = (time.perf_counter() - t0) * 1000.0
 
         if calibrated_prob >= self.pass_threshold:
@@ -340,7 +361,15 @@ class LogitGate(BaseGate):
             reverse_prob=round(p2, 4) if p2 is not None else None,
             forward_log_odds=round(l1, 4),
             reverse_log_odds=round(l2, 4) if l2 is not None else None,
+            positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
+            log_odds_pass=round(log_odds_pass, 4),
+            shannon_entropy=round(shannon_entropy, 4),
             tokens_generated=0,
+            metadata={
+                "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
+                "log_odds_pass": round(log_odds_pass, 4),
+                "shannon_entropy": round(shannon_entropy, 4),
+            },
         )
 
         verdict = Verdict(
@@ -377,6 +406,7 @@ class LogitGate(BaseGate):
             top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
             l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
 
+            temp = max(self.logit_temperature, 1e-6)
             if self.symmetric_debiasing:
                 prompt2 = compile_batch_binary_prompt(
                     rubrics=rubrics,
@@ -393,9 +423,12 @@ class LogitGate(BaseGate):
                     reverse_log_odds=l2,
                     logit_temperature=self.logit_temperature,
                 )
+                pos_bias = 0.5 * abs(l1 - l2)
+                log_odds_pass = (l1 + l2) / (2.0 * temp)
             else:
                 l2, p2 = None, None
-                temp = max(self.logit_temperature, 1e-6)
+                pos_bias = None
+                log_odds_pass = l1 / temp
                 scaled_lo = l1 / temp
                 if scaled_lo > 50.0:
                     calibrated_prob = 1.0
@@ -404,6 +437,7 @@ class LogitGate(BaseGate):
                 else:
                     calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
+            shannon_entropy = compute_shannon_entropy(calibrated_prob)
             latency = (time.perf_counter() - t0) * 1000.0
 
             if calibrated_prob >= self.pass_threshold:
@@ -425,7 +459,15 @@ class LogitGate(BaseGate):
                 reverse_prob=round(p2, 4) if p2 is not None else None,
                 forward_log_odds=round(l1, 4),
                 reverse_log_odds=round(l2, 4) if l2 is not None else None,
+                positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
+                log_odds_pass=round(log_odds_pass, 4),
+                shannon_entropy=round(shannon_entropy, 4),
                 tokens_generated=0,
+                metadata={
+                    "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
+                    "log_odds_pass": round(log_odds_pass, 4),
+                    "shannon_entropy": round(shannon_entropy, 4),
+                },
             )
 
             results.append(
@@ -461,6 +503,7 @@ class LogitGate(BaseGate):
                 query_first=False,
             )
 
+            temp = max(self.logit_temperature, 1e-6)
             if self.symmetric_debiasing:
                 prompt2 = compile_batch_binary_prompt(
                     rubrics=rubrics,
@@ -481,11 +524,14 @@ class LogitGate(BaseGate):
                     reverse_log_odds=l2,
                     logit_temperature=self.logit_temperature,
                 )
+                pos_bias = 0.5 * abs(l1 - l2)
+                log_odds_pass = (l1 + l2) / (2.0 * temp)
             else:
                 top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
                 l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
                 l2, p2 = None, None
-                temp = max(self.logit_temperature, 1e-6)
+                pos_bias = None
+                log_odds_pass = l1 / temp
                 scaled_lo = l1 / temp
                 if scaled_lo > 50.0:
                     calibrated_prob = 1.0
@@ -494,6 +540,7 @@ class LogitGate(BaseGate):
                 else:
                     calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
 
+            shannon_entropy = compute_shannon_entropy(calibrated_prob)
             latency = (time.perf_counter() - t0) * 1000.0
 
             if calibrated_prob >= self.pass_threshold:
@@ -515,7 +562,15 @@ class LogitGate(BaseGate):
                 reverse_prob=round(p2, 4) if p2 is not None else None,
                 forward_log_odds=round(l1, 4),
                 reverse_log_odds=round(l2, 4) if l2 is not None else None,
+                positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
+                log_odds_pass=round(log_odds_pass, 4),
+                shannon_entropy=round(shannon_entropy, 4),
                 tokens_generated=0,
+                metadata={
+                    "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
+                    "log_odds_pass": round(log_odds_pass, 4),
+                    "shannon_entropy": round(shannon_entropy, 4),
+                },
             )
 
             return Verdict(

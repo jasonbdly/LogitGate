@@ -13,3 +13,4 @@ release_notes.md
 .coverage
 htmlcov/
 *.log
+uv.lock

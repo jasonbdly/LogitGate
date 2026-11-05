@@ -4,6 +4,7 @@ import json
 import math
 import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -192,6 +193,181 @@ def combine_symmetric_log_odds(
     if mean_log_odds < -50.0:
         return 0.0
     return 1.0 / (1.0 + math.exp(-mean_log_odds))
+
+
+def compute_shannon_entropy(p_pass: float, eps: float = 1e-12) -> float:
+    """Computes normalized binary Shannon entropy in [0.0, 1.0] (bits)."""
+    p_c = min(max(p_pass, eps), 1.0 - eps)
+    return -(p_c * math.log2(p_c) + (1.0 - p_c) * math.log2(1.0 - p_c))
+
+
+@dataclass(frozen=True)
+class SurfaceTokenMap:
+    """Maps canonical binary poles to all single-token surface form IDs."""
+
+    positive_token_ids: tuple[int, ...]
+    negative_token_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.positive_token_ids, tuple):
+            object.__setattr__(self, "positive_token_ids", tuple(sorted(self.positive_token_ids)))
+        if not isinstance(self.negative_token_ids, tuple):
+            object.__setattr__(self, "negative_token_ids", tuple(sorted(self.negative_token_ids)))
+
+    @classmethod
+    def from_tokenizer(
+        cls,
+        tokenizer: Any,
+        pos_label: str = "A",
+        neg_label: str = "B",
+    ) -> SurfaceTokenMap:
+        def _collect_ids(label: str) -> tuple[int, ...]:
+            variants = {
+                label,
+                label.lower(),
+                label.upper(),
+                label.capitalize(),
+                f" {label}",
+                f" {label.lower()}",
+                f" {label.upper()}",
+                f" {label.capitalize()}",
+            }
+            token_ids: set[int] = set()
+            for v in variants:
+                try:
+                    encoded = tokenizer.encode(v, add_special_tokens=False)
+                except TypeError:
+                    encoded = tokenizer.encode(v)
+                if len(encoded) == 1:
+                    token_ids.add(int(encoded[0]))
+            if not token_ids:
+                raise ValueError(f"Label '{label}' does not map to any single-token ID.")
+            return tuple(sorted(token_ids))
+
+        return cls(
+            positive_token_ids=_collect_ids(pos_label),
+            negative_token_ids=_collect_ids(neg_label),
+        )
+
+
+def marginalize_pole_logprob(
+    logits: Any,
+    pos_ids: Sequence[int],
+    neg_ids: Sequence[int],
+    temperature: float = 1.0,
+) -> tuple[float, float]:
+    """Computes logsumexp over all surface-form tokens for each pole, normalized
+
+    strictly over the union of valid verdict tokens (eliminating leakage to irrelevant vocab).
+
+    Args:
+        logits: 1D Tensor or sequence of shape [vocab_size] from the final prefill token.
+        pos_ids: Token IDs corresponding to the first pole (e.g. token 'A').
+        neg_ids: Token IDs corresponding to the second pole (e.g. token 'B').
+        temperature: Calibration temperature T > 0.
+
+    Returns:
+        Tuple of (log_prob_pos, log_prob_neg)
+    """
+    if temperature <= 0.0:
+        raise ValueError("Temperature must be strictly positive.")
+    if not pos_ids or not neg_ids:
+        raise ValueError("pos_ids and neg_ids must not be empty.")
+
+    try:
+        import torch
+
+        if isinstance(logits, torch.Tensor):
+            scaled_logits = logits.float() / temperature
+            pos_tensor = scaled_logits[list(pos_ids)]
+            neg_tensor = scaled_logits[list(neg_ids)]
+
+            lse_pos = torch.logsumexp(pos_tensor, dim=0)
+            lse_neg = torch.logsumexp(neg_tensor, dim=0)
+            lse_total = torch.logaddexp(lse_pos, lse_neg)
+            return float((lse_pos - lse_total).item()), float((lse_neg - lse_total).item())
+    except ImportError:
+        pass
+
+    # Sequence fallback
+    scaled = [float(logits[i]) / temperature for i in range(len(logits))]
+    pos_vals = [scaled[i] for i in pos_ids]
+    neg_vals = [scaled[i] for i in neg_ids]
+
+    def _lse(vals: Sequence[float]) -> float:
+        m = max(vals)
+        return m + math.log(sum(math.exp(v - m) for v in vals))
+
+    lse_pos_f = _lse(pos_vals)
+    lse_neg_f = _lse(neg_vals)
+    m_tot = max(lse_pos_f, lse_neg_f)
+    lse_total_f = m_tot + math.log(math.exp(lse_pos_f - m_tot) + math.exp(lse_neg_f - m_tot))
+    return lse_pos_f - lse_total_f, lse_neg_f - lse_total_f
+
+
+@dataclass(frozen=True)
+class DebiasedLogitResult:
+    calibrated_prob_pass: float
+    shannon_entropy: float
+    log_odds_pass: float
+    positional_bias_magnitude: float
+    pass_forward_prob: float
+    pass_permuted_prob: float
+
+
+def compute_symmetric_debiased_verdict(
+    logits_pass_first: Any,
+    logits_fail_first: Any,
+    token_map: SurfaceTokenMap,
+    temperature: float = 1.0,
+) -> DebiasedLogitResult:
+    """Executes Symmetric Label Permutation debiasing in log-odds space.
+
+    Pass 1 (Forward):  Token 'A' = PASS, Token 'B' = FAIL
+    Pass 2 (Permuted): Token 'A' = FAIL, Token 'B' = PASS
+
+    By binding the physical tokens ('A', 'B') to swapped semantic meanings across
+    Pass 1 and Pass 2, subtracting the log-odds cancels both token-identity prior
+    (preference for 'A' over 'B') and slot-order bias.
+    """
+    # Pass 1: A -> Pass, B -> Fail
+    lp_A1, lp_B1 = marginalize_pole_logprob(
+        logits_pass_first,
+        token_map.positive_token_ids,
+        token_map.negative_token_ids,
+        temperature=temperature,
+    )
+    delta_1 = lp_A1 - lp_B1
+
+    # Pass 2: A -> Fail, B -> Pass
+    lp_A2, lp_B2 = marginalize_pole_logprob(
+        logits_fail_first,
+        token_map.positive_token_ids,
+        token_map.negative_token_ids,
+        temperature=temperature,
+    )
+    delta_2 = lp_B2 - lp_A2
+
+    unbiased_log_odds = 0.5 * (delta_1 + delta_2)
+    positional_bias = 0.5 * abs(delta_1 - delta_2)
+
+    if unbiased_log_odds > 50.0:
+        p_pass = 1.0
+    elif unbiased_log_odds < -50.0:
+        p_pass = 0.0
+    else:
+        p_pass = 1.0 / (1.0 + math.exp(-unbiased_log_odds))
+
+    entropy = compute_shannon_entropy(p_pass)
+
+    return DebiasedLogitResult(
+        calibrated_prob_pass=p_pass,
+        shannon_entropy=entropy,
+        log_odds_pass=unbiased_log_odds,
+        positional_bias_magnitude=positional_bias,
+        pass_forward_prob=math.exp(lp_A1),
+        pass_permuted_prob=math.exp(lp_B2),
+    )
 
 
 def fit_calibration(

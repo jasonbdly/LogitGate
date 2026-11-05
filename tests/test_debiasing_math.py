@@ -10,7 +10,13 @@ from logitgate.debiasing.inversion import (
     compile_binary_prompt,
     compile_score_prompt,
 )
-from logitgate.debiasing.permutation import combine_symmetric_log_odds, fit_calibration
+from logitgate.debiasing.permutation import (
+    SurfaceTokenMap,
+    combine_symmetric_log_odds,
+    compute_symmetric_debiased_verdict,
+    fit_calibration,
+    marginalize_pole_logprob,
+)
 from logitgate.debiasing.softmax import extract_token_logprob
 from logitgate.gates.logit_gate import LogitGate
 
@@ -228,3 +234,81 @@ def test_compile_score_prompt_identical_static_prefix():
     assert pref_norm == pref_inv
     assert "[EVALUATION RUBRIC]" in pref_norm
     assert "[CANDIDATE ARTIFACT]" in pref_norm
+
+
+class _DummyTokenizer:
+    def __init__(self, vocab_map: dict[str, list[int]]) -> None:
+        self.vocab_map = vocab_map
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        return self.vocab_map.get(text, [99999, 99998])
+
+
+def test_surface_token_map_from_tokenizer():
+    vocab = {
+        "A": [10],
+        "a": [11],
+        " A": [12],
+        " a": [13],
+        "B": [20],
+        "b": [21],
+        " B": [22],
+        " b": [23],
+    }
+    tok = _DummyTokenizer(vocab)
+    token_map = SurfaceTokenMap.from_tokenizer(tok, pos_label="A", neg_label="B")
+
+    assert set(token_map.positive_token_ids) == {10, 11, 12, 13}
+    assert set(token_map.negative_token_ids) == {20, 21, 22, 23}
+
+
+def test_surface_token_map_empty_raises():
+    tok = _DummyTokenizer({})
+    with pytest.raises(ValueError, match="does not map to any single-token ID"):
+        SurfaceTokenMap.from_tokenizer(tok, pos_label="XYZ")
+
+
+def test_marginalize_pole_logprob_tensor_and_fallback():
+    import torch
+
+    logits = torch.zeros(30)
+    logits[10] = 2.0   # A
+    logits[12] = 2.5   # " A"
+    logits[20] = 1.0   # B
+    logits[22] = 1.2   # " B"
+
+    pos_ids = [10, 12]
+    neg_ids = [20, 22]
+
+    lp_pos, lp_neg = marginalize_pole_logprob(logits, pos_ids, neg_ids, temperature=1.0)
+    p_pos = math.exp(lp_pos)
+    p_neg = math.exp(lp_neg)
+    assert pytest.approx(p_pos + p_neg, rel=1e-5) == 1.0
+    assert p_pos > p_neg
+
+    logits_list = logits.tolist()
+    lp_pos_seq, lp_neg_seq = marginalize_pole_logprob(
+        logits_list, pos_ids, neg_ids, temperature=1.0
+    )
+    assert pytest.approx(lp_pos_seq, rel=1e-5) == lp_pos
+    assert pytest.approx(lp_neg_seq, rel=1e-5) == lp_neg
+
+
+def test_compute_symmetric_debiased_verdict_cancels_bias():
+    import torch
+
+    token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
+
+    logits_pass_first = torch.tensor([5.0, 0.0])
+    logits_fail_first = torch.tensor([3.0, 2.0])
+
+    res = compute_symmetric_debiased_verdict(
+        logits_pass_first, logits_fail_first, token_map=token_map, temperature=1.0
+    )
+
+    expected_prob = 1.0 / (1.0 + math.exp(-2.0))
+    assert pytest.approx(res.log_odds_pass, rel=1e-4) == 2.0
+    assert pytest.approx(res.positional_bias_magnitude, rel=1e-4) == 3.0
+    assert pytest.approx(res.calibrated_prob_pass, rel=1e-4) == expected_prob
+    assert 0.0 <= res.shannon_entropy <= 1.0
+

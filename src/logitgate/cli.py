@@ -74,7 +74,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     cal_parser = subparsers.add_parser(
         "calibrate",
-        help="Run micro-calibration dataset to fit and cache optimal logit temperature",
+        help="Run micro-calibration dataset to fit optimal temperature or conformal cascade thresholds",
     )
     cal_parser.add_argument(
         "--backend",
@@ -93,6 +93,23 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Optional custom path to calibration cache JSON file",
+    )
+    cal_parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Optional path to holdout dataset (JSON, JSONL, or Markdown) for Split Conformal Cascade calibration",
+    )
+    cal_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.05,
+        help="Target risk bound alpha for selective classification (default: 0.05)",
+    )
+    cal_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output calibration results in JSON format",
     )
 
     explain_parser = subparsers.add_parser(
@@ -145,11 +162,61 @@ def main(argv: Sequence[str] | None = None) -> int:
         from pathlib import Path
 
         from logitgate.backends.base import resolve_logit_backend
-        from logitgate.debiasing.permutation import auto_calibrate_backend
 
         backend = resolve_logit_backend(args.backend, model=args.model)
-        cache_path = Path(args.cache_path) if args.cache_path else None
         effective_model = args.model or getattr(backend, "model", "default")
+
+        if args.dataset:
+            import json
+            from dataclasses import asdict
+
+            from logitgate.calibration.conformal import (
+                calibrate_cascade_thresholds,
+                load_calibration_dataset,
+            )
+
+            samples = load_calibration_dataset(args.dataset)
+            if not samples:
+                sys.stderr.write(f"Error: No valid samples found in dataset '{args.dataset}'\n")
+                return 1
+
+            calibrated_probs: list[float] = []
+            ground_truth_labels: list[bool] = []
+
+            for sample_rubric, sample_candidate, sample_y in samples:
+                gate = LogitGate(rubric=sample_rubric, backend=backend, model=args.model)
+                v = gate.evaluate(sample_candidate)
+                prob = v.probability if v.probability is not None else (1.0 if v.passed else 0.0)
+                calibrated_probs.append(prob)
+                ground_truth_labels.append(bool(sample_y))
+
+            thresholds = calibrate_cascade_thresholds(
+                calibrated_probs=calibrated_probs,
+                ground_truth_labels=ground_truth_labels,
+                target_risk_alpha=args.alpha,
+            )
+
+            if args.json:
+                print(json.dumps(asdict(thresholds), indent=2))
+            else:
+                print("=" * 60)
+                print("LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION")
+                print("=" * 60)
+                print(f"Dataset:                   {args.dataset}")
+                print(f"Calibration Samples:       {thresholds.calibration_set_size}")
+                print(f"Target Risk (Alpha):       {thresholds.target_risk_alpha:.4f}")
+                print("-" * 60)
+                print(f"Layer 1 Tau Reject:        {thresholds.tau_reject:.4f}")
+                print(f"Layer 1 Tau Accept:        {thresholds.tau_accept:.4f}")
+                print(f"Layer 2 Escalation Rate:   {thresholds.empirical_escalation_rate:.2%}")
+                print("-" * 60)
+                print(f"Guaranteed Layer 1 Error: <= {thresholds.target_risk_alpha:.2%}")
+                print("=" * 60)
+            return 0
+
+        from logitgate.debiasing.permutation import auto_calibrate_backend
+
+        cache_path = Path(args.cache_path) if args.cache_path else None
 
         print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
         result = auto_calibrate_backend(
@@ -158,10 +225,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_cache=True,
             cache_path=cache_path,
         )
-        print(f"Optimal Temperature: {result.optimal_temperature:.4f}")
-        print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
-        print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
-        print("Calibration successfully saved to cache.")
+        if args.json:
+            print(result.model_dump_json(indent=2))
+        else:
+            print(f"Optimal Temperature: {result.optimal_temperature:.4f}")
+            print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
+            print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
+            print("Calibration successfully saved to cache.")
         return 0
 
     if args.command == "explain":
@@ -194,6 +264,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             orig_prob = snapshot.verdict.probability
             prob_str = f"{orig_prob:.4f}" if orig_prob is not None else "N/A"
             print(f"Original Prob:   {prob_str}")
+            if snapshot.positional_bias_magnitude is not None:
+                print(f"Positional Bias: {snapshot.positional_bias_magnitude:.4f} log-odds")
+            if snapshot.log_odds_pass is not None:
+                print(f"Unbiased Log-Odds: {snapshot.log_odds_pass:.4f}")
+            if snapshot.shannon_entropy is not None:
+                print(f"Verdict Entropy: {snapshot.shannon_entropy:.4f} bits")
+            if snapshot.loops_executed is not None:
+                print(f"Recurrent Loops: {snapshot.loops_executed}")
+            if snapshot.failure_code:
+                print(f"Failure Code:    {snapshot.failure_code}")
             print(f"Triggered Layer: {snapshot.verdict.triggered_layer}")
             print("-" * 60)
             print(f"Replay Verdict:  {verdict.status.value.upper()}")

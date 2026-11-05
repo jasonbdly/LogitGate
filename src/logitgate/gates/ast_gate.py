@@ -61,6 +61,22 @@ def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
     return None
 
 
+class ASTFailureCode:
+    """Standardized failure codes for Layer 0 deterministic AST and contract verification."""
+
+    MIN_LENGTH_VIOLATION = "MIN_LENGTH_VIOLATION"
+    MAX_LENGTH_VIOLATION = "MAX_LENGTH_VIOLATION"
+    JSON_SYNTAX_ERROR = "JSON_SYNTAX_ERROR"
+    JSON_TYPE_ERROR = "JSON_TYPE_ERROR"
+    JSON_SCHEMA_VALIDATION_ERROR = "JSON_SCHEMA_VALIDATION_ERROR"
+    SYNTAX_ERROR = "SYNTAX_ERROR"
+    FORBIDDEN_IMPORT = "FORBIDDEN_IMPORT"
+    FORBIDDEN_PATTERN = "FORBIDDEN_PATTERN"
+    MISSING_SECTION = "MISSING_SECTION"
+    DAG_CYCLE_DETECTED = "DAG_CYCLE_DETECTED"
+    CUSTOM_VALIDATOR_FAILED = "CUSTOM_VALIDATOR_FAILED"
+
+
 class ASTGate(BaseGate):
     """Deterministic CPU verification gate (Layer 0).
 
@@ -127,47 +143,56 @@ class ASTGate(BaseGate):
         feat_str = f", {', '.join(features)}" if features else ""
         return f"ASTGate(name='{self.name}'{feat_str})"
 
+    def _fail(
+        self,
+        err: str,
+        code: str,
+        t0: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> Verdict:
+        latency = (time.perf_counter() - t0) * 1000.0
+        meta = {"failure_code": code}
+        if metadata:
+            meta.update(metadata)
+        trace = LayerTrace(
+            layer_name=self.name,
+            status=DecisionStatus.FAILED,
+            latency_ms=latency,
+            diagnostic_report=err,
+            failure_code=code,
+            metadata=meta,
+        )
+        return Verdict(
+            passed=False,
+            status=DecisionStatus.FAILED,
+            triggered_layer=self.name,
+            total_latency_ms=latency,
+            total_tokens_generated=0,
+            reason=err,
+            traces=[trace],
+        )
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         candidate_str = str(candidate)
 
         # 0. Min / Max Length Checks
         if self.min_length is not None and len(candidate_str) < self.min_length:
-            latency = (time.perf_counter() - t0) * 1000.0
             err = f"Artifact length {len(candidate_str)} is less than minimum required length {self.min_length}"
-            trace = LayerTrace(
-                layer_name=self.name,
-                status=DecisionStatus.FAILED,
-                latency_ms=latency,
-                diagnostic_report=err,
-            )
-            return Verdict(
-                passed=False,
-                status=DecisionStatus.FAILED,
-                triggered_layer=self.name,
-                total_latency_ms=latency,
-                total_tokens_generated=0,
-                reason=err,
-                traces=[trace],
+            return self._fail(
+                err,
+                ASTFailureCode.MIN_LENGTH_VIOLATION,
+                t0,
+                {"actual_length": len(candidate_str), "min_length": self.min_length},
             )
 
         if self.max_length is not None and len(candidate_str) > self.max_length:
-            latency = (time.perf_counter() - t0) * 1000.0
             err = f"Artifact length {len(candidate_str)} exceeds maximum allowed length {self.max_length}"
-            trace = LayerTrace(
-                layer_name=self.name,
-                status=DecisionStatus.FAILED,
-                latency_ms=latency,
-                diagnostic_report=err,
-            )
-            return Verdict(
-                passed=False,
-                status=DecisionStatus.FAILED,
-                triggered_layer=self.name,
-                total_latency_ms=latency,
-                total_tokens_generated=0,
-                reason=err,
-                traces=[trace],
+            return self._fail(
+                err,
+                ASTFailureCode.MAX_LENGTH_VIOLATION,
+                t0,
+                {"actual_length": len(candidate_str), "max_length": self.max_length},
             )
 
         # 0b. JSON Schema Check
@@ -179,41 +204,16 @@ class ASTGate(BaseGate):
                 try:
                     parsed_json = json.loads(candidate)
                 except json.JSONDecodeError as e:
-                    latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Invalid JSON syntax: {e}"
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=err,
-                        traces=[trace],
+                    return self._fail(
+                        err,
+                        ASTFailureCode.JSON_SYNTAX_ERROR,
+                        t0,
+                        {"lineno": e.lineno, "colno": e.colno},
                     )
             else:
-                latency = (time.perf_counter() - t0) * 1000.0
                 err = f"Expected JSON string, dict, or list; got {type(candidate).__name__}"
-                trace = LayerTrace(
-                    layer_name=self.name,
-                    status=DecisionStatus.FAILED,
-                    latency_ms=latency,
-                    diagnostic_report=err,
-                )
-                return Verdict(
-                    passed=False,
-                    status=DecisionStatus.FAILED,
-                    triggered_layer=self.name,
-                    total_latency_ms=latency,
-                    total_tokens_generated=0,
-                    reason=err,
-                    traces=[trace],
-                )
+                return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0)
 
             if isinstance(self.json_schema, type) and issubclass(self.json_schema, BaseModel):
                 try:
@@ -222,63 +222,28 @@ class ASTGate(BaseGate):
                     else:
                         self.json_schema.model_validate_json(candidate_str)
                 except (ValidationError, ValueError, TypeError) as e:
-                    latency = (time.perf_counter() - t0) * 1000.0
                     err = f"JSON validation failed for schema {self.json_schema.__name__}: {e}"
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=err,
-                        traces=[trace],
+                    return self._fail(
+                        err,
+                        ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
+                        t0,
+                        {"schema": self.json_schema.__name__},
                     )
             elif isinstance(self.json_schema, dict):
                 if not isinstance(parsed_json, dict):
-                    latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Expected JSON object (dict) for schema validation, got {type(parsed_json).__name__}"
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=err,
-                        traces=[trace],
-                    )
+                    return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0)
 
                 required_keys = self.json_schema.get("required")
                 if isinstance(required_keys, (list, tuple, set)):
                     for req_key in required_keys:
                         if req_key not in parsed_json:
-                            latency = (time.perf_counter() - t0) * 1000.0
                             err = f"Missing required JSON key: '{req_key}'"
-                            trace = LayerTrace(
-                                layer_name=self.name,
-                                status=DecisionStatus.FAILED,
-                                latency_ms=latency,
-                                diagnostic_report=err,
-                            )
-                            return Verdict(
-                                passed=False,
-                                status=DecisionStatus.FAILED,
-                                triggered_layer=self.name,
-                                total_latency_ms=latency,
-                                total_tokens_generated=0,
-                                reason=err,
-                                traces=[trace],
+                            return self._fail(
+                                err,
+                                ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
+                                t0,
+                                {"missing_key": req_key},
                             )
 
                 props = self.json_schema.get("properties")
@@ -296,60 +261,30 @@ class ASTGate(BaseGate):
                             expected_type_str = prop_def["type"]
                             expected_type = type_map.get(expected_type_str)
                             if expected_type and not isinstance(parsed_json[prop_name], expected_type):
-                                latency = (time.perf_counter() - t0) * 1000.0
                                 err = f"Property '{prop_name}' has invalid type: expected {expected_type_str}, got {type(parsed_json[prop_name]).__name__}"
-                                trace = LayerTrace(
-                                    layer_name=self.name,
-                                    status=DecisionStatus.FAILED,
-                                    latency_ms=latency,
-                                    diagnostic_report=err,
-                                )
-                                return Verdict(
-                                    passed=False,
-                                    status=DecisionStatus.FAILED,
-                                    triggered_layer=self.name,
-                                    total_latency_ms=latency,
-                                    total_tokens_generated=0,
-                                    reason=err,
-                                    traces=[trace],
+                                return self._fail(
+                                    err,
+                                    ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
+                                    t0,
+                                    {"property": prop_name, "expected_type": expected_type_str},
                                 )
                 elif "required" not in self.json_schema:
                     for key, expected in self.json_schema.items():
                         if key not in parsed_json:
-                            latency = (time.perf_counter() - t0) * 1000.0
                             err = f"Missing required JSON key: '{key}'"
-                            trace = LayerTrace(
-                                layer_name=self.name,
-                                status=DecisionStatus.FAILED,
-                                latency_ms=latency,
-                                diagnostic_report=err,
-                            )
-                            return Verdict(
-                                passed=False,
-                                status=DecisionStatus.FAILED,
-                                triggered_layer=self.name,
-                                total_latency_ms=latency,
-                                total_tokens_generated=0,
-                                reason=err,
-                                traces=[trace],
+                            return self._fail(
+                                err,
+                                ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
+                                t0,
+                                {"missing_key": key},
                             )
                         if isinstance(expected, type) and not isinstance(parsed_json[key], expected):
-                            latency = (time.perf_counter() - t0) * 1000.0
                             err = f"Key '{key}' expected type {expected.__name__}, got {type(parsed_json[key]).__name__}"
-                            trace = LayerTrace(
-                                layer_name=self.name,
-                                status=DecisionStatus.FAILED,
-                                latency_ms=latency,
-                                diagnostic_report=err,
-                            )
-                            return Verdict(
-                                passed=False,
-                                status=DecisionStatus.FAILED,
-                                triggered_layer=self.name,
-                                total_latency_ms=latency,
-                                total_tokens_generated=0,
-                                reason=err,
-                                traces=[trace],
+                            return self._fail(
+                                err,
+                                ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
+                                t0,
+                                {"property": key, "expected_type": expected.__name__},
                             )
 
         # 1. Syntax Check
@@ -359,22 +294,12 @@ class ASTGate(BaseGate):
                 parsed_ast = ast.parse(candidate_str)
             except SyntaxError as e:
                 if self.syntax:
-                    latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Syntax error at line {e.lineno}, offset {e.offset}: {e.msg}"
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=err,
-                        traces=[trace],
+                    return self._fail(
+                        err,
+                        ASTFailureCode.SYNTAX_ERROR,
+                        t0,
+                        {"lineno": e.lineno, "offset": e.offset, "msg": e.msg},
                     )
 
         # 2. Forbidden Imports
@@ -395,22 +320,12 @@ class ASTGate(BaseGate):
             for imp in found_imports:
                 for forbidden in self.forbidden_imports:
                     if imp == forbidden or imp.startswith(f"{forbidden}."):
-                        latency = (time.perf_counter() - t0) * 1000.0
                         err = f"Forbidden import detected: '{imp}'"
-                        trace = LayerTrace(
-                            layer_name=self.name,
-                            status=DecisionStatus.FAILED,
-                            latency_ms=latency,
-                            diagnostic_report=err,
-                        )
-                        return Verdict(
-                            passed=False,
-                            status=DecisionStatus.FAILED,
-                            triggered_layer=self.name,
-                            total_latency_ms=latency,
-                            total_tokens_generated=0,
-                            reason=err,
-                            traces=[trace],
+                        return self._fail(
+                            err,
+                            ASTFailureCode.FORBIDDEN_IMPORT,
+                            t0,
+                            {"forbidden_import": imp},
                         )
 
         # 3. Forbidden Patterns
@@ -421,22 +336,12 @@ class ASTGate(BaseGate):
                 except re.error:
                     matched = pattern in candidate_str
                 if matched:
-                    latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Forbidden pattern matched: '{pattern}'"
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=err,
-                        traces=[trace],
+                    return self._fail(
+                        err,
+                        ASTFailureCode.FORBIDDEN_PATTERN,
+                        t0,
+                        {"pattern": pattern},
                     )
 
         # 4. Required Sections
@@ -449,22 +354,12 @@ class ASTGate(BaseGate):
                     except re.error:
                         has_section = False
                 if not has_section:
-                    latency = (time.perf_counter() - t0) * 1000.0
                     err = f"Missing required section: '{section}'"
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=err,
-                        traces=[trace],
+                    return self._fail(
+                        err,
+                        ASTFailureCode.MISSING_SECTION,
+                        t0,
+                        {"missing_section": section},
                     )
 
         # 5. Acyclic DAG Check
@@ -487,21 +382,10 @@ class ASTGate(BaseGate):
             if tasks_data is not None:
                 dag_err = _detect_dag_cycle(tasks_data)
                 if dag_err:
-                    latency = (time.perf_counter() - t0) * 1000.0
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=dag_err,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=dag_err,
-                        traces=[trace],
+                    return self._fail(
+                        dag_err,
+                        ASTFailureCode.DAG_CYCLE_DETECTED,
+                        t0,
                     )
 
         # 6. Custom Validators
@@ -518,21 +402,10 @@ class ASTGate(BaseGate):
                     val_msg = f"Validator raised exception: {ex}"
 
                 if not val_ok:
-                    latency = (time.perf_counter() - t0) * 1000.0
-                    trace = LayerTrace(
-                        layer_name=self.name,
-                        status=DecisionStatus.FAILED,
-                        latency_ms=latency,
-                        diagnostic_report=val_msg,
-                    )
-                    return Verdict(
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=self.name,
-                        total_latency_ms=latency,
-                        total_tokens_generated=0,
-                        reason=val_msg,
-                        traces=[trace],
+                    return self._fail(
+                        val_msg,
+                        ASTFailureCode.CUSTOM_VALIDATOR_FAILED,
+                        t0,
                     )
 
         latency = (time.perf_counter() - t0) * 1000.0

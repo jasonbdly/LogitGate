@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from logitgate.gates.ast_gate import ASTGate
+from logitgate.gates.ast_gate import ASTFailureCode, ASTGate
 from logitgate.models import DecisionStatus
 
 
@@ -108,3 +108,61 @@ def test_custom_validators():
 
     v_neg = gate.evaluate(-2)
     assert v_neg.passed is False
+
+
+def test_ast_failure_codes():
+    gate = ASTGate(syntax=True, name="TestAST")
+    verdict = gate.evaluate("def invalid_syntax(:")
+    assert verdict.passed is False
+    assert len(verdict.traces) == 1
+    trace = verdict.traces[0]
+    assert trace.failure_code == ASTFailureCode.SYNTAX_ERROR
+    assert trace.metadata.get("failure_code") == ASTFailureCode.SYNTAX_ERROR
+
+
+def test_ast_forbidden_import_code():
+    gate = ASTGate(forbidden_imports=["os", "sys"])
+    verdict = gate.evaluate("import os\nprint(1)")
+    assert verdict.passed is False
+    assert verdict.traces[0].failure_code == ASTFailureCode.FORBIDDEN_IMPORT
+
+
+def test_ast_json_schema_failure_code():
+    gate = ASTGate(json_schema={"required": ["name", "age"]})
+    verdict = gate.evaluate('{"name": "Alice"}')
+    assert verdict.passed is False
+    assert verdict.traces[0].failure_code == ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR
+
+
+def test_all_ast_failure_codes():
+    # 1. Max length
+    g_len = ASTGate(max_length=5)
+    v_len = g_len.evaluate("123456")
+    assert v_len.traces[0].failure_code == ASTFailureCode.MAX_LENGTH_VIOLATION
+
+    # 2. Forbidden pattern
+    g_pat = ASTGate(forbidden_patterns=[r"\bDROP\s+TABLE\b"])
+    v_pat = g_pat.evaluate("DROP TABLE users;")
+    assert v_pat.traces[0].failure_code == ASTFailureCode.FORBIDDEN_PATTERN
+
+    # 3. Missing section
+    g_sec = ASTGate(required_sections=["## Installation"])
+    v_sec = g_sec.evaluate("# Readme with no install section")
+    assert v_sec.traces[0].failure_code == ASTFailureCode.MISSING_SECTION
+
+    # 4. DAG cycle
+    g_dag = ASTGate(acyclic_dag=True)
+    v_dag = g_dag.evaluate([
+        {"id": "A", "deps": ["B"]},
+        {"id": "B", "deps": ["A"]},
+    ])
+    assert v_dag.traces[0].failure_code == ASTFailureCode.DAG_CYCLE_DETECTED
+
+    # 5. Custom validator
+    def reject_all(x):
+        return False, "Custom rejected"
+
+    g_val = ASTGate(validators=[reject_all])
+    v_val = g_val.evaluate("any text")
+    assert v_val.traces[0].failure_code == ASTFailureCode.CUSTOM_VALIDATOR_FAILED
+

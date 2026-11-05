@@ -47,6 +47,11 @@ class LayerTrace(BaseModel):
     reverse_log_odds: float | None = None
     tokens_generated: int = 0
     diagnostic_report: str | None = None
+    positional_bias_magnitude: float | None = None
+    log_odds_pass: float | None = None
+    shannon_entropy: float | None = None
+    loops_executed: int | None = None
+    failure_code: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def __repr__(self) -> str:
@@ -57,8 +62,12 @@ class LayerTrace(BaseModel):
         ]
         if self.calibrated_prob is not None:
             parts.append(f"prob={self.calibrated_prob:.4f}")
+        if self.positional_bias_magnitude is not None:
+            parts.append(f"bias={self.positional_bias_magnitude:.4f}")
         if self.tokens_generated > 0:
             parts.append(f"tokens={self.tokens_generated}")
+        if self.failure_code:
+            parts.append(f"failure_code='{self.failure_code}'")
         return f"LayerTrace({', '.join(parts)})"
 
 

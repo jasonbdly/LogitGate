@@ -3,16 +3,25 @@ from __future__ import annotations
 import json
 import math
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+import torch
 
 from logitgate.backends.base import resolve_logit_backend, strip_reasoning_blocks
+from logitgate.backends.dory_recurrent import (
+    execute_adaptive_recurrent_loops,
+)
 from logitgate.backends.llamacpp import LlamaCppBackend
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
+from logitgate.backends.pytorch_native import PrefixBroadcastLogitEvaluator
 from logitgate.cli import main
+from logitgate.debiasing.permutation import DebiasedLogitResult, SurfaceTokenMap
+from logitgate.hardware.memory_guard import PCIeSpilloverGuard, VRAMWatermarkStatus
+from logitgate.models import DecisionStatus, LayerTrace, Verdict
+from logitgate.snapshot import VerdictSnapshot
 
 # ---------------------------------------------------------------------------
 # Helpers & Mocks
@@ -807,4 +816,342 @@ def test_recurrent_backend_mock_inference() -> None:
     assert isinstance(text, str)
     _, gen_kwargs = mock_model.generate.call_args
     assert gen_kwargs.get("num_loops") == 3
+
+
+# ---------------------------------------------------------------------------
+# PrefixBroadcastLogitEvaluator Tests
+# ---------------------------------------------------------------------------
+
+def test_prefix_broadcast_evaluator_geometry():
+    prefix, s_fwd, s_perm = PrefixBroadcastLogitEvaluator.build_inverted_prefix_and_suffixes(
+        rubric="Candidate must be factual.",
+        candidate="Paris is the capital of France.",
+    )
+    assert "<|system|>" in prefix
+    assert "<|rubric|>" in prefix
+    assert "Candidate must be factual." in prefix
+    assert "<|candidate|>" in prefix
+    assert "Paris is the capital of France." in prefix
+
+    assert "Map 'A' = PASS" in s_fwd
+    assert "Map 'B' = FAIL" in s_fwd
+    assert "Map 'A' = FAIL" in s_perm
+    assert "Map 'B' = PASS" in s_perm
+
+
+def test_prefix_broadcast_evaluator_mock_execution():
+    class MockModelOutput:
+        def __init__(self, logits, past_key_values=None):
+            self.logits = logits
+            self.past_key_values = past_key_values
+
+    class MockModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.eval_call_count = 0
+
+        def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
+            self.eval_call_count += 1
+            b, s = input_ids.shape
+            v = 100
+            dummy_logits = torch.randn(b, s, v)
+            kv = tuple(
+                (torch.randn(b, 2, 4, 16), torch.randn(b, 2, 4, 16)) for _ in range(2)
+            )
+            return MockModelOutput(dummy_logits, past_key_values=kv)
+
+    class MockTokenizer:
+        def encode(self, text, add_special_tokens=True, return_tensors=None):
+            tokens = [hash(w) % 100 for w in text.split()]
+            if return_tensors == "pt":
+                return torch.tensor([tokens], dtype=torch.long)
+            return tokens
+
+    mock_model = MockModel()
+    mock_tok = MockTokenizer()
+    evaluator = PrefixBroadcastLogitEvaluator(
+        model=mock_model,
+        tokenizer=mock_tok,
+        device=torch.device("cpu"),
+    )
+
+    l1, l2 = evaluator.evaluate_single_pass_permuted(
+        rubric="Must be safe.",
+        candidate="Clean response.",
+    )
+
+    assert l1.shape == (100,)
+    assert l2.shape == (100,)
+    assert mock_model.eval_call_count == 2  # Call 1: prefix (B=1), Call 2: suffixes (B=2)
+
+
+def test_prefix_broadcast_evaluator_dynamic_cache():
+    class DummyDynamicCache:
+        def __init__(self):
+            self.interleaved = False
+
+        def batch_repeat_interleave(self, repeats):
+            self.interleaved = True
+            return self
+
+    class MockModel(torch.nn.Module):
+        def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
+            b, s = input_ids.shape
+            v = 50
+            cache = past_key_values or DummyDynamicCache()
+            return MagicMock(logits=torch.randn(b, s, v), past_key_values=cache)
+
+    class MockTokenizer:
+        def encode(self, text, add_special_tokens=True, return_tensors=None):
+            tokens = [hash(w) % 50 for w in text.split()]
+            if return_tensors == "pt":
+                return torch.tensor([tokens], dtype=torch.long)
+            return tokens
+
+    evaluator = PrefixBroadcastLogitEvaluator(
+        model=MockModel(),
+        tokenizer=MockTokenizer(),
+        device="cpu",
+    )
+    l1, l2 = evaluator.evaluate_single_pass_permuted(
+        rubric="Test",
+        candidate="Test candidate",
+    )
+    assert l1.shape == (50,)
+    assert l2.shape == (50,)
+
+
+def test_prefix_broadcast_evaluator_evaluate_debiased():
+    class MockModel(torch.nn.Module):
+        def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
+            b, s = input_ids.shape
+            logits = torch.zeros(b, s, 10)
+            if b == 2:
+                # pass 1: pole A (id 0) high
+                logits[0, -1, 0] = 3.0
+                logits[0, -1, 1] = 0.0
+                # pass 2: pole B (id 1) high
+                logits[1, -1, 0] = 0.0
+                logits[1, -1, 1] = 3.0
+            return MagicMock(logits=logits, past_key_values=((torch.zeros(1, 2, 4, 16), torch.zeros(1, 2, 4, 16)),))
+
+    class MockTokenizer:
+        def encode(self, text, add_special_tokens=True, return_tensors=None):
+            if return_tensors == "pt":
+                return torch.tensor([[0, 1]], dtype=torch.long)
+            return [0, 1]
+
+    evaluator = PrefixBroadcastLogitEvaluator(
+        model=MockModel(),
+        tokenizer=MockTokenizer(),
+        device="cpu",
+    )
+    token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
+    res = evaluator.evaluate_debiased(
+        rubric="Test",
+        candidate="Candidate",
+        token_map=token_map,
+    )
+    assert isinstance(res, DebiasedLogitResult)
+    assert res.calibrated_prob_pass > 0.90
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Recurrent Loop Early Halting Tests
+# ---------------------------------------------------------------------------
+
+def test_execute_adaptive_recurrent_loops_halts_early():
+    h0 = torch.randn(1, 5, 64)
+
+    def recurrent_step_fn(h, loop_idx):
+        return h * 0.9 + 0.1
+
+    def lm_head(h_last):
+        logits = torch.zeros(1, 1, 100)
+        logits[0, 0, 0] = 8.0
+        logits[0, 0, 1] = -5.0
+        return logits
+
+    token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
+
+    trace = execute_adaptive_recurrent_loops(
+        initial_hidden_state=h0,
+        recurrent_step_fn=recurrent_step_fn,
+        lm_head=lm_head,
+        final_norm=None,
+        token_map=token_map,
+        min_loops=2,
+        max_loops=6,
+        entropy_halt_threshold=0.20,
+        kl_stability_threshold=0.01,
+    )
+
+    assert trace.halted_early is True
+    assert trace.loops_executed == 2
+    assert len(trace.entropy_trajectory) == 2
+
+
+def test_execute_adaptive_recurrent_loops_max_loops():
+    h0 = torch.randn(1, 5, 64)
+
+    def recurrent_step_fn(h, loop_idx):
+        return h + torch.randn_like(h)
+
+    loop_count = 0
+
+    def lm_head(h_last):
+        nonlocal loop_count
+        loop_count += 1
+        logits = torch.zeros(1, 1, 100)
+        logits[0, 0, 0] = 0.5 if loop_count % 2 == 0 else -0.5
+        logits[0, 0, 1] = 0.5 if loop_count % 2 == 1 else -0.5
+        return logits
+
+    token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
+
+    trace = execute_adaptive_recurrent_loops(
+        initial_hidden_state=h0,
+        recurrent_step_fn=recurrent_step_fn,
+        lm_head=lm_head,
+        final_norm=None,
+        token_map=token_map,
+        min_loops=2,
+        max_loops=5,
+        entropy_halt_threshold=0.05,
+        kl_stability_threshold=0.001,
+    )
+
+    assert trace.halted_early is False
+    assert trace.loops_executed == 5
+    assert len(trace.entropy_trajectory) == 5
+
+
+# ---------------------------------------------------------------------------
+# PCIe Spillover Guard Tests
+# ---------------------------------------------------------------------------
+
+def test_pcie_spillover_guard_cpu():
+    guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
+    status = guard.inspect()
+    assert isinstance(status, VRAMWatermarkStatus)
+    assert status.spillover_risk_detected is False
+
+    with guard.guard_forward_pass() as s:
+        assert isinstance(s, VRAMWatermarkStatus)
+
+
+def test_pcie_spillover_guard_mocked_cuda():
+    guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
+
+    with patch("torch.cuda.is_available", return_value=True), \
+         patch("torch.cuda.mem_get_info", return_value=(256 * 1024 * 1024, 16000 * 1024 * 1024)), \
+         patch("torch.cuda.memory_allocated", return_value=(1000 * 1024 * 1024)), \
+         patch("torch.cuda.memory_reserved", return_value=(2000 * 1024 * 1024)), \
+         patch("torch.cuda.empty_cache") as mock_empty:
+
+        status = guard.inspect()
+        assert status.spillover_risk_detected is True
+        assert status.free_physical_mb == 256.0
+
+        with guard.guard_forward_pass(estimated_kv_mb=128.0):
+            pass
+        mock_empty.assert_called()
+
+
+def test_pcie_spillover_guard_reserved_memory_risk():
+    guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
+    with patch("torch.cuda.is_available", return_value=True), \
+         patch("torch.cuda.mem_get_info", return_value=(10000 * 1024 * 1024, 100000 * 1024 * 1024)), \
+         patch("torch.cuda.memory_allocated", return_value=(50000 * 1024 * 1024)), \
+         patch("torch.cuda.memory_reserved", return_value=(97000 * 1024 * 1024)):
+        status = guard.inspect()
+        assert status.spillover_risk_detected is True
+
+
+# ---------------------------------------------------------------------------
+# CLI Calibration & Telemetry Tests
+# ---------------------------------------------------------------------------
+
+def test_cli_calibrate_conformal_md(capsys):
+    ret = main([
+        "calibrate",
+        "--dataset",
+        "EPISTEMIC_REASONING_TEST_CASES.md",
+        "--alpha",
+        "0.05",
+    ])
+    assert ret == 0
+    captured = capsys.readouterr().out
+    assert "LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION" in captured
+    assert "Layer 1 Tau Reject:" in captured
+    assert "Layer 1 Tau Accept:" in captured
+    assert "Guaranteed Layer 1 Error:" in captured
+
+
+def test_cli_calibrate_json_dataset(tmp_path, capsys):
+    dataset_path = tmp_path / "calibration.json"
+    dataset_path.write_text(json.dumps([
+        {"rubric": "Is it valid?", "candidate": "valid", "ground_truth": True},
+        {"rubric": "Is it valid?", "candidate": "invalid", "ground_truth": False},
+    ] * 6))
+
+    ret = main([
+        "calibrate",
+        "--dataset",
+        str(dataset_path),
+        "--alpha",
+        "0.10",
+        "--json",
+    ])
+    assert ret == 0
+    captured = capsys.readouterr().out
+    data = json.loads(captured)
+    assert data["calibration_set_size"] == 12
+    assert data["target_risk_alpha"] == 0.10
+    assert "tau_reject" in data
+    assert "tau_accept" in data
+
+
+def test_cli_explain_renders_telemetry(tmp_path, capsys):
+    trace = LayerTrace(
+        layer_name="LogitGate",
+        status=DecisionStatus.FAILED,
+        latency_ms=45.0,
+        calibrated_prob=0.15,
+        positional_bias_magnitude=0.42,
+        log_odds_pass=-1.73,
+        shannon_entropy=0.61,
+        loops_executed=4,
+        failure_code="EPISTEMIC_UNCERTAINTY",
+    )
+    verdict = Verdict(
+        passed=False,
+        status=DecisionStatus.FAILED,
+        probability=0.15,
+        triggered_layer="LogitGate",
+        total_latency_ms=45.0,
+        traces=[trace],
+    )
+    snap = VerdictSnapshot(
+        test_name="test_telemetry_render",
+        rubric="Must satisfy safety",
+        candidate="Uncertain candidate output",
+        verdict=verdict,
+    )
+    snap_dir = tmp_path / "failures"
+    saved_path = snap.save(directory=snap_dir)
+
+    ret = main([
+        "explain",
+        str(saved_path),
+        "--backend",
+        "stub://default",
+    ])
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "Positional Bias: 0.4200 log-odds" in out
+    assert "Unbiased Log-Odds: -1.7300" in out
+    assert "Verdict Entropy: 0.6100 bits" in out
+    assert "Recurrent Loops: 4" in out
+    assert "Failure Code:    EPISTEMIC_UNCERTAINTY" in out
 

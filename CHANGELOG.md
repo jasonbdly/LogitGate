@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.3] - 2026-11-05
+
+### Added
+
+#### Mathematical Debiasing & Surface-Form Token Marginalization
+- Added `SurfaceTokenMap` in `logitgate.debiasing.permutation` to map canonical binary poles to single-token surface variants across casing and whitespace tokens (`"A"`, `" A"`, `"a"`, etc.).
+- Added `marginalize_pole_logprob` for normalizing pole probabilities strictly over the valid binary decision subspace via logsumexp, eliminating vocabulary probability leakage.
+- Added `compute_symmetric_debiased_verdict` to execute symmetric permutation in log-odds space, algebraically cancelling positional and token prior biases and outputting calibrated probability, normalized Shannon entropy in bits, unbiased log-odds, and positional bias magnitude.
+
+#### Shared KV-Cache Prefix Broadcasting
+- Added `PrefixBroadcastLogitEvaluator` in `logitgate.backends.pytorch_native` for running Query-First Attention Inverted prefixes once at `batch_size=1` and broadcasting cached key-values across permuted label binding suffixes at `batch_size=2` in ~1.02x single-pass latency.
+
+#### Latent-Recurrent Early Halting
+- Added `execute_adaptive_recurrent_loops` and `RecurrentLoopTrace` in `logitgate.backends.dory_recurrent` for early exit in looped transformers when verdict entropy drops below threshold and consecutive loop log-probs stabilize.
+
+#### Split Conformal Cascade Calibration CLI
+- Added `calibrate_cascade_thresholds` and `ConformalCascadeThresholds` in `logitgate.calibration.conformal` for calculating distribution-free selective classification bounds ($\tau_{\text{reject}}, \tau_{\text{accept}}$) with finite-sample error rate guarantees bounded by $\le \alpha$.
+- Enhanced `logitgate calibrate` CLI to accept `--dataset <path>` and `--alpha <float>`, with native parsing for Markdown tables, JSON, and JSONL datasets.
+- Added `EPISTEMIC_REASONING_TEST_CASES.md` reference dataset containing calibrated holdout test cases.
+
+#### PCIe VRAM Spillover Guard
+- Added `PCIeSpilloverGuard` and `VRAMWatermarkStatus` in `logitgate.hardware.memory_guard` to monitor physical CUDA VRAM headroom and prevent silent CUDA Unified Memory paging over PCIe into host RAM. Integrated into native PyTorch and recurrent backend passes.
+
+#### ASTGate Failure Codes & Diagnostic Telemetry
+- Added standardized `ASTFailureCode` enumeration across syntax, schema, import, pattern, section, DAG cycle, and length violations.
+- Recorded `positional_bias_magnitude`, `log_odds_pass`, `shannon_entropy`, `loops_executed`, and `failure_code` on `LayerTrace` and `VerdictSnapshot`.
+- Rendered debiasing telemetry, recurrent loop counts, and failure codes directly in `logitgate explain`.
+
+---
+
 ## [0.2.2] - 2026-11-04
 
 ### Documentation

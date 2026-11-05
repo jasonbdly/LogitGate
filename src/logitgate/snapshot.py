@@ -68,6 +68,51 @@ class VerdictSnapshot(BaseModel):
             gate_config=gate_config or {},
         )
 
+    @property
+    def positional_bias_magnitude(self) -> float | None:
+        for t in self.verdict.traces:
+            if t.positional_bias_magnitude is not None:
+                return t.positional_bias_magnitude
+            if "positional_bias_magnitude" in t.metadata and t.metadata["positional_bias_magnitude"] is not None:
+                return float(t.metadata["positional_bias_magnitude"])
+        return None
+
+    @property
+    def log_odds_pass(self) -> float | None:
+        for t in self.verdict.traces:
+            if t.log_odds_pass is not None:
+                return t.log_odds_pass
+            if "log_odds_pass" in t.metadata and t.metadata["log_odds_pass"] is not None:
+                return float(t.metadata["log_odds_pass"])
+        return None
+
+    @property
+    def shannon_entropy(self) -> float | None:
+        for t in self.verdict.traces:
+            if t.shannon_entropy is not None:
+                return t.shannon_entropy
+            if "shannon_entropy" in t.metadata and t.metadata["shannon_entropy"] is not None:
+                return float(t.metadata["shannon_entropy"])
+        return None
+
+    @property
+    def loops_executed(self) -> int | None:
+        for t in self.verdict.traces:
+            if t.loops_executed is not None:
+                return t.loops_executed
+            if "loops_executed" in t.metadata and t.metadata["loops_executed"] is not None:
+                return int(t.metadata["loops_executed"])
+        return None
+
+    @property
+    def failure_code(self) -> str | None:
+        for t in self.verdict.traces:
+            if t.failure_code is not None:
+                return t.failure_code
+            if "failure_code" in t.metadata and t.metadata["failure_code"] is not None:
+                return str(t.metadata["failure_code"])
+        return None
+
     def save(self, directory: str | Path | None = None) -> Path:
         """
         Saves this snapshot as JSON to directory (defaulting to LOGITGATE_SNAPSHOT_DIR or .logitgate/failures),

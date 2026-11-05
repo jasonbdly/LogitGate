@@ -287,7 +287,7 @@ If you use LogitGate in your research or production systems, please cite it as f
   author = {Jason Bradley},
   title = {LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
-  version = {0.2.2},
+  version = {0.2.3},
   url = {https://github.com/jasonbdly/LogitGate},
   license = {Apache-2.0}
 }

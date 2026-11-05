@@ -81,8 +81,9 @@ class DoryRotaryEmbedding(nn.Module):
         device: torch.device,
         dtype: torch.dtype,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
-        freqs = torch.outer(t, self.inv_freq.to(device))
+        inv_freq: torch.Tensor = self.inv_freq  # type: ignore[assignment]
+        t = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
+        freqs = torch.outer(t, inv_freq.to(device))
         emb = torch.cat((freqs, freqs), dim=-1)
         cos = emb.cos()[None, None, :, :].to(dtype)
         sin = emb.sin()[None, None, :, :].to(dtype)

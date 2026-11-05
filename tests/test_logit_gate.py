@@ -386,6 +386,7 @@ async def test_deepeval_system_one_multi_question_batching():
     for pref in prefixes[1:]:
         assert pref == prefixes[0]
 
+
     # Async a_decide
     backend.prompt_log.clear()
     async_answers, _async_cost = await model.a_decide("def foo(): pass", questions)
@@ -394,3 +395,23 @@ async def test_deepeval_system_one_multi_question_batching():
     prefixes = [p.split(marker)[0] for p in backend.prompt_log]
     for pref in prefixes[1:]:
         assert pref == prefixes[0]
+
+
+def test_logit_gate_telemetry_populated():
+    # Symmetric LogitGate
+    gate_sym = LogitGate(rubric="Test rubric", backend=StubBackend(default_prob=0.88), symmetric_debiasing=True)
+    verdict_sym = gate_sym.evaluate("Candidate text")
+    trace_sym = verdict_sym.traces[0]
+    assert trace_sym.positional_bias_magnitude is not None
+    assert trace_sym.log_odds_pass is not None
+    assert trace_sym.shannon_entropy is not None
+    assert 0.0 <= trace_sym.shannon_entropy <= 1.0
+
+    # Asymmetric LogitGate
+    gate_asym = LogitGate(rubric="Test rubric", backend=StubBackend(default_prob=0.88), symmetric_debiasing=False)
+    verdict_asym = gate_asym.evaluate("Candidate text")
+    trace_asym = verdict_asym.traces[0]
+    assert trace_asym.positional_bias_magnitude is None
+    assert trace_asym.log_odds_pass is not None
+    assert trace_asym.shannon_entropy is not None
+

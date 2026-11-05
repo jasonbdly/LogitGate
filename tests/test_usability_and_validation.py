@@ -931,3 +931,39 @@ def test_readme_no_raw_mermaid_for_pypi_rendering():
     )
 
 
+def test_verdict_snapshot_telemetry_properties():
+    from logitgate.snapshot import VerdictSnapshot
+
+    trace = LayerTrace(
+        layer_name="LogitGate",
+        status=DecisionStatus.PASSED,
+        latency_ms=45.0,
+        calibrated_prob=0.92,
+        positional_bias_magnitude=0.34,
+        log_odds_pass=2.45,
+        shannon_entropy=0.40,
+        loops_executed=3,
+        failure_code=None,
+    )
+    verdict = Verdict(
+        passed=True,
+        status=DecisionStatus.PASSED,
+        probability=0.92,
+        triggered_layer="LogitGate",
+        total_latency_ms=45.0,
+        traces=[trace],
+    )
+    snap = VerdictSnapshot.from_verdict(
+        verdict=verdict,
+        rubric="Test Rubric",
+        candidate="Test Candidate",
+    )
+
+    assert snap.positional_bias_magnitude == 0.34
+    assert snap.log_odds_pass == 2.45
+    assert snap.shannon_entropy == 0.40
+    assert snap.loops_executed == 3
+    assert snap.failure_code is None
+
+
+

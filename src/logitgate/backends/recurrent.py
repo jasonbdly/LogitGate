@@ -12,6 +12,11 @@ import math
 from typing import Any
 
 from logitgate.backends.base import GenerativeBackend, LogitBackend
+from logitgate.backends.dory_recurrent import (
+    RecurrentLoopTrace,
+    execute_adaptive_recurrent_loops,
+)
+from logitgate.hardware.memory_guard import PCIeSpilloverGuard
 
 
 class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
@@ -57,6 +62,8 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         self._model = model
         self._tokenizer = tokenizer
         self.torch_dtype = torch_dtype
+        self.spillover_guard = PCIeSpilloverGuard()
+        self.last_loops_executed: int = num_loops
 
     def __repr__(self) -> str:
         return f"RecurrentPyTorchBackend(model='{self.model_name}', num_loops={self.num_loops}, device='{self.device}')"
@@ -131,6 +138,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         except (ValueError, TypeError):
             kwargs["num_loops"] = self.num_loops
 
+        no_grad_ctx: Any
         try:
             import torch
             no_grad_ctx = torch.no_grad()
@@ -138,7 +146,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             from contextlib import nullcontext
             no_grad_ctx = nullcontext()
 
-        with no_grad_ctx:
+        with no_grad_ctx, self.spillover_guard.guard_forward_pass():
             outputs = model(**inputs, **kwargs)
         if hasattr(outputs, "logits"):
             if hasattr(outputs.logits, "ndim"):
@@ -151,6 +159,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             logits = outputs[0][-1]
 
         # Compute log_softmax
+        log_probs: Any
         try:
             import torch
 
@@ -238,7 +247,8 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         else:
             input_tensor = inputs
 
-        outputs = model.generate(input_tensor, **gen_kwargs)
+        with self.spillover_guard.guard_forward_pass():
+            outputs = model.generate(input_tensor, **gen_kwargs)
         input_len = input_tensor.shape[-1]
         generated_ids = outputs[0][input_len:]
         text = tokenizer.decode(generated_ids, skip_special_tokens=True)
