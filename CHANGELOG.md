@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-11-04
+
+### Documentation
+
+#### PyPI & Cross-Platform Responsive Unicode Diagrams
+- Replaced unsupported raw Mermaid diagram in `README.md` with a compact, mobile-friendly Unicode box-drawing diagram. Ensures clean, instant rendering across PyPI (`pypi.org`), mobile web, terminal CLI documentation viewers, and IDE README previews.
+
+---
+
 ## [0.2.1] - 2026-11-04
 
 ### Fixed

@@ -20,18 +20,24 @@ When evaluating whether an LLM output satisfies a rubric, traditional frameworks
 
 `LogitGate` uses a **3-layer cascaded pipeline**:
 
-```mermaid
-flowchart TD
-    artifact["Candidate Artifact"] --> L0["Layer 0: ASTGate / ContractGate"]
-    
-    L0 -->|"Syntax / Schema Failure"| F0["FAIL: 0 LLM calls (sub-0.1ms)"]
-    L0 -->|"Passed"| L1["Layer 1: LogitGate"]
-    
-    L1 -->|"P >= pass_threshold (>= 0.85)"| P1["PASS: 0 CoT tokens (~40–110ms)"]
-    L1 -->|"P <= fail_threshold (<= 0.20)"| F1["FAIL: 0 CoT tokens (~40–110ms)"]
-    L1 -->|"0.20 < P < 0.85 (Ambiguous)"| L2["Layer 2: JudgeGate"]
-    
-    L2 -->|"Escalated Critique"| R2["Actionable Diagnostic Report"]
+```
+            Candidate Artifact
+                    │
+                    ▼
+┌──────────────────────────────────────┐
+│  Layer 0: ASTGate / ContractGate     ├──► [FAIL: syntax/schema, <0.1ms]
+└──────────────────┬───────────────────┘
+                   │ Passed
+                   ▼
+┌──────────────────────────────────────┐
+│  Layer 1: LogitGate                  ├──► [PASS: P >= 0.85, ~40–110ms]
+└──────────────────┬───────────────────┤
+                   │ Ambiguous         └──► [FAIL: P <= 0.20, ~40–110ms]
+                   │ (0.20 < P < 0.85)
+                   ▼
+┌──────────────────────────────────────┐
+│  Layer 2: JudgeGate                  ├──► [Actionable Diagnostic Report]
+└──────────────────────────────────────┘
 ```
 
 1. **Layer 0 (`ASTGate` / `ContractGate`)**: Deterministic checks in **<0.1 ms** on CPU (Python AST syntax, JSON/Pydantic schemas, regex patterns, acyclic DAG topology). Failures reject immediately with zero LLM overhead.
@@ -281,7 +287,7 @@ If you use LogitGate in your research or production systems, please cite it as f
   author = {Jason Bradley},
   title = {LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
-  version = {0.2.1},
+  version = {0.2.2},
   url = {https://github.com/jasonbdly/LogitGate},
   license = {Apache-2.0}
 }
