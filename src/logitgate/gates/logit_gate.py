@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from logitgate.backends.base import LogitBackend, resolve_logit_backend
-from logitgate.config import LogitGateDefaults, get_default_backend, get_default_model
+from logitgate.config import LogitGateDefaults, get_default_model
 from logitgate.debiasing.inversion import (
     compile_batch_binary_prompt,
     compile_binary_prompt,
@@ -25,6 +25,34 @@ from logitgate.debiasing.softmax import (
 from logitgate.exceptions import ConfigurationError
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
+from logitgate.snapshot import persist_failure_snapshot
+
+TopLogprobs = list[dict[str, Any]]
+
+
+def _clamped_sigmoid(x: float) -> float:
+    """Logistic function saturated at |x| > 50 to avoid `math.exp` overflow on degenerate logits."""
+    if x > 50.0:
+        return 1.0
+    if x < -50.0:
+        return 0.0
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _softmax(logprobs: Mapping[Any, float], temperature: float) -> dict[Any, float]:
+    """Temperature-scaled softmax renormalized over the given label set only.
+
+    Probability mass the model puts on tokens outside the label set is dropped on purpose:
+    the gate answers "which of these labels", not "what is the next token".
+    """
+    temp = max(temperature, 1e-6)
+    scaled = {k: lp / temp for k, lp in logprobs.items()}
+    max_lp = max(scaled.values()) if scaled else 0.0
+    exp_vals = {k: math.exp(lp - max_lp) for k, lp in scaled.items()}
+    total = sum(exp_vals.values())
+    if total <= 0:
+        return {k: 1.0 / len(scaled) for k in scaled}
+    return {k: v / total for k, v in exp_vals.items()}
 
 
 class LogitGate(BaseGate):
@@ -111,11 +139,8 @@ class LogitGate(BaseGate):
                 f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
             )
 
-        effective_backend = (
-            get_default_backend() if (backend is None or backend == "default") else backend
-        )
         effective_model = model or get_default_model()
-        self.backend = resolve_logit_backend(effective_backend, model=effective_model)
+        self.backend = resolve_logit_backend(backend, model=model)
         self.model = effective_model
 
         if logit_temperature == "auto":
@@ -151,22 +176,10 @@ class LogitGate(BaseGate):
         self.logit_temperature = effective_temp
         self.name = name
 
-    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
-        if verdict.passed:
-            return verdict
-
-        save_on_fail = kwargs.get("save_on_fail", self.save_on_fail)
-        from logitgate.config import get_default_save_failures
-        should_save = save_on_fail if save_on_fail is not None else get_default_save_failures()
-        if not should_save:
-            return verdict
-
-        if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
-            return verdict
-
+    def replay_config(self) -> dict[str, Any]:
         from logitgate.backends.base import infer_backend_spec
-        from logitgate.snapshot import VerdictSnapshot
-        gate_config: dict[str, Any] = {
+
+        config: dict[str, Any] = {
             "rubric": self.rubric,
             "backend": infer_backend_spec(self.backend),
             "pass_threshold": self.pass_threshold,
@@ -177,21 +190,26 @@ class LogitGate(BaseGate):
             "preset": self.preset,
             "name": self.name,
         }
-        if hasattr(self, "model") and self.model:
-            gate_config["model"] = self.model
+        # A backend *instance* carries its own model (e.g. OpenAICompatBackend(model=...)), and
+        # `infer_backend_spec` can't encode it for every scheme. Without it, replay would
+        # silently run against the scheme's default model.
+        model = self.model or getattr(self.backend, "model", None)
+        if model:
+            config["model"] = model
+        return config
 
-        test_name = kwargs.get("test_name")
-        snapshot = VerdictSnapshot.from_verdict(
-            verdict=verdict,
-            rubric=self.rubric,
+    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        if verdict.passed:
+            return verdict
+        return persist_failure_snapshot(
+            verdict,
             candidate=candidate,
-            test_name=test_name,
-            gate_config=gate_config,
+            rubric=self.rubric,
+            gate_config=self.replay_config(),
+            save_on_fail=kwargs.get("save_on_fail", self.save_on_fail),
+            test_name=kwargs.get("test_name"),
+            snapshot_dir=kwargs.get("snapshot_dir"),
         )
-        saved_path = snapshot.save(directory=kwargs.get("snapshot_dir"))
-        if verdict.traces:
-            verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
-        return verdict
 
     def __repr__(self) -> str:
         rubric_repr = repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
@@ -202,32 +220,75 @@ class LogitGate(BaseGate):
             f"backend={self.backend!r})"
         )
 
-    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        t0 = time.perf_counter()
+    # -- Prompt construction & scoring (shared by sync, async, and batch paths) ------------
 
-        # Pass 1: A=Pass, B=Fail
-        prompt1 = compile_binary_prompt(
-            rubric=self.rubric,
-            candidate=candidate,
-            pass_token="A",
-            fail_token="B",
-            query_first=self.query_first,
-        )
-        top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
-        l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
+    def _binary_prompts(
+        self,
+        candidate: Any,
+        rubrics: Sequence[str] | None = None,
+        rubric_index: int = 0,
+    ) -> tuple[str, str | None]:
+        """Returns the (forward, reverse) prompts; reverse is ``None`` without debiasing.
 
-        temp = max(self.logit_temperature, 1e-6)
-        if self.symmetric_debiasing:
-            # Pass 2: A=Fail, B=Pass (prefix identical in prompt cache)
-            prompt2 = compile_binary_prompt(
-                rubric=self.rubric,
+        Forward binds A=PASS/B=FAIL, reverse binds B=PASS/A=FAIL. Both share a byte-identical
+        prefix (rubric + candidate) so the second pass is mostly a KV-cache hit.
+        """
+
+        def build(pass_token: str, fail_token: str) -> str:
+            if rubrics is None:
+                return compile_binary_prompt(
+                    rubric=self.rubric,
+                    candidate=candidate,
+                    pass_token=pass_token,
+                    fail_token=fail_token,
+                    query_first=self.query_first,
+                )
+            return compile_batch_binary_prompt(
+                rubrics=rubrics,
                 candidate=candidate,
-                pass_token="B",
-                fail_token="A",
-                query_first=self.query_first,
+                rubric_index=rubric_index,
+                pass_token=pass_token,
+                fail_token=fail_token,
+                query_first=False,
             )
-            top2 = self.backend.query_top_logprobs(prompt2, top_k=10, allowed_tokens=["A", "B"])
-            l2, p2 = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
+
+        return build("A", "B"), (build("B", "A") if self.symmetric_debiasing else None)
+
+    def _query(self, prompt: str) -> list[dict[str, Any]]:
+        return self.backend.query_top_logprobs(prompt, top_k=10, allowed_tokens=["A", "B"])
+
+    async def _aquery_pair(
+        self, forward: str, reverse: str | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        if reverse is None:
+            return await self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"]), None
+        # Issued concurrently: servers with prefix caching (vLLM, llama.cpp, Ollama) serve the
+        # shared prefix once, so the pair costs ~one prefill instead of two.
+        top_fwd, top_rev = await asyncio.gather(
+            self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"]),
+            self.backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"]),
+        )
+        return top_fwd, top_rev
+
+    def _verdict_from_logprobs(
+        self,
+        top_fwd: list[dict[str, Any]],
+        top_rev: list[dict[str, Any]] | None,
+        t0: float,
+    ) -> Verdict:
+        """Turns first-token logprobs into a calibrated, thresholded verdict.
+
+        With a reverse pass, the forward and reverse log-odds are averaged *in log-odds space*.
+        A constant preference for token "A" shows up with opposite sign in the two passes and
+        cancels exactly (Zhao et al., 2021). Averaging probabilities would only dampen it.
+        """
+        l1, p1 = compute_binary_log_odds(top_fwd, pass_token="A", fail_token="B")
+        temp = max(self.logit_temperature, 1e-6)
+        l2: float | None = None
+        p2: float | None = None
+        pos_bias: float | None = None
+        if top_rev is not None:
+            l2, p2 = compute_binary_log_odds(top_rev, pass_token="B", fail_token="A")
             calibrated_prob = combine_symmetric_log_odds(
                 forward_log_odds=l1,
                 reverse_log_odds=l2,
@@ -236,30 +297,20 @@ class LogitGate(BaseGate):
             pos_bias = 0.5 * abs(l1 - l2)
             log_odds_pass = (l1 + l2) / (2.0 * temp)
         else:
-            l2, p2 = None, None
-            pos_bias = None
             log_odds_pass = l1 / temp
-            scaled_lo = l1 / temp
-            if scaled_lo > 50.0:
-                calibrated_prob = 1.0
-            elif scaled_lo < -50.0:
-                calibrated_prob = 0.0
-            else:
-                calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
+            calibrated_prob = _clamped_sigmoid(log_odds_pass)
 
         shannon_entropy = compute_shannon_entropy(calibrated_prob)
         latency = (time.perf_counter() - t0) * 1000.0
 
         if calibrated_prob >= self.pass_threshold:
             status = DecisionStatus.PASSED
-            passed = True
         elif calibrated_prob <= self.fail_threshold:
             status = DecisionStatus.FAILED
-            passed = False
         else:
             status = DecisionStatus.AMBIGUOUS
-            passed = False
 
+        bias_rounded = round(pos_bias, 4) if pos_bias is not None else None
         trace = LayerTrace(
             layer_name=self.name,
             status=status,
@@ -269,19 +320,18 @@ class LogitGate(BaseGate):
             reverse_prob=round(p2, 4) if p2 is not None else None,
             forward_log_odds=round(l1, 4),
             reverse_log_odds=round(l2, 4) if l2 is not None else None,
-            positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
+            positional_bias_magnitude=bias_rounded,
             log_odds_pass=round(log_odds_pass, 4),
             shannon_entropy=round(shannon_entropy, 4),
             tokens_generated=0,
             metadata={
-                "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
+                "positional_bias_magnitude": bias_rounded,
                 "log_odds_pass": round(log_odds_pass, 4),
                 "shannon_entropy": round(shannon_entropy, 4),
             },
         )
-
-        verdict = Verdict(
-            passed=passed,
+        return Verdict(
+            passed=status == DecisionStatus.PASSED,
             status=status,
             probability=round(calibrated_prob, 4),
             triggered_layer=self.name,
@@ -290,307 +340,170 @@ class LogitGate(BaseGate):
             reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
             traces=[trace],
         )
-        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+
+    # -- Public evaluation API --------------------------------------------------------------
+
+    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        t0 = time.perf_counter()
+        forward, reverse = self._binary_prompts(candidate)
+        top_fwd = self._query(forward)
+        top_rev = self._query(reverse) if reverse is not None else None
+        return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
-
-        prompt1 = compile_binary_prompt(
-            rubric=self.rubric,
-            candidate=candidate,
-            pass_token="A",
-            fail_token="B",
-            query_first=self.query_first,
-        )
-
-        temp = max(self.logit_temperature, 1e-6)
-        if self.symmetric_debiasing:
-            prompt2 = compile_binary_prompt(
-                rubric=self.rubric,
-                candidate=candidate,
-                pass_token="B",
-                fail_token="A",
-                query_first=self.query_first,
-            )
-            top1, top2 = await asyncio.gather(
-                self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"]),
-                self.backend.aquery_top_logprobs(prompt2, top_k=10, allowed_tokens=["A", "B"]),
-            )
-            l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
-            l2, p2 = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
-            calibrated_prob = combine_symmetric_log_odds(
-                forward_log_odds=l1,
-                reverse_log_odds=l2,
-                logit_temperature=self.logit_temperature,
-            )
-            pos_bias = 0.5 * abs(l1 - l2)
-            log_odds_pass = (l1 + l2) / (2.0 * temp)
-        else:
-            top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
-            l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
-            l2, p2 = None, None
-            pos_bias = None
-            log_odds_pass = l1 / temp
-            scaled_lo = l1 / temp
-            if scaled_lo > 50.0:
-                calibrated_prob = 1.0
-            elif scaled_lo < -50.0:
-                calibrated_prob = 0.0
-            else:
-                calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
-
-        shannon_entropy = compute_shannon_entropy(calibrated_prob)
-        latency = (time.perf_counter() - t0) * 1000.0
-
-        if calibrated_prob >= self.pass_threshold:
-            status = DecisionStatus.PASSED
-            passed = True
-        elif calibrated_prob <= self.fail_threshold:
-            status = DecisionStatus.FAILED
-            passed = False
-        else:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-
-        trace = LayerTrace(
-            layer_name=self.name,
-            status=status,
-            latency_ms=latency,
-            calibrated_prob=round(calibrated_prob, 4),
-            forward_prob=round(p1, 4),
-            reverse_prob=round(p2, 4) if p2 is not None else None,
-            forward_log_odds=round(l1, 4),
-            reverse_log_odds=round(l2, 4) if l2 is not None else None,
-            positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
-            log_odds_pass=round(log_odds_pass, 4),
-            shannon_entropy=round(shannon_entropy, 4),
-            tokens_generated=0,
-            metadata={
-                "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
-                "log_odds_pass": round(log_odds_pass, 4),
-                "shannon_entropy": round(shannon_entropy, 4),
-            },
-        )
-
-        verdict = Verdict(
-            passed=passed,
-            status=status,
-            probability=round(calibrated_prob, 4),
-            triggered_layer=self.name,
-            total_latency_ms=latency,
-            total_tokens_generated=0,
-            reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
-            traces=[trace],
-        )
-        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+        top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate))
+        return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
 
     def evaluate_batch(self, candidate: Any, rubrics: Sequence[str]) -> list[Verdict]:
-        """
-        Evaluates multiple rubrics against candidate artifact using multi-rubric
-        batch prompt compilation with 100% byte-identical KV-cache prefix sharing.
-        """
-        if not rubrics:
-            return []
+        """Evaluates several atomic rubrics against one candidate.
 
+        The candidate is placed first in every prompt, so all 2 x len(rubrics) queries share
+        one cached prefix and only the short rubric suffix is re-prefilled per query.
+        """
         results = []
-        for idx, _ in enumerate(rubrics):
+        for idx in range(len(rubrics)):
             t0 = time.perf_counter()
-            prompt1 = compile_batch_binary_prompt(
-                rubrics=rubrics,
-                candidate=candidate,
-                rubric_index=idx,
-                pass_token="A",
-                fail_token="B",
-                query_first=False,
-            )
-            top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
-            l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
-
-            temp = max(self.logit_temperature, 1e-6)
-            if self.symmetric_debiasing:
-                prompt2 = compile_batch_binary_prompt(
-                    rubrics=rubrics,
-                    candidate=candidate,
-                    rubric_index=idx,
-                    pass_token="B",
-                    fail_token="A",
-                    query_first=False,
-                )
-                top2 = self.backend.query_top_logprobs(prompt2, top_k=10, allowed_tokens=["A", "B"])
-                l2, p2 = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
-                calibrated_prob = combine_symmetric_log_odds(
-                    forward_log_odds=l1,
-                    reverse_log_odds=l2,
-                    logit_temperature=self.logit_temperature,
-                )
-                pos_bias = 0.5 * abs(l1 - l2)
-                log_odds_pass = (l1 + l2) / (2.0 * temp)
-            else:
-                l2, p2 = None, None
-                pos_bias = None
-                log_odds_pass = l1 / temp
-                scaled_lo = l1 / temp
-                if scaled_lo > 50.0:
-                    calibrated_prob = 1.0
-                elif scaled_lo < -50.0:
-                    calibrated_prob = 0.0
-                else:
-                    calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
-
-            shannon_entropy = compute_shannon_entropy(calibrated_prob)
-            latency = (time.perf_counter() - t0) * 1000.0
-
-            if calibrated_prob >= self.pass_threshold:
-                status = DecisionStatus.PASSED
-                passed = True
-            elif calibrated_prob <= self.fail_threshold:
-                status = DecisionStatus.FAILED
-                passed = False
-            else:
-                status = DecisionStatus.AMBIGUOUS
-                passed = False
-
-            trace = LayerTrace(
-                layer_name=self.name,
-                status=status,
-                latency_ms=latency,
-                calibrated_prob=round(calibrated_prob, 4),
-                forward_prob=round(p1, 4),
-                reverse_prob=round(p2, 4) if p2 is not None else None,
-                forward_log_odds=round(l1, 4),
-                reverse_log_odds=round(l2, 4) if l2 is not None else None,
-                positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
-                log_odds_pass=round(log_odds_pass, 4),
-                shannon_entropy=round(shannon_entropy, 4),
-                tokens_generated=0,
-                metadata={
-                    "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
-                    "log_odds_pass": round(log_odds_pass, 4),
-                    "shannon_entropy": round(shannon_entropy, 4),
-                },
-            )
-
-            results.append(
-                Verdict(
-                    passed=passed,
-                    status=status,
-                    probability=round(calibrated_prob, 4),
-                    triggered_layer=self.name,
-                    total_latency_ms=latency,
-                    total_tokens_generated=0,
-                    reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
-                    traces=[trace],
-                )
-            )
+            forward, reverse = self._binary_prompts(candidate, rubrics, idx)
+            top_fwd = self._query(forward)
+            top_rev = self._query(reverse) if reverse is not None else None
+            results.append(self._verdict_from_logprobs(top_fwd, top_rev, t0))
         return results
 
     async def aevaluate_batch(self, candidate: Any, rubrics: Sequence[str]) -> list[Verdict]:
-        """
-        Asynchronously evaluates multiple rubrics against candidate artifact using
-        multi-rubric batch prompt compilation with 100% byte-identical KV-cache prefix sharing.
+        """Async `evaluate_batch`. The first rubric runs alone to warm the shared prefix.
+
+        Firing every query at a cold server makes each one prefill the full candidate in
+        parallel (a cache stampede). One sequential warm-up turns the rest into cache hits.
         """
         if not rubrics:
             return []
 
         async def _eval_single(idx: int) -> Verdict:
             t0 = time.perf_counter()
-            prompt1 = compile_batch_binary_prompt(
-                rubrics=rubrics,
-                candidate=candidate,
-                rubric_index=idx,
-                pass_token="A",
-                fail_token="B",
-                query_first=False,
-            )
+            top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate, rubrics, idx))
+            return self._verdict_from_logprobs(top_fwd, top_rev, t0)
 
-            temp = max(self.logit_temperature, 1e-6)
-            if self.symmetric_debiasing:
-                prompt2 = compile_batch_binary_prompt(
-                    rubrics=rubrics,
-                    candidate=candidate,
-                    rubric_index=idx,
-                    pass_token="B",
-                    fail_token="A",
-                    query_first=False,
-                )
-                top1, top2 = await asyncio.gather(
-                    self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"]),
-                    self.backend.aquery_top_logprobs(prompt2, top_k=10, allowed_tokens=["A", "B"]),
-                )
-                l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
-                l2, p2 = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
-                calibrated_prob = combine_symmetric_log_odds(
-                    forward_log_odds=l1,
-                    reverse_log_odds=l2,
-                    logit_temperature=self.logit_temperature,
-                )
-                pos_bias = 0.5 * abs(l1 - l2)
-                log_odds_pass = (l1 + l2) / (2.0 * temp)
-            else:
-                top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=["A", "B"])
-                l1, p1 = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
-                l2, p2 = None, None
-                pos_bias = None
-                log_odds_pass = l1 / temp
-                scaled_lo = l1 / temp
-                if scaled_lo > 50.0:
-                    calibrated_prob = 1.0
-                elif scaled_lo < -50.0:
-                    calibrated_prob = 0.0
-                else:
-                    calibrated_prob = 1.0 / (1.0 + math.exp(-scaled_lo))
-
-            shannon_entropy = compute_shannon_entropy(calibrated_prob)
-            latency = (time.perf_counter() - t0) * 1000.0
-
-            if calibrated_prob >= self.pass_threshold:
-                status = DecisionStatus.PASSED
-                passed = True
-            elif calibrated_prob <= self.fail_threshold:
-                status = DecisionStatus.FAILED
-                passed = False
-            else:
-                status = DecisionStatus.AMBIGUOUS
-                passed = False
-
-            trace = LayerTrace(
-                layer_name=self.name,
-                status=status,
-                latency_ms=latency,
-                calibrated_prob=round(calibrated_prob, 4),
-                forward_prob=round(p1, 4),
-                reverse_prob=round(p2, 4) if p2 is not None else None,
-                forward_log_odds=round(l1, 4),
-                reverse_log_odds=round(l2, 4) if l2 is not None else None,
-                positional_bias_magnitude=round(pos_bias, 4) if pos_bias is not None else None,
-                log_odds_pass=round(log_odds_pass, 4),
-                shannon_entropy=round(shannon_entropy, 4),
-                tokens_generated=0,
-                metadata={
-                    "positional_bias_magnitude": round(pos_bias, 4) if pos_bias is not None else None,
-                    "log_odds_pass": round(log_odds_pass, 4),
-                    "shannon_entropy": round(shannon_entropy, 4),
-                },
-            )
-
-            return Verdict(
-                passed=passed,
-                status=status,
-                probability=round(calibrated_prob, 4),
-                triggered_layer=self.name,
-                total_latency_ms=latency,
-                total_tokens_generated=0,
-                reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
-                traces=[trace],
-            )
-
-        if len(rubrics) == 1:
-            return [await _eval_single(0)]
-
-        # Prevent KV-cache stampede: populate server cache with first item
         first_verdict = await _eval_single(0)
         rest_verdicts = await asyncio.gather(*[_eval_single(idx) for idx in range(1, len(rubrics))])
         return [first_verdict, *rest_verdicts]
+
+
+class MultiRubricGate(BaseGate):
+    """Checks several *atomic* rubrics against one candidate; passes only if every rubric passes.
+
+    Prefer this to one compound rubric ("is it typed AND documented AND safe?"). A compound
+    question blends independent signals into one logit, and a strong "yes" on two criteria can
+    mask a "no" on the third. Here each rubric gets its own debiased read, and all reads share
+    the candidate's KV-cache prefix (see `LogitGate.evaluate_batch`).
+
+    Aggregation is weakest-link: any FAILED rubric gives FAILED, otherwise any AMBIGUOUS gives
+    AMBIGUOUS, and ``probability`` is the minimum across rubrics. One trace per rubric is
+    recorded (``metadata["rubric"]``), so `logitgate explain` shows which criterion failed.
+
+    Inside a `Cascade`, a downstream `JudgeGate` inherits all rubrics as a bulleted list.
+
+    Args:
+        rubrics: Atomic yes/no criteria, one question each.
+        name: Identifier for this gate instance.
+        **options: Any `LogitGate` option (``backend``, ``model``, ``pass_threshold``,
+            ``fail_threshold``, ``symmetric_debiasing``, ``logit_temperature``, ``preset``...).
+
+    Example:
+        >>> gate = MultiRubricGate([
+        ...     "Does the function have type annotations?",
+        ...     "Does the function handle n <= 0?",
+        ... ])
+        >>> verdict = gate(candidate_code)
+        >>> [t.metadata["rubric"] for t in verdict.traces if t.status != "passed"]
+    """
+
+    def __init__(self, rubrics: Sequence[str], name: str = "MultiRubricGate", **options: Any) -> None:
+        cleaned = [r.strip() for r in rubrics if isinstance(r, str) and r.strip()]
+        if len(cleaned) != len(rubrics) or not cleaned:
+            raise ConfigurationError("MultiRubricGate needs one or more non-empty rubric strings")
+        self.rubrics = cleaned
+        self.name = name
+        self._gate = LogitGate(rubric=cleaned[0], name=name, **options)
+        self.save_on_fail = self._gate.save_on_fail
+
+    @property
+    def rubric(self) -> str:
+        """All criteria as one bulleted rubric, the form a downstream judge receives."""
+        return "\n".join(f"- {r}" for r in self.rubrics)
+
+    @property
+    def backend(self) -> LogitBackend:
+        return self._gate.backend
+
+    def __repr__(self) -> str:
+        return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
+
+    def evaluate_each(self, candidate: Any) -> list[Verdict]:
+        """Per-rubric verdicts, in `rubrics` order."""
+        return self._gate.evaluate_batch(candidate, self.rubrics)
+
+    async def aevaluate_each(self, candidate: Any) -> list[Verdict]:
+        return await self._gate.aevaluate_batch(candidate, self.rubrics)
+
+    def _aggregate(self, verdicts: Sequence[Verdict], t0: float) -> Verdict:
+        traces: list[LayerTrace] = []
+        for i, (rubric, v) in enumerate(zip(self.rubrics, verdicts)):
+            for trace in v.traces:
+                traces.append(trace.model_copy(update={
+                    "layer_name": f"{self.name}[{i}]",
+                    "metadata": {**trace.metadata, "rubric": rubric},
+                }))
+        statuses = {v.status for v in verdicts}
+        if DecisionStatus.FAILED in statuses:
+            status = DecisionStatus.FAILED
+        elif DecisionStatus.AMBIGUOUS in statuses:
+            status = DecisionStatus.AMBIGUOUS
+        else:
+            status = DecisionStatus.PASSED
+        probs = [v.probability for v in verdicts if v.probability is not None]
+        unresolved = [
+            f"{v.status.value.upper()} {rubric!r} (P={v.probability:.4f})"
+            for rubric, v in zip(self.rubrics, verdicts)
+            if not v.passed and v.probability is not None
+        ]
+        passed_count = sum(v.passed for v in verdicts)
+        reason = f"{passed_count}/{len(verdicts)} rubrics passed"
+        if unresolved:
+            reason += "; " + "; ".join(unresolved)
+        return Verdict(
+            passed=status == DecisionStatus.PASSED,
+            status=status,
+            probability=min(probs) if probs else None,
+            triggered_layer=self.name,
+            total_latency_ms=(time.perf_counter() - t0) * 1000.0,
+            total_tokens_generated=0,
+            reason=reason,
+            traces=traces,
+        )
+
+    def replay_config(self) -> dict[str, Any]:
+        config = {k: v for k, v in self._gate.replay_config().items() if k != "rubric"}
+        return {**config, "gate_type": "MultiRubricGate", "rubrics": list(self.rubrics)}
+
+    def _snapshot(self, candidate: Any, verdict: Verdict, kwargs: dict[str, Any]) -> Verdict:
+        return persist_failure_snapshot(
+            verdict,
+            candidate=candidate,
+            rubric=self.rubric,
+            gate_config=self.replay_config(),
+            save_on_fail=kwargs.get("save_on_fail", self.save_on_fail),
+            test_name=kwargs.get("test_name"),
+            snapshot_dir=kwargs.get("snapshot_dir"),
+        )
+
+    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        t0 = time.perf_counter()
+        return self._snapshot(candidate, self._aggregate(self.evaluate_each(candidate), t0), kwargs)
+
+    async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        t0 = time.perf_counter()
+        return self._snapshot(candidate, self._aggregate(await self.aevaluate_each(candidate), t0), kwargs)
 
 
 class ChoiceGate(BaseGate):
@@ -640,14 +553,11 @@ class ChoiceGate(BaseGate):
         if effective_temp <= 0.0:
             raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
 
-        effective_backend = (
-            get_default_backend() if (backend is None or backend == "default") else backend
-        )
         effective_model = model or get_default_model()
 
         self.question = question.strip()
         self.options = dict(options)
-        self.backend = resolve_logit_backend(effective_backend, model=effective_model)
+        self.backend = resolve_logit_backend(backend, model=model)
         self.model = effective_model
         self.symmetric_debiasing = symmetric_debiasing
         self.query_first = query_first
@@ -658,54 +568,43 @@ class ChoiceGate(BaseGate):
         q_repr = repr(self.question[:40] + "..." if len(self.question) > 40 else self.question)
         return f"ChoiceGate(question={q_repr}, options={list(self.options.keys())!r}, backend={self.backend!r})"
 
-    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        t0 = time.perf_counter()
-        keys = list(self.options.keys())
+    def _choice_prompts(self, candidate: Any) -> tuple[str, str | None]:
+        """Returns (original order, reversed option order) prompts; reversed is optional.
 
-        # Pass 1: Original option order
-        prompt1 = compile_choice_prompt(
+        Keys stay fixed while the descriptions are reversed, so each description is seen
+        under two different letters. That cancels both letter priors and position bias.
+        """
+        forward = compile_choice_prompt(
             question=self.question,
             candidate=candidate,
             options=self.options,
             query_first=self.query_first,
         )
-        top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=keys)
-        logprobs1 = {k: extract_token_logprob(top1, k) for k in keys}
+        if not self.symmetric_debiasing:
+            return forward, None
+        keys = list(self.options)
+        reversed_mapping = dict(zip(keys, reversed(list(self.options.values()))))
+        reverse = compile_choice_prompt(
+            question=self.question,
+            candidate=candidate,
+            options=reversed_mapping,
+            query_first=self.query_first,
+        )
+        return forward, reverse
 
-        if self.symmetric_debiasing and len(keys) >= 2:
-            # Pass 2: Reversed option mapping
-            reversed_values = list(reversed(list(self.options.values())))
-            reversed_mapping = dict(zip(keys, reversed_values))
-            prompt2 = compile_choice_prompt(
-                question=self.question,
-                candidate=candidate,
-                options=reversed_mapping,
-                query_first=self.query_first,
-            )
-            top2 = self.backend.query_top_logprobs(prompt2, top_k=10, allowed_tokens=keys)
-            # Map logprobs back to original option keys
-            logprobs2: dict[str, float] = {}
-            for i, k in enumerate(keys):
-                rev_key = keys[len(keys) - 1 - i]
-                logprobs2[k] = extract_token_logprob(top2, rev_key)
-
-            # Average logprobs
-            combined_logprobs = {k: (logprobs1[k] + logprobs2[k]) / 2.0 for k in keys}
-        else:
-            combined_logprobs = logprobs1
-
-        # Temperature scaling before softmax normalization
-        temp = max(self.logit_temperature, 1e-6)
-        scaled_logprobs = {k: lp / temp for k, lp in combined_logprobs.items()}
-
-        # Normalized softmax probabilities
-        max_lp = max(scaled_logprobs.values()) if scaled_logprobs else 0.0
-        exp_vals = {k: math.exp(lp - max_lp) for k, lp in scaled_logprobs.items()}
-        total_exp = sum(exp_vals.values())
-        choice_probs = {k: exp_vals[k] / total_exp for k in keys} if total_exp > 0 else {k: 1.0 / len(keys) for k in keys}
-
-        best_choice = max(choice_probs, key=choice_probs.get)  # type: ignore
-        max_prob = choice_probs[best_choice]
+    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
+        keys = list(self.options)
+        combined = {k: extract_token_logprob(top_fwd, k) for k in keys}
+        if top_rev is not None:
+            # In the reversed prompt, option i's description sits under key[-1 - i].
+            n = len(keys)
+            combined = {
+                k: (combined[k] + extract_token_logprob(top_rev, keys[n - 1 - i])) / 2.0
+                for i, k in enumerate(keys)
+            }
+        choice_probs = _softmax(combined, self.logit_temperature)
+        best_choice, max_prob = max(choice_probs.items(), key=lambda kv: kv[1])
+        rounded = {k: round(v, 4) for k, v in choice_probs.items()}
         latency = (time.perf_counter() - t0) * 1000.0
 
         trace = LayerTrace(
@@ -713,91 +612,46 @@ class ChoiceGate(BaseGate):
             status=DecisionStatus.PASSED,
             latency_ms=latency,
             calibrated_prob=round(max_prob, 4),
-            metadata={"choice_probabilities": {k: round(v, 4) for k, v in choice_probs.items()}},
+            metadata={"choice_probabilities": rounded},
         )
-
         return Verdict(
             passed=True,
             status=DecisionStatus.PASSED,
             probability=round(max_prob, 4),
             choice=best_choice,
-            choice_probabilities={k: round(v, 4) for k, v in choice_probs.items()},
+            choice_probabilities=rounded,
             triggered_layer=self.name,
             total_latency_ms=latency,
             total_tokens_generated=0,
             reason=f"ChoiceGate selected '{best_choice}' with P={max_prob:.4f}",
             traces=[trace],
         )
+
+    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        t0 = time.perf_counter()
+        keys = list(self.options)
+        forward, reverse = self._choice_prompts(candidate)
+        top_fwd = self.backend.query_top_logprobs(forward, top_k=10, allowed_tokens=keys)
+        top_rev = (
+            self.backend.query_top_logprobs(reverse, top_k=10, allowed_tokens=keys)
+            if reverse is not None
+            else None
+        )
+        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
-        keys = list(self.options.keys())
-
-        prompt1 = compile_choice_prompt(
-            question=self.question,
-            candidate=candidate,
-            options=self.options,
-            query_first=self.query_first,
-        )
-
-        if self.symmetric_debiasing and len(keys) >= 2:
-            reversed_values = list(reversed(list(self.options.values())))
-            reversed_mapping = dict(zip(keys, reversed_values))
-            prompt2 = compile_choice_prompt(
-                question=self.question,
-                candidate=candidate,
-                options=reversed_mapping,
-                query_first=self.query_first,
-            )
-            top1, top2 = await asyncio.gather(
-                self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=keys),
-                self.backend.aquery_top_logprobs(prompt2, top_k=10, allowed_tokens=keys),
-            )
-            logprobs1 = {k: extract_token_logprob(top1, k) for k in keys}
-            logprobs2: dict[str, float] = {}
-            for i, k in enumerate(keys):
-                rev_key = keys[len(keys) - 1 - i]
-                logprobs2[k] = extract_token_logprob(top2, rev_key)
-
-            combined_logprobs = {k: (logprobs1[k] + logprobs2[k]) / 2.0 for k in keys}
+        keys = list(self.options)
+        forward, reverse = self._choice_prompts(candidate)
+        top_rev: TopLogprobs | None = None
+        if reverse is None:
+            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=keys)
         else:
-            top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=keys)
-            logprobs1 = {k: extract_token_logprob(top1, k) for k in keys}
-            combined_logprobs = logprobs1
-
-        # Temperature scaling before softmax normalization
-        temp = max(self.logit_temperature, 1e-6)
-        scaled_logprobs = {k: lp / temp for k, lp in combined_logprobs.items()}
-
-        max_lp = max(scaled_logprobs.values()) if scaled_logprobs else 0.0
-        exp_vals = {k: math.exp(lp - max_lp) for k, lp in scaled_logprobs.items()}
-        total_exp = sum(exp_vals.values())
-        choice_probs = {k: exp_vals[k] / total_exp for k in keys} if total_exp > 0 else {k: 1.0 / len(keys) for k in keys}
-
-        best_choice = max(choice_probs, key=choice_probs.get)  # type: ignore
-        max_prob = choice_probs[best_choice]
-        latency = (time.perf_counter() - t0) * 1000.0
-
-        trace = LayerTrace(
-            layer_name=self.name,
-            status=DecisionStatus.PASSED,
-            latency_ms=latency,
-            calibrated_prob=round(max_prob, 4),
-            metadata={"choice_probabilities": {k: round(v, 4) for k, v in choice_probs.items()}},
-        )
-
-        return Verdict(
-            passed=True,
-            status=DecisionStatus.PASSED,
-            probability=round(max_prob, 4),
-            choice=best_choice,
-            choice_probabilities={k: round(v, 4) for k, v in choice_probs.items()},
-            triggered_layer=self.name,
-            total_latency_ms=latency,
-            total_tokens_generated=0,
-            reason=f"ChoiceGate selected '{best_choice}' with P={max_prob:.4f}",
-            traces=[trace],
-        )
+            top_fwd, top_rev = await asyncio.gather(
+                self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=keys),
+                self.backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=keys),
+            )
+        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
 
 
 class ScoreGate(BaseGate):
@@ -854,16 +708,13 @@ class ScoreGate(BaseGate):
         if effective_temp <= 0.0:
             raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
 
-        effective_backend = (
-            get_default_backend() if (backend is None or backend == "default") else backend
-        )
         effective_model = model or get_default_model()
 
         self.rubric = rubric.strip()
         self.min_score = min_score
         self.max_score = max_score
         self.threshold = threshold
-        self.backend = resolve_logit_backend(effective_backend, model=effective_model)
+        self.backend = resolve_logit_backend(backend, model=model)
         self.model = effective_model
         self.symmetric_debiasing = symmetric_debiasing
         self.query_first = query_first
@@ -879,59 +730,28 @@ class ScoreGate(BaseGate):
             f"backend={self.backend!r})"
         )
 
-    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        t0 = time.perf_counter()
-        score_tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
-
-        prompt1 = compile_score_prompt(
-            rubric=self.rubric,
-            candidate=candidate,
-            min_score=self.min_score,
-            max_score=self.max_score,
-            query_first=self.query_first,
-            inverted=False,
-        )
-        top1 = self.backend.query_top_logprobs(prompt1, top_k=10, allowed_tokens=score_tokens)
-        logprobs1 = {s: extract_token_logprob(top1, str(s)) for s in range(self.min_score, self.max_score + 1)}
-
-        if self.symmetric_debiasing:
-            prompt2 = compile_score_prompt(
+    def _score_prompts(self, candidate: Any) -> tuple[str, str | None]:
+        def build(inverted: bool) -> str:
+            return compile_score_prompt(
                 rubric=self.rubric,
                 candidate=candidate,
                 min_score=self.min_score,
                 max_score=self.max_score,
                 query_first=self.query_first,
-                inverted=True,
+                inverted=inverted,
             )
-            top2 = self.backend.query_top_logprobs(prompt2, top_k=10, allowed_tokens=score_tokens)
-            # In inverted prompt: token s' represents quality score = max_score + min_score - s'
-            # So for quality score s, the token queried was s' = max_score + min_score - s
-            logprobs2 = {
-                s: extract_token_logprob(top2, str(self.max_score + self.min_score - s))
-                for s in range(self.min_score, self.max_score + 1)
-            }
-            combined_logprobs = {
-                s: (logprobs1[s] + logprobs2[s]) / 2.0
-                for s in range(self.min_score, self.max_score + 1)
-            }
-        else:
-            combined_logprobs = logprobs1
 
-        # Temperature scaling before softmax
-        temp = max(self.logit_temperature, 1e-6)
-        scaled_logprobs = {s: lp / temp for s, lp in combined_logprobs.items()}
+        return build(False), (build(True) if self.symmetric_debiasing else None)
 
-        # Normalized softmax probabilities
-        max_lp = max(scaled_logprobs.values()) if scaled_logprobs else 0.0
-        exp_vals = {s: math.exp(lp - max_lp) for s, lp in scaled_logprobs.items()}
-        total_exp = sum(exp_vals.values())
-        score_probs = (
-            {s: exp_vals[s] / total_exp for s in scaled_logprobs}
-            if total_exp > 0
-            else {s: 1.0 / len(scaled_logprobs) for s in scaled_logprobs}
-        )
+    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
+        scores = range(self.min_score, self.max_score + 1)
+        combined = {s: extract_token_logprob(top_fwd, str(s)) for s in scores}
+        if top_rev is not None:
+            # On the inverted scale, quality s is written as token (max + min - s).
+            mirror = self.max_score + self.min_score
+            combined = {s: (combined[s] + extract_token_logprob(top_rev, str(mirror - s))) / 2.0 for s in scores}
 
-        # Expected score: sum(s * P(s))
+        score_probs = _softmax(combined, self.logit_temperature)
         expected_score = sum(s * prob for s, prob in score_probs.items())
         passed = expected_score >= self.threshold
         status = DecisionStatus.PASSED if passed else DecisionStatus.FAILED
@@ -946,7 +766,6 @@ class ScoreGate(BaseGate):
                 "token_probabilities": {str(k): round(v, 4) for k, v in score_probs.items()},
             },
         )
-
         return Verdict(
             passed=passed,
             status=status,
@@ -957,84 +776,29 @@ class ScoreGate(BaseGate):
             reason=f"ScoreGate E[S]={expected_score:.2f} (threshold={self.threshold})",
             traces=[trace],
         )
+
+    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        t0 = time.perf_counter()
+        tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
+        forward, reverse = self._score_prompts(candidate)
+        top_fwd = self.backend.query_top_logprobs(forward, top_k=10, allowed_tokens=tokens)
+        top_rev = (
+            self.backend.query_top_logprobs(reverse, top_k=10, allowed_tokens=tokens)
+            if reverse is not None
+            else None
+        )
+        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
-        score_tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
-
-        prompt1 = compile_score_prompt(
-            rubric=self.rubric,
-            candidate=candidate,
-            min_score=self.min_score,
-            max_score=self.max_score,
-            query_first=self.query_first,
-            inverted=False,
-        )
-
-        if self.symmetric_debiasing:
-            prompt2 = compile_score_prompt(
-                rubric=self.rubric,
-                candidate=candidate,
-                min_score=self.min_score,
-                max_score=self.max_score,
-                query_first=self.query_first,
-                inverted=True,
-            )
-            top1, top2 = await asyncio.gather(
-                self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=score_tokens),
-                self.backend.aquery_top_logprobs(prompt2, top_k=10, allowed_tokens=score_tokens),
-            )
-            logprobs1 = {s: extract_token_logprob(top1, str(s)) for s in range(self.min_score, self.max_score + 1)}
-            logprobs2 = {
-                s: extract_token_logprob(top2, str(self.max_score + self.min_score - s))
-                for s in range(self.min_score, self.max_score + 1)
-            }
-            combined_logprobs = {
-                s: (logprobs1[s] + logprobs2[s]) / 2.0
-                for s in range(self.min_score, self.max_score + 1)
-            }
+        tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
+        forward, reverse = self._score_prompts(candidate)
+        top_rev: TopLogprobs | None = None
+        if reverse is None:
+            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=tokens)
         else:
-            top1 = await self.backend.aquery_top_logprobs(prompt1, top_k=10, allowed_tokens=score_tokens)
-            logprobs1 = {s: extract_token_logprob(top1, str(s)) for s in range(self.min_score, self.max_score + 1)}
-            combined_logprobs = logprobs1
-
-        # Temperature scaling before softmax
-        temp = max(self.logit_temperature, 1e-6)
-        scaled_logprobs = {s: lp / temp for s, lp in combined_logprobs.items()}
-
-        # Normalized softmax probabilities
-        max_lp = max(scaled_logprobs.values()) if scaled_logprobs else 0.0
-        exp_vals = {s: math.exp(lp - max_lp) for s, lp in scaled_logprobs.items()}
-        total_exp = sum(exp_vals.values())
-        score_probs = (
-            {s: exp_vals[s] / total_exp for s in scaled_logprobs}
-            if total_exp > 0
-            else {s: 1.0 / len(scaled_logprobs) for s in scaled_logprobs}
-        )
-
-        # Expected score: sum(s * P(s))
-        expected_score = sum(s * prob for s, prob in score_probs.items())
-        passed = expected_score >= self.threshold
-        status = DecisionStatus.PASSED if passed else DecisionStatus.FAILED
-        latency = (time.perf_counter() - t0) * 1000.0
-
-        trace = LayerTrace(
-            layer_name=self.name,
-            status=status,
-            latency_ms=latency,
-            metadata={
-                "expected_score": round(expected_score, 4),
-                "token_probabilities": {str(k): round(v, 4) for k, v in score_probs.items()},
-            },
-        )
-
-        return Verdict(
-            passed=passed,
-            status=status,
-            score=round(expected_score, 4),
-            triggered_layer=self.name,
-            total_latency_ms=latency,
-            total_tokens_generated=0,
-            reason=f"ScoreGate E[S]={expected_score:.2f} (threshold={self.threshold})",
-            traces=[trace],
-        )
+            top_fwd, top_rev = await asyncio.gather(
+                self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=tokens),
+                self.backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=tokens),
+            )
+        return self._verdict_from_logprobs(top_fwd, top_rev, t0)

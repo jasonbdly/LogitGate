@@ -2,12 +2,103 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import functools
+import inspect
 import math
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
+import httpx
 from typing_extensions import Self
+
+from logitgate.exceptions import (
+    BackendError,
+    BackendTimeoutError,
+    BackendUnavailableError,
+)
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+_OFFLINE_HINT = "Or set backend='stub://' for offline testing."
+
+
+def _response_detail(response: httpx.Response) -> str:
+    """Extracts the server's own error message (Ollama: {"error": str}, OpenAI: {"error": {...}})."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            error = error.get("message")
+        if error:
+            return str(error)[:300]
+    try:
+        return response.text.strip()[:300] or response.reason_phrase
+    except httpx.ResponseNotRead:
+        return response.reason_phrase
+
+
+def describe_transport_error(backend: Any, exc: httpx.HTTPError) -> BackendError:
+    """Converts a raw ``httpx`` failure into a `BackendError` that says what to do next.
+
+    Backends customize the advice through optional attributes rather than subclassing:
+    ``service_name`` (display name), ``connect_hint`` (how to start the server), and
+    ``transport_hint(status_code, detail) -> str | None`` (status-specific advice such as
+    ``ollama pull <model>`` on a 404).
+    """
+    service = getattr(backend, "service_name", type(backend).__name__)
+    base_url = getattr(backend, "base_url", None) or "<unknown url>"
+
+    if isinstance(exc, httpx.TimeoutException):
+        timeout = getattr(backend, "timeout", None)
+        within = f" within {timeout:g}s" if isinstance(timeout, (int, float)) else ""
+        return BackendTimeoutError(
+            f"{service} at {base_url} did not respond{within} ({type(exc).__name__}). "
+            "The first request after a model loads is often far slower than steady state: "
+            "pre-warm the model, or pass a larger timeout= to the backend."
+        )
+    if isinstance(exc, httpx.ConnectError):
+        hint = getattr(backend, "connect_hint", f"Is the {service} server running?")
+        return BackendUnavailableError(f"Cannot connect to {service} at {base_url}. {hint} {_OFFLINE_HINT}")
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        detail = _response_detail(exc.response)
+        hint_fn = getattr(backend, "transport_hint", None)
+        hint = hint_fn(code, detail) if callable(hint_fn) else None
+        message = f"{service} at {base_url} returned HTTP {code}: {detail}"
+        return BackendError(f"{message}. {hint}" if hint else message)
+    return BackendError(f"{service} request to {base_url} failed: {type(exc).__name__}: {exc}")
+
+
+def translate_transport_errors(method: _F) -> _F:
+    """Decorates backend I/O methods so callers never see a bare ``httpx`` traceback.
+
+    The original exception is chained as ``__cause__``. Retries or fallbacks *inside* the
+    method (e.g. Ollama's ``think=False`` retry on HTTP 400) still see raw ``httpx`` errors,
+    because translation happens only at the method boundary.
+    """
+    if inspect.iscoroutinefunction(method):
+
+        @functools.wraps(method)
+        async def async_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return await method(self, *args, **kwargs)
+            except httpx.HTTPError as exc:
+                raise describe_transport_error(self, exc) from exc
+
+        return cast(_F, async_wrapper)
+
+    @functools.wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(self, *args, **kwargs)
+        except httpx.HTTPError as exc:
+            raise describe_transport_error(self, exc) from exc
+
+    return cast(_F, wrapper)
 
 
 def strip_reasoning_blocks(text: str) -> str:
@@ -205,24 +296,30 @@ def resolve_logit_backend(
     if isinstance(backend_spec, LogitBackend):
         return backend_spec
 
-    from logitgate.config import get_default_backend, get_default_model
+    from logitgate.config import (
+        LogitGateDefaults,
+        get_default_model,
+        warn_if_implicit_stub,
+    )
 
-    explicit_model = model
+    # Model precedence: explicit `model=` argument > model embedded in the URI > LOGITGATE_MODEL
+    # > per-backend default. The environment is a fallback; it must never override something
+    # the caller wrote down.
+    env_model = get_default_model()
     if backend_spec is None or backend_spec == "default":
-        default_spec = get_default_backend()
-        if model is None:
-            model = get_default_model()
+        default_spec = LogitGateDefaults.backend
         if (
             default_spec == "stub://default"
-            and explicit_model is not None
-            and explicit_model not in ("default", "stub")
-            and not explicit_model.startswith("stub")
+            and model is not None
+            and model not in ("default", "stub")
+            and not model.startswith("stub")
         ):
-            backend_spec = f"ollama://localhost:11434/{explicit_model}"
+            # `LogitGate(rubric, model="qwen2.5:7b")` with nothing configured means "use my
+            # local Ollama model", not "silently return P=0.95".
+            backend_spec = f"ollama://localhost:11434/{model}"
         else:
+            warn_if_implicit_stub(default_spec)
             backend_spec = default_spec
-    elif model is None:
-        model = get_default_model()
 
     spec = str(backend_spec).strip()
     if spec.startswith("stub://") or spec == "stub" or spec == "stub://default":
@@ -235,50 +332,47 @@ def resolve_logit_backend(
                 pass
         return StubBackend(default_prob=prob, **kwargs)
 
+    def _uri_model(parsed_path: str) -> str | None:
+        return parsed_path.lstrip("/") or None
+
     if spec.startswith("ollama://"):
         from logitgate.backends.ollama import OllamaBackend
         parsed = urlparse(spec)
         netloc = parsed.netloc or "localhost:11434"
-        base_url = f"http://{netloc}"
-        parsed_model = parsed.path.lstrip("/") if parsed.path else None
-        effective_model = model or parsed_model or "qwen2.5-coder:14b"
-        return OllamaBackend(base_url=base_url, model=effective_model, **kwargs)
+        effective_model = model or _uri_model(parsed.path) or env_model or "qwen2.5-coder:14b"
+        return OllamaBackend(base_url=f"http://{netloc}", model=effective_model, **kwargs)
 
     if spec.startswith(("openai://", "vllm://")):
         from logitgate.backends.openai_compat import OpenAICompatBackend
         parsed = urlparse(spec)
         scheme = "https" if spec.startswith("openai://") else "http"
         base_url = f"{scheme}://{parsed.netloc}{parsed.path}"
-        effective_model = model or "gpt-4o-mini"
-        return OpenAICompatBackend(base_url=base_url, model=effective_model, **kwargs)
+        return OpenAICompatBackend(base_url=base_url, model=model or env_model or "gpt-4o-mini", **kwargs)
 
     if spec.startswith("llamacpp://") or spec == "llamacpp":
         from logitgate.backends.llamacpp import LlamaCppBackend
         if spec == "llamacpp":
-            return LlamaCppBackend(model=model, **kwargs)
+            return LlamaCppBackend(model=model or env_model, **kwargs)
         parsed = urlparse(spec)
+        effective_model_opt = model or _uri_model(parsed.path) or env_model
         if parsed.netloc:
-            base_url = f"http://{parsed.netloc}"
-            parsed_model = parsed.path.lstrip("/") if parsed.path else None
-            effective_model_opt: str | None = model or parsed_model or None
-            return LlamaCppBackend(base_url=base_url, model=effective_model_opt, **kwargs)
-        else:
-            effective_model_opt = model or (parsed.path.lstrip("/") if parsed.path else None)
-            return LlamaCppBackend(model=effective_model_opt, **kwargs)
+            return LlamaCppBackend(base_url=f"http://{parsed.netloc}", model=effective_model_opt, **kwargs)
+        return LlamaCppBackend(model=effective_model_opt, **kwargs)
 
     if spec.startswith("recurrent://") or spec == "recurrent":
         from logitgate.backends.recurrent import RecurrentPyTorchBackend
+        uri_model = None
         if spec.startswith("recurrent://"):
             parsed_rec = urlparse(spec)
-            target_model = model or (f"{parsed_rec.netloc}{parsed_rec.path}" if parsed_rec.netloc else None) or "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
-        else:
-            target_model = model or "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+            uri_model = f"{parsed_rec.netloc}{parsed_rec.path}" if parsed_rec.netloc else None
+        target_model = model or uri_model or env_model or "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
         return RecurrentPyTorchBackend(model_name=target_model, **kwargs)
 
     # Fallback to Ollama or Stub
     if "stub" in spec:
         return StubBackend(**kwargs)
 
+    # A bare spec such as "qwen2.5:7b" is treated as an Ollama model name.
     from logitgate.backends.ollama import OllamaBackend
     return OllamaBackend(model=model or spec, **kwargs)
 

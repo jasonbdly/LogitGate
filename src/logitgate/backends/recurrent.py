@@ -12,10 +12,6 @@ import math
 from typing import Any
 
 from logitgate.backends.base import GenerativeBackend, LogitBackend
-from logitgate.backends.dory_recurrent import (
-    RecurrentLoopTrace,
-    execute_adaptive_recurrent_loops,
-)
 from logitgate.hardware.memory_guard import PCIeSpilloverGuard
 
 

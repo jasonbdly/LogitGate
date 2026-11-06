@@ -5,8 +5,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class VRAMWatermarkStatus:
+    """Point-in-time CUDA memory reading, in MiB. All zeros means "no CUDA device visible"."""
+
     allocated_mb: float
     reserved_mb: float
     free_physical_mb: float

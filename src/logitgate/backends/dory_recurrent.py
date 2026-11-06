@@ -12,8 +12,10 @@ from logitgate.debiasing.permutation import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RecurrentLoopTrace:
+    """Result of an adaptive recurrent run: loops used, per-loop verdict entropy, final logits."""
+
     loops_executed: int
     entropy_trajectory: tuple[float, ...]
     halted_early: bool

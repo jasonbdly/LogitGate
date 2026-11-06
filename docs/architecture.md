@@ -44,8 +44,10 @@ flowchart TD
      - **Discrete K-ary Selection (`ChoiceGate`)**: Normalizes probabilities across $K$ options using forward and reverse permutation averaging.
      - **Continuous Scoring (`ScoreGate`)**: Computes probability-weighted expected scores ($\mathbb{E}[S] = \sum s \cdot P(s)$) over discrete anchors (1 to 5) with scale reversal.
    - **Short-Circuiting Rules**:
-     - If calibrated confidence $P \ge \text{pass\_threshold}$ (default: $0.85$), it issues an immediate **Fast-Path PASS**, bypassing Layer 2 entirely.
+     - If calibrated confidence $P \ge \text{pass\_threshold}$ (default: $0.85$), it issues an immediate **Fast-Path PASS**, bypassing the following Layer-2 gate (unless that gate's policy is `always`).
      - If confidence $P \le \text{fail\_threshold}$ (default: $0.20$) and downstream `JudgeGate` is configured with `trigger="on_ambiguous_only"`, it issues an immediate **Decisive FAIL**, short-circuiting Layer 2.
+
+> **Routing is trait-based.** `Cascade` never checks concrete classes. Each gate declares `layer_tier` (0 deterministic, 1 logit, 2 generative), `can_fast_path`, and, on tier-2 gates, `escalation_policy`. Tier-0 failures are final. A tier-1 failure or ambiguity defers to an immediately following tier-2 gate, whose policy decides whether it runs. Custom gates, wrappers, and decorators that declare these traits route exactly like the built-ins. The sync and async paths share one generator-based pipeline (`Cascade._pipeline`), so routing behavior is identical between `evaluate` and `aevaluate` by construction.
 
 3. **Layer 2 (`JudgeGate`)**:
    - **Latency**: 1,500–5,000 ms (generative autoregressive decoding).
@@ -83,7 +85,7 @@ When deploying LLM evaluation pipelines, a common production failure mode is **K
 
 ### Topology 1: Single-Model Shared KV-Cache (Batch Evaluation Suites)
 - **Use Case**: Evaluating multiple rubrics on the same candidate artifact.
-- **Mechanics**: Using `evaluate_batch(candidate, rubrics)`, the candidate tokens are evaluated once. Subsequent rubric logit probes reuse the shared `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix in the KV-cache without evicting the context, reducing per-rubric latency to ~110 ms on GPU and ~450–925 ms on CPU.
+- **Mechanics**: Using `MultiRubricGate` (or `evaluate_batch(candidate, rubrics)`), the candidate tokens are evaluated once. Subsequent rubric logit probes reuse the shared `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix in the KV-cache without evicting the context, reducing per-rubric latency to ~110 ms on GPU and ~450–925 ms on CPU.
 
 ### Topology 2: Heterogeneous Dual-GPU Sidecar (High-Throughput Production)
 - **GPU 0**: Pinned exclusively to the primary generator model (e.g., `gemma4:26b` MoE or `gemma4:31b` Dense) with 16k–32k context. Its generation KV-cache is **never evicted**.

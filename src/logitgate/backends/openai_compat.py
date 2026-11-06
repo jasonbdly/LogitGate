@@ -10,6 +10,7 @@ from logitgate.backends.base import (
     GenerativeBackend,
     LogitBackend,
     strip_reasoning_blocks,
+    translate_transport_errors,
 )
 
 EXCLUDED_INTERNAL_KWARGS = {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
@@ -21,6 +22,18 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
     supporting first-token logprob extraction, persistent connection pooling,
     and generative reviews with reasoning trace suppression.
     """
+
+    service_name = "OpenAI-compatible server"
+    connect_hint = "Check base_url, and that the server is running (vLLM: `vllm serve <model>`)."
+
+    def transport_hint(self, status_code: int, detail: str) -> str | None:
+        if status_code in (401, 403):
+            return "Set OPENAI_API_KEY or pass api_key= (vLLM: match its --api-key)."
+        if status_code == 404:
+            return f"Check that model '{self.model}' is served and base_url ends with /v1."
+        if status_code == 400 and "logprobs" in detail.lower():
+            return "This endpoint does not expose logprobs; LogitGate needs top_logprobs support."
+        return None
 
     def __init__(
         self,
@@ -128,6 +141,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
             for item in top_logprobs
         ]
 
+    @translate_transport_errors
     def query_top_logprobs(
         self,
         prompt: str,
@@ -144,6 +158,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
+    @translate_transport_errors
     async def aquery_top_logprobs(
         self,
         prompt: str,
@@ -160,6 +175,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
+    @translate_transport_errors
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
@@ -179,6 +195,7 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("usage", {}).get("completion_tokens", 0)
         return strip_reasoning_blocks(content), tokens
 
+    @translate_transport_errors
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {

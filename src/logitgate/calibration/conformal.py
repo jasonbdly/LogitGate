@@ -8,14 +8,63 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+_GRID = 1e4  # thresholds are reported at 4 decimals, like LogitGate probabilities
+_EPS = 1e-7  # absorbs float noise such as 0.45 * 1e4 == 4500.000000000001
 
-@dataclass(frozen=True)
+
+def _ceil4(x: float) -> float:
+    return math.ceil(x * _GRID - _EPS) / _GRID
+
+
+def _floor4(x: float) -> float:
+    return math.floor(x * _GRID + _EPS) / _GRID
+
+
+def _strictly_above4(x: float) -> float:
+    """Smallest 4-decimal value strictly greater than ``x``."""
+    return math.floor(x * _GRID + _EPS) / _GRID + 1.0 / _GRID
+
+
+def _strictly_below4(x: float) -> float:
+    """Largest 4-decimal value strictly less than ``x``."""
+    return math.ceil(x * _GRID - _EPS) / _GRID - 1.0 / _GRID
+
+
+def min_samples_per_class(target_risk_alpha: float) -> int:
+    """Smallest per-class calibration size for which the conformal bound is attainable.
+
+    The split-conformal quantile is the ⌈(m+1)(1-a)⌉-th smallest of m scores, with
+    a = alpha / 2 per class. Once that rank exceeds m, the valid threshold is +infinity
+    ("never decide at Layer 1"), so we need m >= ⌈(1-a)/a⌉. That's 39 per class at
+    alpha=0.05 and 19 at alpha=0.10.
+    """
+    a = target_risk_alpha / 2.0
+    return math.ceil((1.0 - a) / a - 1e-9)
+
+
+@dataclass(frozen=True, slots=True)
 class ConformalCascadeThresholds:
+    """Layer-1 accept/reject cutoffs fitted on a labeled holdout set.
+
+    Scores strictly between ``tau_reject`` and ``tau_accept`` are escalated to Layer 2. Use
+    ``tau_accept`` as `LogitGate(pass_threshold=...)` and ``tau_reject`` as ``fail_threshold``.
+
+    When ``guarantee_holds`` is True: the false-accept rate on negatives and the false-reject
+    rate on positives are each <= alpha/2, so the overall Layer-1 error rate is <= alpha.
+    This is a marginal guarantee, in expectation over the calibration draw, and holds only for
+    inputs exchangeable with the calibration set. Refit whenever the model, prompt template,
+    or input distribution changes. When False, the thresholds are a best-effort heuristic.
+    """
+
     tau_reject: float  # Reject immediately at Layer 1 if P(Pass) <= tau_reject
     tau_accept: float  # Accept immediately at Layer 1 if P(Pass) >= tau_accept
     target_risk_alpha: float  # Maximum tolerated error rate at Layer 1
     empirical_escalation_rate: float
     calibration_set_size: int
+    guarantee_holds: bool = True
+    min_samples_per_class: int = 0
+    num_positive: int = 0
+    num_negative: int = 0
 
 
 def calibrate_cascade_thresholds(
@@ -23,11 +72,25 @@ def calibrate_cascade_thresholds(
     ground_truth_labels: Sequence[bool],
     target_risk_alpha: float = 0.05,
 ) -> ConformalCascadeThresholds:
-    """Computes finite-sample Conformal Selective Classification thresholds
+    """Computes split-conformal selective-classification thresholds for the Layer 1 -> 2 handoff.
 
-    (tau_reject, tau_accept) for the Layer 1 -> Layer 2 Cascade handoff.
+    Negatives' P(pass) bounds how high a fail can score (``tau_accept``); positives' 1 - P(pass)
+    bounds how low a pass can score (``tau_reject``). Each side gets alpha/2.
 
-    Any sample with tau_reject < P(Pass) < tau_accept is escalated to JudgeGate (Layer 2).
+    The thresholds are deliberately conservative in three ways:
+
+    - **Strictness.** The conformal bound covers ``P > q``, but `LogitGate` accepts on
+      ``P >= pass_threshold``. Thresholds are moved one 4-decimal step past the quantile so
+      that ties with calibration scores (common, since probabilities are rounded) can't
+      leak through.
+    - **Rounding** always moves away from the decision region: accept rounds up, reject
+      rounds down.
+    - **Crossing.** If the raw cutoffs meet or cross (heavily overlapping classes), both move
+      outward around their midpoint. That only widens the escalation band.
+
+    If a class has fewer than `min_samples_per_class` samples, no finite threshold carries
+    the guarantee. The result then has ``guarantee_holds=False`` and a `CalibrationWarning`
+    is emitted, instead of a number being quietly passed off as a bound.
 
     Parameters:
         calibrated_probs: Model predicted pass probabilities P(Pass) in [0.0, 1.0].
@@ -35,7 +98,7 @@ def calibrate_cascade_thresholds(
         target_risk_alpha: Maximum tolerated error rate at Layer 1 (default: 0.05).
 
     Returns:
-        ConformalCascadeThresholds with bounded tau_reject and tau_accept cutoffs.
+        ConformalCascadeThresholds with conservative tau_reject and tau_accept cutoffs.
     """
     n = len(calibrated_probs)
     if n != len(ground_truth_labels) or n < 10:
@@ -46,48 +109,69 @@ def calibrate_cascade_thresholds(
             f"target_risk_alpha must be strictly between 0.0 and 1.0, got {target_risk_alpha}"
         )
 
-    # Separate non-conformity scores for negative and positive samples
     # For ground truth False (0), high P(Pass) is a false-acceptance risk
-    neg_scores = sorted(
-        [float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if not y]
-    )
+    neg_scores = sorted(float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if not y)
     # For ground truth True (1), low P(Pass) is a false-rejection risk
-    pos_scores = sorted(
-        [1.0 - float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if y]
-    )
+    pos_scores = sorted(1.0 - float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if y)
 
     if not neg_scores or not pos_scores:
         raise ValueError(
             "Calibration set must contain both positive and negative ground truth labels."
         )
 
-    # Finite-sample conformal quantile index: ceil((m + 1) * (1 - alpha)) - 1
-    def _conformal_quantile(scores: list[float], alpha: float) -> float:
-        m = len(scores)
-        q_idx = min(math.ceil((m + 1) * (1.0 - alpha)) - 1, m - 1)
-        q_idx = max(q_idx, 0)
-        return scores[q_idx]
-
     half_alpha = target_risk_alpha / 2.0
-    tau_accept = _conformal_quantile(neg_scores, half_alpha)
-    one_minus_tau_reject = _conformal_quantile(pos_scores, half_alpha)
-    tau_reject = 1.0 - one_minus_tau_reject
+    required = min_samples_per_class(target_risk_alpha)
 
-    # Ensure non-crossing interval
-    if tau_reject >= tau_accept:
-        midpoint = 0.5 * (tau_reject + tau_accept)
-        tau_reject = min(tau_reject, midpoint - 0.05)
-        tau_accept = max(tau_accept, midpoint + 0.05)
+    def _conformal_quantile(scores: list[float]) -> tuple[float, bool]:
+        """Returns the ⌈(m+1)(1-a)⌉-th order statistic, and whether that rank exists."""
+        m = len(scores)
+        rank = math.ceil((m + 1) * (1.0 - half_alpha) - 1e-9)
+        return scores[max(min(rank, m), 1) - 1], rank <= m
+
+    q_accept, accept_ok = _conformal_quantile(neg_scores)
+    q_reject, reject_ok = _conformal_quantile(pos_scores)
+    raw_accept, raw_reject = q_accept, 1.0 - q_reject
+
+    tau_accept = _strictly_above4(raw_accept)
+    tau_reject = _strictly_below4(raw_reject)
+    if raw_reject >= raw_accept:
+        midpoint = 0.5 * (raw_reject + raw_accept)
+        tau_reject = min(tau_reject, _floor4(midpoint - 0.05))
+        tau_accept = max(tau_accept, _ceil4(midpoint + 0.05))
+
+    # Thresholds outside [0, 1] mean "never decide on this side". LogitGate's range is [0, 1];
+    # pinning there admits only exact saturation (P == 1.0 / P == 0.0, |log-odds| > 50), and
+    # if a calibration point itself sits at saturation, the guarantee can't be expressed.
+    saturated = raw_accept >= 1.0 or raw_reject <= 0.0
+    tau_accept = min(tau_accept, 1.0)
+    tau_reject = max(tau_reject, 0.0)
+
+    guarantee_holds = accept_ok and reject_ok and not saturated
+    if not guarantee_holds:
+        import warnings
+
+        from logitgate.exceptions import CalibrationWarning
+
+        warnings.warn(
+            f"Conformal guarantee does not hold at alpha={target_risk_alpha}: need >= {required} "
+            f"positives and >= {required} negatives (have {len(pos_scores)} / {len(neg_scores)})"
+            + ("; a calibration score sits at P=0 or P=1" if saturated else "")
+            + ". Thresholds are best-effort only.",
+            CalibrationWarning,
+            stacklevel=2,
+        )
 
     escalated = sum(1 for p in calibrated_probs if tau_reject < p < tau_accept)
-    escalation_rate = escalated / float(n)
-
     return ConformalCascadeThresholds(
-        tau_reject=round(max(0.01, tau_reject), 4),
-        tau_accept=round(min(0.99, tau_accept), 4),
+        tau_reject=tau_reject,
+        tau_accept=tau_accept,
         target_risk_alpha=target_risk_alpha,
-        empirical_escalation_rate=round(escalation_rate, 4),
+        empirical_escalation_rate=round(escalated / float(n), 4),
         calibration_set_size=n,
+        guarantee_holds=guarantee_holds,
+        min_samples_per_class=required,
+        num_positive=len(pos_scores),
+        num_negative=len(neg_scores),
     )
 
 

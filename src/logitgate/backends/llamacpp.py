@@ -11,6 +11,7 @@ from logitgate.backends.base import (
     GenerativeBackend,
     LogitBackend,
     strip_reasoning_blocks,
+    translate_transport_errors,
 )
 
 
@@ -20,6 +21,9 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
       Mode A: In-process llama_cpp.Llama instance (via create_chat_completion)
       Mode B: llama-server HTTP endpoint (/v1/chat/completions with /completion fallback)
     """
+
+    service_name = "llama.cpp server"
+    connect_hint = "Is llama-server running? (e.g. `llama-server -m model.gguf --port 8080`)"
 
     def __init__(
         self,
@@ -207,6 +211,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
                 payload[k] = v
         return payload
 
+    @translate_transport_errors
     def query_top_logprobs(
         self,
         prompt: str,
@@ -240,6 +245,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         resp.raise_for_status()
         return self._extract_completion_logprobs(resp.json())
 
+    @translate_transport_errors
     async def aquery_top_logprobs(
         self,
         prompt: str,
@@ -274,6 +280,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         resp.raise_for_status()
         return self._extract_completion_logprobs(resp.json())
 
+    @translate_transport_errors
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         if self.llm is not None:
             return self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs)
@@ -312,6 +319,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         tokens = data.get("tokens_predicted", data.get("tokens_evaluated", 0))
         return strip_reasoning_blocks(content), tokens
 
+    @translate_transport_errors
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         if self.llm is not None:
             loop = asyncio.get_running_loop()

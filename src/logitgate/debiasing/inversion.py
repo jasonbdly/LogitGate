@@ -1,7 +1,32 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+
+def render_candidate(candidate: Any) -> str:
+    """Renders an artifact the way the model would see it in production.
+
+    Agents mostly validate *structured* outputs: tool-call arguments, API payloads, Pydantic
+    models. ``str(dict)`` gives a Python repr (single quotes, ``True``/``None``) that models read
+    as code rather than data, and that never matches what a tool actually emitted. These are
+    rendered as indented JSON instead. Strings pass through untouched.
+    """
+    if isinstance(candidate, str):
+        return candidate.strip()
+    model_dump_json = getattr(candidate, "model_dump_json", None)  # Pydantic v2 models
+    if callable(model_dump_json) and not isinstance(candidate, type):
+        return str(model_dump_json(indent=2))
+    if dataclasses.is_dataclass(candidate) and not isinstance(candidate, type):
+        candidate = dataclasses.asdict(candidate)
+    if isinstance(candidate, (Mapping, list, tuple)):
+        try:
+            return json.dumps(candidate, indent=2, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            pass  # e.g. non-string dict keys mixed with unorderable types
+    return str(candidate).strip()
 
 
 def compile_binary_prompt(
@@ -18,7 +43,7 @@ def compile_binary_prompt(
     When query_first=True, the rubric and candidate artifact form a 100% byte-identical
     static prefix across both Pass 1 and Pass 2, allowing KV-cache hit rates > 99%.
     """
-    cand_str = str(candidate).strip()
+    cand_str = render_candidate(candidate)
     rubric_str = rubric.strip()
 
     if query_first:
@@ -75,7 +100,7 @@ def compile_batch_binary_prompt(
     if rubric_index < 0 or rubric_index >= len(rubrics):
         raise IndexError(f"rubric_index {rubric_index} out of bounds for rubrics list of size {len(rubrics)}")
 
-    cand_str = str(candidate).strip()
+    cand_str = render_candidate(candidate)
     target_rubric = rubrics[rubric_index].strip()
 
     t_pass = pass_token.strip().upper()
@@ -120,7 +145,7 @@ def compile_choice_prompt(
     """
     Compiles a discrete multi-choice prompt with identical static prefix.
     """
-    cand_str = str(candidate).strip()
+    cand_str = render_candidate(candidate)
     q_str = question.strip()
 
     if query_first:
@@ -155,7 +180,7 @@ def compile_score_prompt(
     corresponds to lowest quality, enabling symmetric score debiasing with
     byte-identical prefix caching.
     """
-    cand_str = str(candidate).strip()
+    cand_str = render_candidate(candidate)
     rubric_str = rubric.strip()
 
     if query_first:

@@ -10,13 +10,15 @@
 
 **Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs.**
 
-LogitGate replaces slow, multi-token LLM-as-a-judge critiques (5–20s) with calibrated first-token logit gates (**36–110 ms**) and a 3-layer cascaded routing pipeline (`ASTGate >> LogitGate >> JudgeGate`), saving 90%–98% of evaluation tokens and wall-clock time while canceling token prior and positional biases.
+LLM-as-a-judge asks a model to write a critique and then a verdict. That costs a full autoregressive generation per check: 1.5–6 s and a few hundred tokens on our hardware. LogitGate reads the verdict straight from the **first-token log-probabilities** (`max_tokens=1`, 0 generated tokens), cancels the model's label-order prior with a forward + reverse pass, and only falls back to a generative judge when that read is genuinely ambiguous.
+
+Measured on the repo's 24-case multi-domain suite (RTX 4070, Ollama, [full methodology](docs/benchmarks.md)): **36–41 ms** single-pass and **90–113 ms** debiased per check. End-to-end, the cascade ran **10.6x–17x** faster than a `think=False` generative judge, at 23/24 accuracy versus the judge's 23–24/24. On pure CPU the gap shrinks to 1.4x, because prefill dominates there. Don't take our word for it: [`logitgate benchmark`](#reproduce-the-numbers-on-your-hardware) reruns the comparison on your model in about a minute.
 
 ---
 
 ## How It Works in 60 Seconds
 
-When evaluating whether an LLM output satisfies a rubric, traditional frameworks prompt a model to generate a 200–500 word critique before outputting `PASS` or `FAIL`. This takes **5 to 20 seconds**, consumes hundreds of tokens, and suffers from recency and positional biases.
+When evaluating whether an LLM output satisfies a rubric, traditional frameworks prompt a model to generate a 200–500 word critique before outputting `PASS` or `FAIL`. That takes **seconds per check**, consumes hundreds of tokens, and is sensitive to label order and position.
 
 `LogitGate` uses a **3-layer cascaded pipeline**:
 
@@ -49,7 +51,7 @@ When evaluating whether an LLM output satisfies a rubric, traditional frameworks
 ## Installation
 
 ```bash
-# Core package (zero dependencies except pydantic & httpx)
+# Core package: only pydantic + httpx
 pip install logitgate
 
 # With optional framework integrations:
@@ -60,6 +62,28 @@ pip install "logitgate[deepeval]"    # DeepEval System-1 metrics
 pip install "logitgate[recurrent]"   # Elastic recurrent looping (NVIDIA Dory-4B)
 pip install "logitgate[all]"         # All integrations
 ```
+
+---
+
+## Pick a Backend (10 seconds)
+
+LogitGate needs an endpoint that returns **token log-probabilities**. Anything below works; a gate's `backend=` argument overrides the global default.
+
+```bash
+export LOGITGATE_BACKEND="ollama://localhost:11434/qwen2.5:7b"   # Ollama
+export LOGITGATE_BACKEND="vllm://localhost:8000/v1"              # vLLM / any OpenAI-compatible server
+export LOGITGATE_BACKEND="llamacpp://localhost:8080"             # llama-server
+export LOGITGATE_BACKEND="stub://"                               # offline stub for CI plumbing (fixed P=0.95)
+```
+
+With nothing configured, LogitGate falls back to the offline stub and emits a one-time `StubBackendWarning`, so a fake `P=0.95` never passes for a real result. Errors say what to do next instead of dumping an `httpx` traceback:
+
+```text
+logitgate.exceptions.BackendUnavailableError: Cannot connect to Ollama at http://localhost:11434.
+Is ollama running? (start it with `ollama serve`) Or set backend='stub://' for offline testing.
+```
+
+A missing Ollama model suggests the exact `ollama pull <model>` command, an OpenAI 401 points at `OPENAI_API_KEY`, and a cold-model timeout says so. `BackendUnavailableError` is also a `ConnectionError`, so existing retry logic keeps working.
 
 ---
 
@@ -104,26 +128,28 @@ print(f"Tokens Generated: {verdict.total_tokens_generated}")  # 0 tokens!
 
 ### 2. Multi-Rubric Batching (Prefix-Preserved KV-Cache Reuse)
 
-When verifying multiple criteria against a candidate artifact, **do not combine them into a single monolithic compound rubric** (which dilutes logit signals and conflates orthogonal requirements). Instead, evaluate isolated atomic rubrics in a single batch using `evaluate_batch`. 
+When verifying multiple criteria against a candidate artifact, **do not combine them into a single monolithic compound rubric** (which dilutes logit signals and conflates orthogonal requirements). Instead, evaluate isolated atomic rubrics with `MultiRubricGate`.
 
-The candidate code is anchored at Token 0, sharing 95–99% of prefix tokens in KV cache across all checks:
+The candidate code is anchored at Token 0, sharing 95–99% of prefix tokens in KV-cache across all checks. `MultiRubricGate` enforces weakest-link aggregation: passes only if *every* atomic rubric passes, and records per-rubric traces so diagnostics show exactly which requirement failed:
 
 ```python
-from logitgate import LogitGate
+from logitgate import MultiRubricGate
 
-# Best Practice: Keep rubrics atomic — evaluate multiple criteria via evaluate_batch
+# Best Practice: Keep rubrics atomic — evaluate multiple criteria via MultiRubricGate
 rubrics = [
     "Does the function calculate Fibonacci numbers recursively?",
     "Does the function explicitly handle non-positive inputs (n <= 0)?",
     "Does the function include parameter and return type annotations?",
 ]
 
-gate = LogitGate("Base rubric")
+gate = MultiRubricGate(rubrics)
 
 # Evaluates all 3 rubrics in a single batch reusing the shared KV-cache prefix
-verdicts = gate.evaluate_batch(candidate_code, rubrics)
+verdict = gate(candidate_code)
+print(f"Passed: {verdict.passed} | {verdict.reason}")
 
-for rubric, v in zip(rubrics, verdicts):
+# Or inspect individual per-rubric verdicts:
+for rubric, v in zip(rubrics, gate.evaluate_each(candidate_code)):
     status = "PASS" if v.passed else "FAIL"
     print(f"[{status}] P={v.probability:.4f} | {rubric}")
 ```
@@ -137,12 +163,80 @@ for rubric, v in zip(rubrics, verdicts):
 | **`ASTGate`** | Layer 0 | **< 0.1 ms** | 0 | Sub-millisecond deterministic checks: Python syntax, forbidden imports, regex, acyclic DAGs, custom callables. |
 | **`ContractGate`** | Layer 0 | **< 0.1 ms** | 0 | General-domain contract validation: Pydantic models, JSON Schemas, length bounds, required sections. |
 | **`LogitGate`** | Layer 1 | **~40–110 ms** | 0 | Calibrated binary classification from first-token logits using symmetric log-odds debiasing ($\bar{L} = \frac{L_1 + L_2}{2T}$). |
+| **`MultiRubricGate`** | Layer 1 | **~50–140 ms** | 0 | Atomic multi-rubric verification sharing KV prefix. Weakest-link aggregation (fails if any criterion fails). |
 | **`ChoiceGate`** | Layer 1 | **~40–120 ms** | 0 | Discrete K-ary routing and intent classification across arbitrary string options with permutation averaging. |
 | **`ScoreGate`** | Layer 1 | **~50–160 ms** | 0 | Continuous probability-weighted rubric scoring (𝔼[S] = Σ s · P(s)) with inverted scale debiasing. |
 | **`JudgeGate`** | Layer 2 | **1.5–5.0 s** | 60–300 | Generative System-2 reasoning judge with reason-then-verdict parsing and self-healing 1-token logit probes. |
 | **`Cascade`** | 0 $\to$ 2 | **~40–120 ms\*** | 0\* | Chained pipeline (`gate_a >> gate_b`). Fast passes short-circuit Layer 2 entirely. |
 
 *\*Typical latency on non-ambiguous inputs.*
+
+---
+
+## Where LogitGate Fits (and Where It Doesn't)
+
+| Tool | What it does | How LogitGate relates |
+| :--- | :--- | :--- |
+| **DeepEval / G-Eval** | Offline evaluation suites and CI scoring; G-Eval weights score tokens by probability. | Complementary. LogitGate is the *inline* path: a sub-100 ms check you can put between agent turns. It ships a DeepEval integration (`LogitGateMetric`) for suites. |
+| **RouteLLM** | Picks *which model generates* a response, before generation. | Different stage. LogitGate judges the output *after* generation. `ChoiceGate` can route, but on content, not on model cost. |
+| **Flow-Judge, Lynx, Prometheus 2** | Dedicated fine-tuned judge models that reason autoregressively. | LogitGate is non-autoregressive and model-agnostic. It projects a verdict from the first-token logits of a model you already serve, with no extra VRAM. A fine-tuned judge works fine as the Layer-2 `JudgeGate` backend. |
+
+**When not to use it:**
+
+- **No logprobs, no LogitGate.** APIs that don't expose `top_logprobs` (e.g. Anthropic) can't host Layer 1. OpenAI caps `top_logprobs` at 20, which is enough for binary and small-K gates.
+- **Multi-step reasoning rubrics** ("is this 12-step derivation correct?") exceed what a single forward pass can judge. Accuracy drops on our reasoning-depth suite ([falsification boundaries](docs/benchmarks.md)). Let those escalate to `JudgeGate`, or decompose them into atomic rubrics.
+- **Tiny models on CPU.** 1–1.5B models are fast but reach 58–63% cascade accuracy on our multi-domain suite. Measure before you trust them.
+
+---
+
+## Reproduce the Numbers on Your Hardware
+
+```bash
+logitgate benchmark --backend ollama://localhost:11434 --model qwen2.5:7b
+logitgate benchmark --backend vllm://localhost:8000/v1 --model Qwen/Qwen2.5-7B-Instruct \
+    --dataset benchmarks/data/multi_domain_24.json --repeat 3 --json > results.json
+```
+
+The command runs the same cases through three configurations and reports p50/p95 latency, generated tokens, LLM calls per case, accuracy, and the cascade's fast-path rate:
+
+1. A generative `JudgeGate` alone (`think=False` by default, so the baseline is a *fast* judge)
+2. A single `LogitGate`
+3. `LogitGate >> JudgeGate` (`on_ambiguous_only`)
+
+Modes run as separate passes after an untimed warm-up, so model load time isn't charged to whichever mode runs first. `--json` records the LogitGate version, backend, model, platform, and a dataset hash, so a result can be traced to exactly what produced it. With the debiased default, LogitGate makes **two** forward passes per check, and the report counts both.
+
+---
+
+## Custom Gates & Routing Traits
+
+`Cascade` never checks concrete classes. It routes on three traits declared on every gate, so wrappers, decorators, and your own gates get the same short-circuiting as the built-ins:
+
+| Trait | Meaning | Built-ins |
+| :--- | :--- | :--- |
+| `layer_tier` | `0` deterministic (failures are final), `1` single forward pass (failures may escalate), `2` generative | `ASTGate`=0, `LogitGate`/`ChoiceGate`/`ScoreGate`=1, `JudgeGate`=2 |
+| `can_fast_path` | A PASSED verdict skips the next generative gate | `False` for `ASTGate` (a valid schema says nothing about semantics) |
+| `escalation_policy` | When a tier-2 gate runs: `on_ambiguous_or_fail`, `on_ambiguous_only`, `always` | `JudgeGate(trigger=...)` |
+
+```python
+from logitgate import BaseGate, DecisionStatus, JudgeGate, LayerTrace, Verdict
+
+class RegexPIIGate(BaseGate):
+    """Deterministic: a hit is a decisive FAIL; a miss proves nothing semantic."""
+
+    name = "RegexPII"
+    layer_tier = 0
+    can_fast_path = False
+
+    def evaluate(self, candidate, **kwargs):
+        leaked = "@" in str(candidate)
+        status = DecisionStatus.FAILED if leaked else DecisionStatus.PASSED
+        trace = LayerTrace(layer_name=self.name, status=status, latency_ms=0.01)
+        return Verdict(passed=not leaked, status=status, triggered_layer=self.name,
+                       total_latency_ms=0.01, traces=[trace])
+
+pipeline = RegexPIIGate() >> JudgeGate(rubric="Does the reply avoid leaking personal data?")
+print(pipeline.evaluate("Contact jane@example.com").triggered_layer)  # RegexPII; judge never called
+```
 
 ---
 
@@ -198,13 +292,11 @@ For complete research data, mathematical derivations, and production recipes, ex
 
 ## Common Recipes
 
-### Multi-Rubric Batch Evaluation (`evaluate_batch`)
+### Multi-Rubric Batch Evaluation (`MultiRubricGate`)
 Evaluates multiple rubrics against a single candidate artifact while anchoring the candidate at Token 0 to share 95–99% of prefix tokens in KV-cache:
 
 ```python
-from logitgate import LogitGate
-
-gate = LogitGate("Base rubric")
+from logitgate import MultiRubricGate
 
 rubrics = [
     "Does the code include full type annotations?",
@@ -212,8 +304,9 @@ rubrics = [
     "Does the code implement proper error handling?",
 ]
 
+gate = MultiRubricGate(rubrics)
 candidate_code = "def fetch(url: str, timeout: int = 10) -> str: pass"
-verdicts = gate.evaluate_batch(candidate_code, rubrics)
+verdicts = gate.evaluate_each(candidate_code)
 
 for rubric, v in zip(rubrics, verdicts):
     print(f"[{'PASS' if v.passed else 'FAIL'}] P={v.probability:.2f} | {rubric}")
@@ -247,7 +340,9 @@ from logitgate import ScoreGate
 
 scorer = ScoreGate(
     rubric="Rate the architectural code quality from 1 (disastrous) to 5 (flawless):",
-    scale=(1, 5),
+    min_score=1,
+    max_score=5,
+    threshold=3.5,
     symmetric_debiasing=True,  # Evaluates 1->5 and 5->1 to eliminate scale anchoring
 )
 
@@ -272,9 +367,17 @@ cat schema.json | logitgate eval --rubric "Must be valid JSON schema"
 # Replay and explain a frozen failure snapshot from CI
 logitgate explain .logitgate/failures/latest.json
 
+# Inspect margins, entropy, and label-order bias without calling any model
+logitgate explain --offline
+
+# Judge vs LogitGate vs cascade latency/cost on your backend
+logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:7b"
+
 # Auto-calibrate model temperature on micro-dataset
 logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b"
 ```
+
+Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreachable or misconfigured.
 
 ---
 
@@ -287,7 +390,7 @@ If you use LogitGate in your research or production systems, please cite it as f
   author = {Jason Bradley},
   title = {LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
-  version = {0.2.3},
+  version = {0.3.0},
   url = {https://github.com/jasonbdly/LogitGate},
   license = {Apache-2.0}
 }

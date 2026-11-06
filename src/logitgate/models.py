@@ -1,3 +1,17 @@
+"""Public, serializable result types.
+
+Data-layout policy for the package:
+
+- **Pydantic models** (this module, `VerdictSnapshot`, `CalibrationResult`) are reserved for
+  objects that cross a boundary: returned to users, written to disk, or replayed from JSON.
+  Validation and `model_dump_json()` are worth their cost there.
+- **Frozen, slotted dataclasses** (`SurfaceTokenMap`, `DebiasedLogitResult`,
+  `VRAMWatermarkStatus`, `ConformalCascadeThresholds`, `RecurrentLoopTrace`) hold internal
+  numeric records built on hot paths, e.g. once per recurrent loop or per forward pass. They
+  skip validation, carry no per-instance ``__dict__``, and immutability makes them safe to
+  share across threads and cache.
+"""
+
 from __future__ import annotations
 
 from enum import Enum

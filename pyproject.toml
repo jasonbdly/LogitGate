@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logitgate"
-version = "0.2.3"
+version = "0.3.0"
 description = "Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -62,6 +62,8 @@ all = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Many tests rely on the implicit offline stub on purpose; the warning has dedicated tests.
+filterwarnings = ["ignore::logitgate.exceptions.StubBackendWarning"]
 
 [tool.mypy]
 warn_unused_ignores = true

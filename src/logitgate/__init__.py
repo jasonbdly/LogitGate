@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, Any
+
 from logitgate.backends.base import (
     GenerativeBackend,
     LogitBackend,
@@ -57,22 +59,22 @@ from logitgate.debiasing.softmax import (
 )
 from logitgate.exceptions import (
     BackendError,
+    BackendTimeoutError,
+    BackendUnavailableError,
     CalibrationError,
     ConfigurationError,
     ContractViolationError,
     LogitGateError,
+    StubBackendWarning,
 )
 from logitgate.gates.ast_gate import ASTFailureCode, ASTGate, ContractGate
-from logitgate.gates.base import BaseGate
+from logitgate.gates.base import BaseGate, EscalationPolicy
 from logitgate.gates.judge_gate import JudgeGate
-from logitgate.gates.logit_gate import ChoiceGate, LogitGate, ScoreGate
+from logitgate.gates.logit_gate import ChoiceGate, LogitGate, MultiRubricGate, ScoreGate
 from logitgate.hardware.memory_guard import (
     PCIeSpilloverGuard,
     VRAMWatermarkStatus,
 )
-from logitgate.integrations.deepeval import LogitGateMetric, LogitGateSystemOneModel
-from logitgate.integrations.langgraph import as_conditional_edge
-from logitgate.integrations.pytest_plugin import check
 from logitgate.models import (
     DecisionStatus,
     LayerTrace,
@@ -80,13 +82,47 @@ from logitgate.models import (
 )
 from logitgate.snapshot import VerdictSnapshot
 
-__version__ = "0.2.3"
+if TYPE_CHECKING:
+    from logitgate.integrations.deepeval import LogitGateMetric, LogitGateSystemOneModel
+    from logitgate.integrations.langgraph import (
+        as_async_conditional_edge,
+        as_conditional_edge,
+    )
+    from logitgate.integrations.pytest_plugin import check
+
+# Integrations resolve on first access; see logitgate/integrations/__init__.py for why.
+_LAZY_INTEGRATIONS = {
+    "LogitGateMetric",
+    "LogitGateSystemOneModel",
+    "MultiRubricGate",
+    "as_async_conditional_edge",
+    "as_conditional_edge",
+    "check",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_INTEGRATIONS:
+        from logitgate import integrations
+
+        value = getattr(integrations, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_LAZY_INTEGRATIONS})
+
+__version__ = "0.3.0"
 
 __all__ = [
     "KNOWN_MODEL_TEMPERATURES",
     "ASTFailureCode",
     "ASTGate",
     "BackendError",
+    "BackendTimeoutError",
+    "BackendUnavailableError",
     "BaseGate",
     "CalibrationError",
     "CalibrationResult",
@@ -98,6 +134,7 @@ __all__ = [
     "ContractViolationError",
     "DebiasedLogitResult",
     "DecisionStatus",
+    "EscalationPolicy",
     "GenerativeBackend",
     "JudgeGate",
     "LayerTrace",
@@ -108,6 +145,7 @@ __all__ = [
     "LogitGateError",
     "LogitGateMetric",
     "LogitGateSystemOneModel",
+    "MultiRubricGate",
     "OllamaBackend",
     "OpenAICompatBackend",
     "PCIeSpilloverGuard",
@@ -116,10 +154,12 @@ __all__ = [
     "RecurrentPyTorchBackend",
     "ScoreGate",
     "StubBackend",
+    "StubBackendWarning",
     "SurfaceTokenMap",
     "VRAMWatermarkStatus",
     "Verdict",
     "VerdictSnapshot",
+    "as_async_conditional_edge",
     "as_conditional_edge",
     "auto_calibrate_backend",
     "calibrate_cascade_thresholds",

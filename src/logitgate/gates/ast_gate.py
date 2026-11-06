@@ -4,34 +4,57 @@ import ast
 import json
 import re
 import time
+from collections import deque
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from logitgate.gates.base import BaseGate
+from logitgate.gates.base import TIER_DETERMINISTIC, BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
+
+# Fallback import scanner for code that doesn't parse (e.g. a snippet with a syntax error
+# when only `forbidden_imports` is enabled). Captures `os.path` from `import os.path` and
+# `from os.path import join`.
+_IMPORT_STMT_RE = re.compile(r"^\s*(?:import|from)\s+([a-zA-Z0-9_\.]+)", re.MULTILINE)
+
+
+def _compile_user_pattern(pattern: str) -> re.Pattern[str] | None:
+    """Compiles a user-supplied pattern once. ``None`` means "treat as a literal substring".
+
+    Users routinely pass strings like ``"eval("`` or ``"$HOME"`` that are invalid or
+    unintended regexes, so invalid patterns degrade to literal matching instead of raising.
+    """
+    try:
+        return re.compile(pattern)
+    except re.error:
+        return None
 
 
 def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
-    """
-    Validates that task dependencies exist and contain no cycles.
-    Returns error message if invalid, None if acyclic and all dependencies exist.
+    """Validates that every dependency exists and the dependency graph is acyclic.
+
+    Uses Kahn's algorithm with a deque, so it runs in O(V + E). (``list.pop(0)`` is O(V) per
+    pop, which makes the whole sort O(V^2) on large plans.) Node order follows the input so
+    error messages are stable across runs and don't depend on hash seeds.
+
+    Returns:
+        A human-readable error message, or ``None`` if the graph is a valid DAG.
     """
     if not isinstance(tasks, list):
         return f"Expected list of tasks for DAG check, got {type(tasks).__name__}"
 
-    task_ids = set()
+    task_ids: dict[str, None] = {}  # insertion-ordered set
     for t in tasks:
         if not isinstance(t, dict):
             return f"Expected task node to be dict, got {type(t).__name__}"
         tid = t.get("id") or t.get("task_id")
         if not tid:
             return f"Task node missing required 'id' or 'task_id': {t}"
-        task_ids.add(str(tid))
+        task_ids[str(tid)] = None
 
     adj: dict[str, list[str]] = {tid: [] for tid in task_ids}
-    in_degree: dict[str, int] = {tid: 0 for tid in task_ids}
+    in_degree: dict[str, int] = dict.fromkeys(task_ids, 0)
 
     for t in tasks:
         tid = str(t.get("id") or t.get("task_id"))
@@ -43,17 +66,15 @@ def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
             adj[dep_str].append(tid)
             in_degree[tid] += 1
 
-    # Kahn's algorithm
-    queue = [tid for tid, deg in in_degree.items() if deg == 0]
+    ready = deque(tid for tid, deg in in_degree.items() if deg == 0)
     visited_count = 0
-
-    while queue:
-        curr = queue.pop(0)
+    while ready:
+        curr = ready.popleft()
         visited_count += 1
-        for neighbor in adj.get(curr, []):
+        for neighbor in adj[curr]:
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
-                queue.append(neighbor)
+                ready.append(neighbor)
 
     if visited_count != len(task_ids):
         unresolved = [tid for tid, deg in in_degree.items() if deg > 0]
@@ -95,6 +116,10 @@ class ASTGate(BaseGate):
         name: Identifier for this gate instance.
     """
 
+    layer_tier = TIER_DETERMINISTIC
+    # A passing structural check carries no semantic signal: a downstream judge must still run.
+    can_fast_path = False
+
     def __init__(
         self,
         syntax: bool = False,
@@ -118,6 +143,8 @@ class ASTGate(BaseGate):
         self.max_length = max_length
         self.validators = list(validators) if validators else None
         self.name = name
+        self._forbidden_res = [(p, _compile_user_pattern(p)) for p in self.forbidden_patterns or []]
+        self._required_res = [(s, _compile_user_pattern(s)) for s in self.required_sections or []]
 
     def __repr__(self) -> str:
         features = []
@@ -314,10 +341,10 @@ class ASTGate(BaseGate):
                         found_imports.add(node.module)
             else:
                 # Regex fallback if AST not parsed
-                for match in re.finditer(r"^\s*(?:import|from)\s+([a-zA-Z0-9_\.]+)", candidate_str, re.MULTILINE):
+                for match in _IMPORT_STMT_RE.finditer(candidate_str):
                     found_imports.add(match.group(1))
 
-            for imp in found_imports:
+            for imp in sorted(found_imports):
                 for forbidden in self.forbidden_imports:
                     if imp == forbidden or imp.startswith(f"{forbidden}."):
                         err = f"Forbidden import detected: '{imp}'"
@@ -329,38 +356,29 @@ class ASTGate(BaseGate):
                         )
 
         # 3. Forbidden Patterns
-        if self.forbidden_patterns:
-            for pattern in self.forbidden_patterns:
-                try:
-                    matched = bool(re.search(pattern, candidate_str))
-                except re.error:
-                    matched = pattern in candidate_str
-                if matched:
-                    err = f"Forbidden pattern matched: '{pattern}'"
-                    return self._fail(
-                        err,
-                        ASTFailureCode.FORBIDDEN_PATTERN,
-                        t0,
-                        {"pattern": pattern},
-                    )
+        for pattern, compiled in self._forbidden_res:
+            matched = bool(compiled.search(candidate_str)) if compiled else pattern in candidate_str
+            if matched:
+                err = f"Forbidden pattern matched: '{pattern}'"
+                return self._fail(
+                    err,
+                    ASTFailureCode.FORBIDDEN_PATTERN,
+                    t0,
+                    {"pattern": pattern},
+                )
 
-        # 4. Required Sections
-        if self.required_sections:
-            for section in self.required_sections:
-                has_section = section in candidate_str
-                if not has_section:
-                    try:
-                        has_section = bool(re.search(section, candidate_str))
-                    except re.error:
-                        has_section = False
-                if not has_section:
-                    err = f"Missing required section: '{section}'"
-                    return self._fail(
-                        err,
-                        ASTFailureCode.MISSING_SECTION,
-                        t0,
-                        {"missing_section": section},
-                    )
+        # 4. Required Sections (literal match first: headers like "## Security (v2)" are not
+        # meant as regexes, and a literal hit is cheaper than a regex search anyway)
+        for section, compiled in self._required_res:
+            has_section = section in candidate_str or bool(compiled and compiled.search(candidate_str))
+            if not has_section:
+                err = f"Missing required section: '{section}'"
+                return self._fail(
+                    err,
+                    ASTFailureCode.MISSING_SECTION,
+                    t0,
+                    {"missing_section": section},
+                )
 
         # 5. Acyclic DAG Check
         if self.acyclic_dag:

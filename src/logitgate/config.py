@@ -149,12 +149,50 @@ def configure(
 
 def reset_config() -> None:
     """Resets global configuration to environment variables and defaults."""
+    global _warned_implicit_stub
     _state.reset()
+    _warned_implicit_stub = False
+
+
+_IMPLICIT_STUB = "stub://default"
+_warned_implicit_stub = False
+
+
+def is_backend_implicit() -> bool:
+    """True when neither `configure(backend=...)` nor ``LOGITGATE_BACKEND`` chose a backend."""
+    return _state.backend is None and "LOGITGATE_BACKEND" not in os.environ
+
+
+def warn_if_implicit_stub(spec: str) -> None:
+    """Warns once if ``spec`` is the stub and nobody explicitly asked for it.
+
+    Without this, ``LogitGate("Is this factual?")("anything")`` returns P=0.95 and looks like
+    it works. That is the worst first impression a first-time user can get.
+    """
+    global _warned_implicit_stub
+    if _warned_implicit_stub or spec != _IMPLICIT_STUB or not is_backend_implicit():
+        return
+    _warned_implicit_stub = True
+    import warnings
+
+    from logitgate.exceptions import StubBackendWarning
+
+    warnings.warn(
+        "No LogitGate backend configured; using the offline stub, which returns a fixed "
+        "P(pass)=0.95 for every input. For real evaluations set LOGITGATE_BACKEND "
+        "(e.g. 'ollama://localhost:11434/qwen2.5:7b', 'vllm://localhost:8000/v1') or call "
+        "logitgate.configure(backend=...). Set LOGITGATE_BACKEND=stub:// to use the stub "
+        "intentionally and silence this warning.",
+        StubBackendWarning,
+        stacklevel=4,
+    )
 
 
 def get_default_backend() -> str:
     """Resolves default backend string via configure() or LOGITGATE_BACKEND."""
-    return LogitGateDefaults.backend
+    backend = LogitGateDefaults.backend
+    warn_if_implicit_stub(backend)
+    return backend
 
 
 def get_default_model() -> str | None:

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-11-05
+
+### Changed (behavior)
+
+These are deliberate fixes. Each one makes runtime behavior match what the docs already promised.
+
+- **`JudgeGate(trigger="always")` now runs after a Layer-1 pass inside a `Cascade`.** It was silently skipped on any upstream PASS, which contradicted the documented "regardless of upstream confidence" semantics.
+- **Gates outside the built-in classes now escalate AMBIGUOUS verdicts** under `on_ambiguous_only`, instead of failing without calling the judge. This affects wrappers and custom gates; the built-in `ScoreGate` and `ChoiceGate` never emit AMBIGUOUS.
+- **Monotonic failure preservation applies to every tier-1 gate.** Before, it only covered `LogitGate`. A decisive `ScoreGate` FAILED followed by `JudgeGate(trigger="on_ambiguous_or_fail")` now stays FAILED; the judge supplies the diagnostic.
+- **`JudgeGate` inherits the rubric of the closest upstream tier-1 gate** (e.g. `ScoreGate`), not only from `LogitGate`.
+- **`JudgeGate` no longer treats arbitrary JSON in a critique as a verdict.** Only objects with a `verdict`, `pass`, or `passed` key count, nested objects parse correctly, and `"pass": "false"` now means false.
+- **HTTP backends raise `BackendError` subclasses instead of raw `httpx` exceptions.** The original is chained as `__cause__`. `BackendUnavailableError` subclasses `ConnectionError` and `BackendTimeoutError` subclasses `TimeoutError`. Code that caught `httpx.HTTPError` from LogitGate calls should catch `BackendError` instead.
+- `JudgeGate` trace latency now includes the self-healing logit probe, when it runs.
+- Cascade reasons now name the skipped layer, e.g. `Fast-path pass at LogitGate (JudgeGate skipped): ...`.
+
+### Added
+- **`MultiRubricGate`:** Atomic multi-rubric evaluation gate with weakest-link aggregation (fails if any criterion fails), per-rubric trace attribution, shared candidate KV-cache prefixing, and bulleted rubric inheritance in `Cascade >> JudgeGate`. Full snapshot persistence and roundtrip `VerdictSnapshot.replay()` support.
+- **Routing traits on `BaseGate`:** `layer_tier`, `can_fast_path`, and `escalation_policy`. `Cascade` routes on these instead of `isinstance`, so custom and wrapped gates get fast-path short-circuiting. Defaults preserve the previous treatment of unrecognized gates. `JudgeGate.trigger` is now an alias of `escalation_policy`.
+- **`logitgate benchmark`:** a reproducible judge vs `LogitGate` vs cascade comparison on your own backend. It reports p50/p95/mean latency, generated tokens, LLM calls per case, accuracy, and fast-path rate. `--json` adds environment metadata and a dataset hash.
+- **`logitgate explain` rewrite:** a per-layer trace table, decision margins in log-odds against both thresholds, interpretation of entropy and label-order bias, forward/reverse probabilities, `--offline` (no model call), and `--color auto|always|never` (honors `NO_COLOR` / `FORCE_COLOR`). If the replay backend is unreachable, the recorded diagnostics still render.
+- **Lazy integration loading (PEP 562):** cut `import logitgate` cold-import latency from ~620ms to ~110ms by deferring `deepeval` and `langgraph` loading until accessed.
+- **LangGraph conditional edge enhancements:** added `as_async_conditional_edge`, explicit `ambiguous_node` routing, and actionable error messages when candidate state keys are missing.
+- **Conformal finite-sample verification:** added `guarantee_holds` tracking and conservative boundary rounding to `calibrate_cascade_thresholds`, issuing a `CalibrationWarning` when calibration sample size $m < \lceil (1 - \alpha/2) / (\alpha/2) \rceil$.
+- **Actionable backend errors** for Ollama, OpenAI-compatible servers, and llama.cpp: how to start the server, `ollama pull <model>` on a missing model, `OPENAI_API_KEY` on 401/403, and cold-load hints on timeouts.
+- **`StubBackendWarning`:** emitted once when no backend is configured and the offline stub is used implicitly. Silence it with `LOGITGATE_BACKEND=stub://`.
+- **`CalibrationWarning`:** emitted when conformal threshold calibration lacks sufficient samples per class for distribution-free error guarantees.
+- CLI exit code `2` for backend errors, printed as one actionable line instead of a traceback.
+- `BaseGate.replay_config()` and `snapshot.persist_failure_snapshot()`, so snapshot persistence has one implementation.
+
+### Refactored
+- `Cascade.evaluate` and `Cascade.aevaluate` now share one generator-based pipeline. Routing, lookahead, and snapshot persistence live in one place; the two drivers differ only in `gate.evaluate` vs `await gate.aevaluate` (`cascade.py`: 579 to 232 lines).
+- The sync/async/batch scoring paths of `LogitGate`, `ChoiceGate`, and `ScoreGate` each collapse into one `_verdict_from_logprobs` (`logit_gate.py`: 1,040 to 692 lines).
+- `JudgeGate` parsing is split into pure functions (`_extract_structured_verdict`, `_extract_keyword_verdict`) with module-level compiled regexes. The logit probe gate is now built once and cached; it was rebuilt, with a disk read, on every parse.
+- `ASTGate`: Kahn's algorithm uses `collections.deque` (O(V+E) instead of O(V²) on wide fan-outs), cycle and import reports are deterministic, and the import scanner plus user patterns are compiled once.
+- Internal numeric records (`SurfaceTokenMap`, `DebiasedLogitResult`, `VRAMWatermarkStatus`, `ConformalCascadeThresholds`, `RecurrentLoopTrace`) are now `@dataclass(frozen=True, slots=True)`.
+- Ollama `generate`/`agenerate` share payload and continuation builders.
+
+### Fixed
+- README `ScoreGate` example used a nonexistent `scale=` argument. A new test executes every README Python block.
+- Removed unused imports in `backends/recurrent.py` (ruff F401).
+
+---
+
 ## [0.2.3] - 2026-11-05
 
 ### Added

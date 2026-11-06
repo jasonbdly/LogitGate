@@ -20,6 +20,56 @@ def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
     return hashlib.sha256(raw).hexdigest()[:8]
 
 
+_SESSION_SNAPSHOTS: list[Path] = []
+
+
+def session_snapshot_paths() -> list[Path]:
+    """Snapshots written by gates in this process, oldest first (feeds the pytest summary)."""
+    return list(_SESSION_SNAPSHOTS)
+
+
+def persist_failure_snapshot(
+    verdict: Verdict,
+    *,
+    candidate: Any,
+    rubric: str,
+    gate_config: dict[str, Any],
+    save_on_fail: bool | None,
+    test_name: str | None = None,
+    snapshot_dir: str | Path | None = None,
+) -> Verdict:
+    """Writes a replayable snapshot for a failed verdict and records its path on the last trace.
+
+    Shared by every gate that persists failures, so the save policy (explicit flag, then
+    `configure()` / ``LOGITGATE_SAVE_FAILURES``) and the "save at most once" guard live in one
+    place. The guard matters for cascades: inner gates run with ``save_on_fail=False`` and the
+    cascade writes a single snapshot containing the full multi-layer trace.
+    """
+    if verdict.passed:
+        return verdict
+
+    from logitgate.config import get_default_save_failures
+
+    should_save = save_on_fail if save_on_fail is not None else get_default_save_failures()
+    if not should_save:
+        return verdict
+    if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
+        return verdict
+
+    snapshot = VerdictSnapshot.from_verdict(
+        verdict=verdict,
+        rubric=rubric,
+        candidate=candidate,
+        test_name=test_name,
+        gate_config=gate_config,
+    )
+    saved_path = snapshot.save(directory=snapshot_dir)
+    _SESSION_SNAPSHOTS.append(saved_path)
+    if verdict.traces:
+        verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
+    return verdict
+
+
 class VerdictSnapshot(BaseModel):
     """
     Deterministic failure snapshot capturing candidate artifact, rubric, verdict,
@@ -197,6 +247,18 @@ class VerdictSnapshot(BaseModel):
         init_kwargs = {k: v for k, v in gate_kwargs.items() if k in allowed_keys}
         effective_backend = backend if backend is not None else gate_kwargs.get("backend")
         effective_model = model if model is not None else gate_kwargs.get("model")
+
+        rubrics = gate_kwargs.get("rubrics")
+        if isinstance(rubrics, list) and rubrics:
+            from logitgate.gates.logit_gate import MultiRubricGate
+
+            multi_gate = MultiRubricGate(
+                rubrics=rubrics,
+                backend=effective_backend,
+                model=effective_model,
+                **init_kwargs,
+            )
+            return multi_gate.evaluate(self.candidate)
 
         gate = LogitGate(
             rubric=self.rubric,

@@ -201,7 +201,7 @@ def compute_shannon_entropy(p_pass: float, eps: float = 1e-12) -> float:
     return -(p_c * math.log2(p_c) + (1.0 - p_c) * math.log2(1.0 - p_c))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SurfaceTokenMap:
     """Maps canonical binary poles to all single-token surface form IDs."""
 
@@ -305,8 +305,10 @@ def marginalize_pole_logprob(
     return lse_pos_f - lse_total_f, lse_neg_f - lse_total_f
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DebiasedLogitResult:
+    """Output of one symmetric (forward + permuted) logit read; see `compute_symmetric_debiased_verdict`."""
+
     calibrated_prob_pass: float
     shannon_entropy: float
     log_odds_pass: float

@@ -9,6 +9,7 @@ from logitgate.backends.base import (
     GenerativeBackend,
     LogitBackend,
     strip_reasoning_blocks,
+    translate_transport_errors,
 )
 from logitgate.config import LogitGateDefaults
 
@@ -20,6 +21,15 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
     Ollama backend supporting first-token logprob extraction with reasoning suppression
     (think: False), persistent connection pooling, and generative diagnostic critiques.
     """
+
+    service_name = "Ollama"
+    connect_hint = "Is ollama running? (start it with `ollama serve`)"
+
+    def transport_hint(self, status_code: int, detail: str) -> str | None:
+        """Turns Ollama's 'model "x" not found, try pulling it first' into the exact command."""
+        if status_code == 404 and "not found" in detail.lower():
+            return f"Pull it first: ollama pull {self.model}"
+        return None
 
     def __init__(
         self,
@@ -131,6 +141,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
                 return lp
         return []
 
+    @translate_transport_errors
     def query_top_logprobs(
         self,
         prompt: str,
@@ -146,6 +157,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
+    @translate_transport_errors
     async def aquery_top_logprobs(
         self,
         prompt: str,
@@ -161,7 +173,12 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
 
-    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+    def build_generate_payload(self, prompt: str, max_tokens: int | None, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Builds the /api/chat payload for a generative critique.
+
+        Thinking defaults on only for budgets >= 256 tokens: with a smaller cap, a reasoning
+        model spends the whole budget inside <think> and never produces a verdict.
+        """
         opts: dict[str, Any] = {
             "temperature": 0.0,
             "num_ctx": self.num_ctx,
@@ -170,6 +187,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
             opts["num_predict"] = max_tokens
         if self.options:
             opts.update(self.options)
+        kwargs = dict(kwargs)
         think_default = max_tokens is None or max_tokens >= 256
         think_val = kwargs.pop("think", think_default)
         if think_val is None:
@@ -188,101 +206,69 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
                 payload["options"].update(v)
             elif k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
-        resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
-        if resp.status_code == 400 and think_val:
-            # Fallback for non-thinking models (e.g. qwen2.5, llama3) that reject think=True
+        return payload
+
+    @staticmethod
+    def _continuation_payload(
+        payload: dict[str, Any], prompt: str, raw_content: str, max_tokens: int | None
+    ) -> dict[str, Any]:
+        """Mid-thought truncation recovery: closes </think> and resumes with think=False.
+
+        If every generated token landed inside <think>, the visible answer is empty. Pre-filling
+        the assistant turn with the partial reasoning plus a closing tag keeps the chain of
+        thought and spends the next budget entirely on the visible verdict.
+        """
+        options = dict(payload["options"])
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        continuation = dict(payload)
+        continuation["messages"] = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": raw_content.rstrip() + "\n</think>\n"},
+        ]
+        continuation["think"] = False
+        continuation["options"] = options
+        return continuation
+
+    @staticmethod
+    def _parse_chat(data: dict[str, Any]) -> tuple[str, int]:
+        return data.get("message", {}).get("content", ""), data.get("eval_count", 0)
+
+    @translate_transport_errors
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+        url = f"{self.base_url}/api/chat"
+        payload = self.build_generate_payload(prompt, max_tokens, kwargs)
+        resp = self.client.post(url, json=payload)
+        if resp.status_code == 400 and payload["think"]:
+            # Non-thinking models (e.g. qwen2.5, llama3) reject think=True with HTTP 400.
             payload["think"] = False
-            think_val = False
-            resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
+            resp = self.client.post(url, json=payload)
         resp.raise_for_status()
-        data = resp.json()
-        content = data.get("message", {}).get("content", "")
-        tokens = data.get("eval_count", 0)
+        content, tokens = self._parse_chat(resp.json())
         visible_text = strip_reasoning_blocks(content)
-
-        # Mid-Thought Truncation Safety Net: True Continuation
-        # If thinking was enabled and 100% of generated tokens were consumed inside <think>,
-        # visible_text is empty while raw content was non-empty. Close </think> and continue
-        # with think=False so all max_tokens go to visible diagnostic output while preserving CoT.
-        if not visible_text and content and think_val:
-            raw_thinking = content.rstrip()
-            assistant_prefill = raw_thinking + "\n</think>\n"
-            continuation_opts = dict(opts)
-            if max_tokens is not None:
-                continuation_opts["num_predict"] = max_tokens
-            continuation_payload = dict(payload)
-            continuation_payload["messages"] = [
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": assistant_prefill},
-            ]
-            continuation_payload["think"] = False
-            continuation_payload["options"] = continuation_opts
-            resp_cont = self.client.post(f"{self.base_url}/api/chat", json=continuation_payload)
+        if not visible_text and content and payload["think"]:
+            resp_cont = self.client.post(url, json=self._continuation_payload(payload, prompt, content, max_tokens))
             resp_cont.raise_for_status()
-            data_cont = resp_cont.json()
-            content_cont = data_cont.get("message", {}).get("content", "")
-            tokens_cont = data_cont.get("eval_count", 0)
+            content_cont, tokens_cont = self._parse_chat(resp_cont.json())
             return strip_reasoning_blocks(content_cont), tokens + tokens_cont
-
         return visible_text, tokens
 
+    @translate_transport_errors
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
-        opts: dict[str, Any] = {
-            "temperature": 0.0,
-            "num_ctx": self.num_ctx,
-        }
-        if max_tokens is not None:
-            opts["num_predict"] = max_tokens
-        if self.options:
-            opts.update(self.options)
-        think_default = max_tokens is None or max_tokens >= 256
-        think_val = kwargs.pop("think", think_default)
-        if think_val is None:
-            think_val = think_default
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "think": think_val,
-            "options": opts,
-        }
-        if self.keep_alive is not None:
-            payload["keep_alive"] = self.keep_alive
-        for k, v in kwargs.items():
-            if k == "options" and isinstance(v, dict):
-                payload["options"].update(v)
-            elif k not in EXCLUDED_INTERNAL_KWARGS:
-                payload[k] = v
-        resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
-        if resp.status_code == 400 and think_val:
+        url = f"{self.base_url}/api/chat"
+        payload = self.build_generate_payload(prompt, max_tokens, kwargs)
+        resp = await self.async_client.post(url, json=payload)
+        if resp.status_code == 400 and payload["think"]:
             payload["think"] = False
-            think_val = False
-            resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
+            resp = await self.async_client.post(url, json=payload)
         resp.raise_for_status()
-        data = resp.json()
-        content = data.get("message", {}).get("content", "")
-        tokens = data.get("eval_count", 0)
+        content, tokens = self._parse_chat(resp.json())
         visible_text = strip_reasoning_blocks(content)
-
-        # Mid-Thought Truncation Safety Net: True Continuation
-        if not visible_text and content and think_val:
-            raw_thinking = content.rstrip()
-            assistant_prefill = raw_thinking + "\n</think>\n"
-            continuation_opts = dict(opts)
-            if max_tokens is not None:
-                continuation_opts["num_predict"] = max_tokens
-            continuation_payload = dict(payload)
-            continuation_payload["messages"] = [
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": assistant_prefill},
-            ]
-            continuation_payload["think"] = False
-            continuation_payload["options"] = continuation_opts
-            resp_cont = await self.async_client.post(f"{self.base_url}/api/chat", json=continuation_payload)
+        if not visible_text and content and payload["think"]:
+            resp_cont = await self.async_client.post(
+                url, json=self._continuation_payload(payload, prompt, content, max_tokens)
+            )
             resp_cont.raise_for_status()
-            data_cont = resp_cont.json()
-            content_cont = data_cont.get("message", {}).get("content", "")
-            tokens_cont = data_cont.get("eval_count", 0)
+            content_cont, tokens_cont = self._parse_chat(resp_cont.json())
             return strip_reasoning_blocks(content_cont), tokens + tokens_cont
-
         return visible_text, tokens

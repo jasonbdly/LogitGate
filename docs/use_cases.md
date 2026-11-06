@@ -18,7 +18,7 @@ In production engineering, **local iteration** and **CI/CD merge gates** have di
 | :--- | :--- | :--- |
 | **Primary Goal** | Fast developer feedback / low-latency routing | **High correctness & minimal false passes** without waiting for LLM essays on clear verdicts |
 | **Preset & Debiasing** | `preset="balanced"` on GPU (`~86ms`), or `preset="fast_triage"` (`1-pass`, `~170ms`) on CPU-only laptops | **`preset="balanced"` or `"strict"` (`symmetric_debiasing=True`)** — always cancel prior token bias |
-| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `evaluate_batch(candidate, rubrics)`** (shared-prefix KV-cache reuse, avoids compound dilution) |
+| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `MultiRubricGate`** (weakest-link aggregation, shared-prefix KV-cache reuse, avoids compound dilution) |
 | **Layer 2 (`JudgeGate`) Trigger** | Omit `JudgeGate`, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 CoT tokens on decisive pass *or* decisive fail; only invokes `JudgeGate` to adjudicate ambiguous borderline cases) |
 
 ```python
@@ -157,18 +157,19 @@ logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b"
 ```
 
 ```python
-from logitgate import LogitGate
-
-evaluator = LogitGate(
-    rubric="Base rubric",
-    logit_temperature="auto",  # Automatically uses cached calibrated temperature
-)
+from logitgate import MultiRubricGate
 
 rubrics = [
     "Is the customer support reply polite and professional?",
     "Does the assistant enforce multi-factor authentication before updating credentials?",
     "Does the response adhere to the company return and refund policy?",
 ]
+
+# Atomic multi-rubric gate with weakest-link aggregation:
+evaluator = MultiRubricGate(
+    rubrics,
+    logit_temperature="auto",  # Automatically uses cached calibrated temperature
+)
 
 support_transcript = (
     "Customer: Please update my account email and process a refund for order #402.\n"
@@ -178,8 +179,11 @@ support_transcript = (
 )
 
 # Evaluates all 3 rubrics in a single batch reusing the shared prompt prefix in KV-cache
-verdicts = evaluator.evaluate_batch(support_transcript, rubrics)
-for r, v in zip(rubrics, verdicts):
+verdict = evaluator(support_transcript)
+print(f"Overall Passed: {verdict.passed} | Reason: {verdict.reason}")
+
+# Or inspect individual per-rubric verdicts:
+for r, v in zip(rubrics, evaluator.evaluate_each(support_transcript)):
     print(f"[{'PASS' if v.passed else 'FAIL'}] P={v.probability:.2f} | {r}")
 ```
 
