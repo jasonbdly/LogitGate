@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-import torch
 
 from logitgate.backends.base import resolve_logit_backend, strip_reasoning_blocks
 from logitgate.backends.dory_recurrent import (
@@ -840,6 +839,8 @@ def test_prefix_broadcast_evaluator_geometry():
 
 
 def test_prefix_broadcast_evaluator_mock_execution():
+    torch = pytest.importorskip("torch")
+
     class MockModelOutput:
         def __init__(self, logits, past_key_values=None):
             self.logits = logits
@@ -886,6 +887,8 @@ def test_prefix_broadcast_evaluator_mock_execution():
 
 
 def test_prefix_broadcast_evaluator_dynamic_cache():
+    torch = pytest.importorskip("torch")
+
     class DummyDynamicCache:
         def __init__(self):
             self.interleaved = False
@@ -922,6 +925,8 @@ def test_prefix_broadcast_evaluator_dynamic_cache():
 
 
 def test_prefix_broadcast_evaluator_evaluate_debiased():
+    torch = pytest.importorskip("torch")
+
     class MockModel(torch.nn.Module):
         def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
             b, s = input_ids.shape
@@ -961,6 +966,7 @@ def test_prefix_broadcast_evaluator_evaluate_debiased():
 # ---------------------------------------------------------------------------
 
 def test_execute_adaptive_recurrent_loops_halts_early():
+    torch = pytest.importorskip("torch")
     h0 = torch.randn(1, 5, 64)
 
     def recurrent_step_fn(h, loop_idx):
@@ -992,6 +998,7 @@ def test_execute_adaptive_recurrent_loops_halts_early():
 
 
 def test_execute_adaptive_recurrent_loops_max_loops():
+    torch = pytest.importorskip("torch")
     h0 = torch.randn(1, 5, 64)
 
     def recurrent_step_fn(h, loop_idx):
@@ -1041,6 +1048,7 @@ def test_pcie_spillover_guard_cpu():
 
 
 def test_pcie_spillover_guard_mocked_cuda():
+    pytest.importorskip("torch")
     guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
 
     with patch("torch.cuda.is_available", return_value=True), \
@@ -1059,6 +1067,7 @@ def test_pcie_spillover_guard_mocked_cuda():
 
 
 def test_pcie_spillover_guard_reserved_memory_risk():
+    pytest.importorskip("torch")
     guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
     with patch("torch.cuda.is_available", return_value=True), \
          patch("torch.cuda.mem_get_info", return_value=(10000 * 1024 * 1024, 100000 * 1024 * 1024)), \

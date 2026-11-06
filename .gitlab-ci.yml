@@ -13,7 +13,7 @@ pytest:
   stage: test
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.10-slim", "3.15-slim"]
+      - PYTHON_VERSION: ["3.10-slim", "3.11-slim", "3.12-slim"]
   image: python:$PYTHON_VERSION
   script:
     - pip install -e ".[test]"

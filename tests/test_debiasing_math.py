@@ -269,7 +269,7 @@ def test_surface_token_map_empty_raises():
 
 
 def test_marginalize_pole_logprob_tensor_and_fallback():
-    import torch
+    torch = pytest.importorskip("torch")
 
     logits = torch.zeros(30)
     logits[10] = 2.0   # A
@@ -295,7 +295,7 @@ def test_marginalize_pole_logprob_tensor_and_fallback():
 
 
 def test_compute_symmetric_debiased_verdict_cancels_bias():
-    import torch
+    torch = pytest.importorskip("torch")
 
     token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
 
