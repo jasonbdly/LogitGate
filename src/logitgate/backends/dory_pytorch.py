@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn.functional as F
@@ -81,7 +81,7 @@ class DoryRotaryEmbedding(nn.Module):
         device: torch.device,
         dtype: torch.dtype,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        inv_freq: torch.Tensor = self.inv_freq  # type: ignore[assignment]
+        inv_freq = cast(torch.Tensor, self.inv_freq)
         t = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
         freqs = torch.outer(t, inv_freq.to(device))
         emb = torch.cat((freqs, freqs), dim=-1)
