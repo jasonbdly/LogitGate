@@ -16,7 +16,7 @@ from logitgate.models import DecisionStatus, LayerTrace, Verdict
 # Fallback import scanner for code that doesn't parse (e.g. a snippet with a syntax error
 # when only `forbidden_imports` is enabled). Captures `os.path` from `import os.path` and
 # `from os.path import join`.
-_IMPORT_STMT_RE = re.compile(r"^\s*(?:import|from)\s+([a-zA-Z0-9_\.]+)", re.MULTILINE)
+_IMPORT_STMT_RE = re.compile(r"^\s*(?:import|from)\s+([a-zA-Z0-9_\.,\s]+)", re.MULTILINE)
 
 
 def _compile_user_pattern(pattern: str) -> re.Pattern[str] | None:
@@ -48,17 +48,25 @@ def _detect_dag_cycle(tasks: list[dict[str, Any]]) -> str | None:
     for t in tasks:
         if not isinstance(t, dict):
             return f"Expected task node to be dict, got {type(t).__name__}"
-        tid = t.get("id") or t.get("task_id")
-        if not tid:
+        tid = t.get("id") if t.get("id") is not None else t.get("task_id")
+        if tid is None or str(tid).strip() == "":
             return f"Task node missing required 'id' or 'task_id': {t}"
-        task_ids[str(tid)] = None
+        tid_str = str(tid)
+        if tid_str in task_ids:
+            return f"Duplicate task ID '{tid_str}' in DAG"
+        task_ids[tid_str] = None
 
     adj: dict[str, list[str]] = {tid: [] for tid in task_ids}
     in_degree: dict[str, int] = dict.fromkeys(task_ids, 0)
 
     for t in tasks:
-        tid = str(t.get("id") or t.get("task_id"))
-        deps = t.get("dependencies") or t.get("deps") or []
+        raw_tid = t.get("id") if t.get("id") is not None else t.get("task_id")
+        tid = str(raw_tid)
+        deps = t.get("dependencies") if t.get("dependencies") is not None else t.get("deps")
+        if deps is None:
+            deps = []
+        if not isinstance(deps, (list, tuple)):
+            return f"Task '{tid}' dependencies must be a list, got {type(deps).__name__}"
         for dep in deps:
             dep_str = str(dep)
             if dep_str not in task_ids:
@@ -244,10 +252,7 @@ class ASTGate(BaseGate):
 
             if isinstance(self.json_schema, type) and issubclass(self.json_schema, BaseModel):
                 try:
-                    if isinstance(parsed_json, dict):
-                        self.json_schema.model_validate(parsed_json)
-                    else:
-                        self.json_schema.model_validate_json(candidate_str)
+                    self.json_schema.model_validate(parsed_json)
                 except (ValidationError, ValueError, TypeError) as e:
                     err = f"JSON validation failed for schema {self.json_schema.__name__}: {e}"
                     return self._fail(
@@ -287,8 +292,10 @@ class ASTGate(BaseGate):
                         if prop_name in parsed_json and isinstance(prop_def, dict) and "type" in prop_def:
                             expected_type_str = prop_def["type"]
                             expected_type = type_map.get(expected_type_str)
-                            if expected_type and not isinstance(parsed_json[prop_name], expected_type):
-                                err = f"Property '{prop_name}' has invalid type: expected {expected_type_str}, got {type(parsed_json[prop_name]).__name__}"
+                            val = parsed_json[prop_name]
+                            is_bool_for_num = isinstance(val, bool) and expected_type_str in ("integer", "number")
+                            if (expected_type and not isinstance(val, expected_type)) or is_bool_for_num:
+                                err = f"Property '{prop_name}' has invalid type: expected {expected_type_str}, got {type(val).__name__}"
                                 return self._fail(
                                     err,
                                     ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
@@ -305,8 +312,12 @@ class ASTGate(BaseGate):
                                 t0,
                                 {"missing_key": key},
                             )
-                        if isinstance(expected, type) and not isinstance(parsed_json[key], expected):
-                            err = f"Key '{key}' expected type {expected.__name__}, got {type(parsed_json[key]).__name__}"
+                        val = parsed_json[key]
+                        if isinstance(expected, type) and (
+                            not isinstance(val, expected)
+                            or (isinstance(val, bool) and expected in (int, float))
+                        ):
+                            err = f"Key '{key}' expected type {expected.__name__}, got {type(val).__name__}"
                             return self._fail(
                                 err,
                                 ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
@@ -339,10 +350,16 @@ class ASTGate(BaseGate):
                             found_imports.add(alias.name)
                     elif isinstance(node, ast.ImportFrom) and node.module:
                         found_imports.add(node.module)
+                        for alias in node.names:
+                            if alias.name and alias.name != "*":
+                                found_imports.add(f"{node.module}.{alias.name}")
             else:
                 # Regex fallback if AST not parsed
                 for match in _IMPORT_STMT_RE.finditer(candidate_str):
-                    found_imports.add(match.group(1))
+                    for part in match.group(1).split(","):
+                        mod_token = part.strip().split()[0] if part.strip() else ""
+                        if mod_token:
+                            found_imports.add(mod_token)
 
             for imp in sorted(found_imports):
                 for forbidden in self.forbidden_imports:
@@ -397,14 +414,19 @@ class ASTGate(BaseGate):
                 except json.JSONDecodeError:
                     pass
 
-            if tasks_data is not None:
-                dag_err = _detect_dag_cycle(tasks_data)
-                if dag_err:
-                    return self._fail(
-                        dag_err,
-                        ASTFailureCode.DAG_CYCLE_DETECTED,
-                        t0,
-                    )
+            if tasks_data is None:
+                return self._fail(
+                    "Candidate does not contain a valid task list ('tasks' or 'nodes') for DAG verification",
+                    ASTFailureCode.DAG_CYCLE_DETECTED,
+                    t0,
+                )
+            dag_err = _detect_dag_cycle(tasks_data)
+            if dag_err:
+                return self._fail(
+                    dag_err,
+                    ASTFailureCode.DAG_CYCLE_DETECTED,
+                    t0,
+                )
 
         # 6. Custom Validators
         if self.validators:

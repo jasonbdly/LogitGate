@@ -68,6 +68,11 @@ def check(
                 "Reproduce & generate full Layer-2 explanation locally without re-running your app:\n"
                 f"  $ logitgate explain {snapshot_path}"
             )
+        else:
+            message += (
+                "\nTip: re-run pytest with --logitgate-save-failures (or set LOGITGATE_SAVE_FAILURES=1) "
+                "to save a snapshot for 'logitgate explain'."
+            )
         raise AssertionError(message)
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:

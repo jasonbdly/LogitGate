@@ -54,7 +54,14 @@ class _DefaultsMeta(type):
         if _state.pass_threshold is not None:
             return _state.pass_threshold
         val = os.environ.get("LOGITGATE_PASS_THRESHOLD")
-        return float(val) if val is not None else 0.85
+        if val is None:
+            return 0.85
+        try:
+            return float(val)
+        except ValueError as err:
+            from logitgate.exceptions import ConfigurationError
+
+            raise ConfigurationError(f"Invalid LOGITGATE_PASS_THRESHOLD={val!r}: must be a float") from err
 
     @pass_threshold.setter
     def pass_threshold(cls, val: float | None) -> None:
@@ -65,7 +72,14 @@ class _DefaultsMeta(type):
         if _state.fail_threshold is not None:
             return _state.fail_threshold
         val = os.environ.get("LOGITGATE_FAIL_THRESHOLD")
-        return float(val) if val is not None else 0.20
+        if val is None:
+            return 0.20
+        try:
+            return float(val)
+        except ValueError as err:
+            from logitgate.exceptions import ConfigurationError
+
+            raise ConfigurationError(f"Invalid LOGITGATE_FAIL_THRESHOLD={val!r}: must be a float") from err
 
     @fail_threshold.setter
     def fail_threshold(cls, val: float | None) -> None:
@@ -76,7 +90,14 @@ class _DefaultsMeta(type):
         if _state.logit_temperature is not None:
             return _state.logit_temperature
         val = os.environ.get("LOGITGATE_TEMPERATURE")
-        return float(val) if val is not None else 1.0
+        if val is None:
+            return 1.0
+        try:
+            return float(val)
+        except ValueError as err:
+            from logitgate.exceptions import ConfigurationError
+
+            raise ConfigurationError(f"Invalid LOGITGATE_TEMPERATURE={val!r}: must be a float") from err
 
     @logit_temperature.setter
     def logit_temperature(cls, val: float | None) -> None:
@@ -87,7 +108,14 @@ class _DefaultsMeta(type):
         if _state.num_ctx is not None:
             return _state.num_ctx
         val = os.environ.get("LOGITGATE_NUM_CTX")
-        return int(val) if val is not None else None
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except ValueError as err:
+            from logitgate.exceptions import ConfigurationError
+
+            raise ConfigurationError(f"Invalid LOGITGATE_NUM_CTX={val!r}: must be an integer") from err
 
     @num_ctx.setter
     def num_ctx(cls, val: int | None) -> None:
@@ -152,6 +180,9 @@ def reset_config() -> None:
     global _warned_implicit_stub
     _state.reset()
     _warned_implicit_stub = False
+    from logitgate.snapshot import reset_snapshot_notices
+
+    reset_snapshot_notices()
 
 
 _IMPLICIT_STUB = "stub://default"

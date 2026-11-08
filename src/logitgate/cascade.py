@@ -121,6 +121,7 @@ class Cascade(BaseGate):
         traces: list[LayerTrace] = []
         tokens = 0
         rubric: str | None = None  # inherited by generative gates without their own rubric
+        replay_cfg: dict[str, Any] | None = None  # most recent replay_config from a gate that ran
         upstream_gate: BaseGate | None = None  # most recent non-generative gate that ran
         upstream: Verdict | None = None
         outcome: dict[str, Any] | None = None  # what the cascade returns if nothing else runs
@@ -132,7 +133,7 @@ class Cascade(BaseGate):
                 total_tokens_generated=tokens,
                 traces=traces,
             )
-            return self._persist_failure(verdict, candidate, rubric, kwargs)
+            return self._persist_failure(verdict, candidate, rubric, kwargs, replay_cfg=replay_cfg)
 
         for i, gate in enumerate(self.gates):
             if gate.layer_tier >= TIER_GENERATIVE:
@@ -186,6 +187,8 @@ class Cascade(BaseGate):
             traces.extend(verdict.traces)
             tokens += verdict.total_tokens_generated
             upstream_gate, upstream = gate, verdict
+            if (cfg := gate.replay_config()) is not None:
+                replay_cfg = cfg
             gate_rubric = getattr(gate, "rubric", None)
             if isinstance(gate_rubric, str) and gate_rubric:
                 rubric = gate_rubric
@@ -214,11 +217,12 @@ class Cascade(BaseGate):
         candidate: Any,
         rubric: str | None,
         kwargs: dict[str, Any],
+        replay_cfg: dict[str, Any] | None = None,
     ) -> Verdict:
         if verdict.passed:
             return verdict
         gate_config: dict[str, Any] = {"cascade_gates": [g.name for g in self.gates]}
-        replay = next((cfg for g in self.gates if (cfg := g.replay_config()) is not None), None)
+        replay = replay_cfg or next((cfg for g in self.gates if (cfg := g.replay_config()) is not None), None)
         if replay is not None:
             gate_config.update(replay)
         return persist_failure_snapshot(

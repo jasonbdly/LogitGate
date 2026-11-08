@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TextIO
 
 from logitgate.cascade import Cascade
-from logitgate.exceptions import BackendError
+from logitgate.exceptions import BackendError, CalibrationError, ConfigurationError
 from logitgate.gates.ast_gate import ASTGate
 from logitgate.gates.logit_gate import LogitGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
@@ -449,7 +449,11 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
             load_calibration_dataset,
         )
 
-        samples = load_calibration_dataset(args.dataset)
+        try:
+            samples = load_calibration_dataset(args.dataset)
+        except (OSError, ValueError) as e:
+            sys.stderr.write(f"Error loading dataset '{args.dataset}': {e}\n")
+            return EXIT_FAILED
         if not samples:
             sys.stderr.write(f"Error: No valid samples found in dataset '{args.dataset}'\n")
             return EXIT_FAILED
@@ -464,11 +468,15 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
             calibrated_probs.append(prob)
             ground_truth_labels.append(bool(sample_y))
 
-        thresholds = calibrate_cascade_thresholds(
-            calibrated_probs=calibrated_probs,
-            ground_truth_labels=ground_truth_labels,
-            target_risk_alpha=args.alpha,
-        )
+        try:
+            thresholds = calibrate_cascade_thresholds(
+                calibrated_probs=calibrated_probs,
+                ground_truth_labels=ground_truth_labels,
+                target_risk_alpha=args.alpha,
+            )
+        except ValueError as e:
+            sys.stderr.write(f"Error: {e}\n")
+            return EXIT_FAILED
 
         if args.json:
             print(json.dumps(asdict(thresholds), indent=2))
@@ -504,7 +512,8 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
 
     cache_path = Path(args.cache_path) if args.cache_path else None
 
-    print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
+    if not args.json:
+        print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
     result = auto_calibrate_backend(
         backend,
         model_key=effective_model,
@@ -568,6 +577,9 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
         sys.stderr.write(f"Error loading dataset '{args.dataset}': {e}\n")
         return EXIT_FAILED
     if args.limit is not None:
+        if args.limit < 1:
+            sys.stderr.write("Error: --limit must be >= 1\n")
+            return EXIT_FAILED
         cases = cases[: args.limit]
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
 
@@ -588,7 +600,7 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             dataset_label=label,
             progress=None if (args.quiet or args.json) else progress,
         )
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         sys.stderr.write(f"Error: {e}\n")
         return EXIT_FAILED
 
@@ -674,6 +686,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Backends already phrase these as "what went wrong + what to do"; a traceback adds nothing.
         sys.stderr.write(f"error: {exc}\n")
         return EXIT_BACKEND_ERROR
+    except (ConfigurationError, CalibrationError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return EXIT_FAILED
     return result
 
 

@@ -28,7 +28,7 @@ _PASS: ParsedVerdict = (True, DecisionStatus.PASSED, 1.0)
 _FAIL: ParsedVerdict = (False, DecisionStatus.FAILED, 0.0)
 
 # Matches [VERDICT: PASS], **[VERDICT: PASS]**, [**VERDICT: PASS**], **Verdict:** FAIL, Verdict: PASS.
-_VERDICT_TAG_RE = re.compile(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS|FAIL)[\*\]]*", re.IGNORECASE)
+_VERDICT_TAG_RE = re.compile(r"\[?\*?\*?VERDICT[\s\*\]]*:[\s\*\[]*(PASS(?:ED)?|FAIL(?:ED)?)\b[\*\]]*", re.IGNORECASE)
 # "did not fail", "without any failures", "zero rejected": negated failure words must not count as FAIL.
 _NEGATED_FAILURE_RE = re.compile(
     r"\b(not|no|without|never|doesn't|does\s+not|did\s+not|didn't|zero)\s+(?:any\s+|to\s+)?"
@@ -77,7 +77,7 @@ def _extract_structured_verdict(text: str) -> ParsedVerdict | None:
     """
     tags = _VERDICT_TAG_RE.findall(text)
     if tags:
-        return _PASS if tags[-1].upper() == "PASS" else _FAIL
+        return _PASS if tags[-1].upper().startswith("PASS") else _FAIL
 
     # Only JSON that actually carries a verdict counts. A critique that quotes the candidate's
     # own JSON (e.g. '{"status": "ok"}') must not be read as a decisive FAIL.
@@ -92,7 +92,7 @@ def _extract_structured_verdict(text: str) -> ParsedVerdict | None:
     elif "passed" in data:
         is_pass = _coerce_pass(data["passed"])
     else:
-        is_pass = str(data["verdict"]).strip().lower() == "pass"
+        is_pass = _coerce_pass(data["verdict"])
     try:
         score = float(data.get("score", 1.0 if is_pass else 0.0))
     except (TypeError, ValueError):
@@ -166,7 +166,7 @@ class JudgeGate(BaseGate):
         rubric: str | None = None,
         backend: str | GenerativeBackend | None = None,
         model: str | None = None,
-        trigger: TriggerMode = "on_ambiguous_or_fail",
+        trigger: TriggerMode = "on_ambiguous_only",
         max_tokens: int | None = None,
         think: bool | None = None,
         name: str = "JudgeGate",
@@ -177,10 +177,14 @@ class JudgeGate(BaseGate):
         if rubric is not None and not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
 
-        effective_model = model or get_default_model()
-
         self.rubric = rubric.strip() if rubric is not None else None
         self.backend = resolve_generative_backend(backend, model=model)
+        effective_model = (
+            model
+            or getattr(self.backend, "model", None)
+            or getattr(self.backend, "model_name", None)
+            or get_default_model()
+        )
         self.model = effective_model
         self.escalation_policy = trigger
         self.max_tokens = max_tokens
@@ -242,6 +246,7 @@ class JudgeGate(BaseGate):
                 backend=backend,
                 model=self.model,
                 symmetric_debiasing=False,
+                save_on_fail=False,
             )
         return self._probe_gate
 

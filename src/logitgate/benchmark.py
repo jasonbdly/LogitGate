@@ -252,6 +252,7 @@ def run_benchmark(
         raise ValueError("repeat must be >= 1 and warmup >= 0")
 
     resolved = resolve_logit_backend(backend, model=model)
+    effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
     metered = _MeteredBackend(resolved)
     # Only Ollama understands `think`; OpenAI-compatible servers may reject unknown fields.
     from logitgate.backends.ollama import OllamaBackend
@@ -259,13 +260,13 @@ def run_benchmark(
     effective_think = judge_think if isinstance(resolved, (OllamaBackend, StubBackend)) else None
 
     def build(mode: str, rubric: str) -> BaseGate:
-        logit = LogitGate(rubric=rubric, backend=metered, model=model)
+        logit = LogitGate(rubric=rubric, backend=metered, model=effective_model)
         if mode == "logit":
             return logit
         judge = JudgeGate(
             rubric=rubric if mode == "judge" else None,
             backend=metered,
-            model=model,
+            model=effective_model,
             trigger="always" if mode == "judge" else cascade_trigger,
             max_tokens=judge_max_tokens,
             think=effective_think,

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,22 @@ def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
 
 
 _SESSION_SNAPSHOTS: list[Path] = []
+_NOTIFIED_SNAPSHOT_SAVED: bool = False
+_NOTIFIED_SNAPSHOT_HINT: bool = False
+
+
+def reset_snapshot_notices() -> None:
+    """Resets one-time console notices and session snapshot list (used by config reset and tests)."""
+    global _NOTIFIED_SNAPSHOT_SAVED, _NOTIFIED_SNAPSHOT_HINT
+    _NOTIFIED_SNAPSHOT_SAVED = False
+    _NOTIFIED_SNAPSHOT_HINT = False
+    _SESSION_SNAPSHOTS.clear()
+
+
+def _should_log_console_notice() -> bool:
+    if os.environ.get("LOGITGATE_QUIET", "0").lower() in ("1", "true", "yes"):
+        return False
+    return "PYTEST_CURRENT_TEST" not in os.environ
 
 
 def session_snapshot_paths() -> list[Path]:
@@ -45,6 +62,7 @@ def persist_failure_snapshot(
     place. The guard matters for cascades: inner gates run with ``save_on_fail=False`` and the
     cascade writes a single snapshot containing the full multi-layer trace.
     """
+    global _NOTIFIED_SNAPSHOT_SAVED, _NOTIFIED_SNAPSHOT_HINT
     if verdict.passed:
         return verdict
 
@@ -52,6 +70,18 @@ def persist_failure_snapshot(
 
     should_save = save_on_fail if save_on_fail is not None else get_default_save_failures()
     if not should_save:
+        if (
+            save_on_fail is None
+            and not _NOTIFIED_SNAPSHOT_HINT
+            and verdict.triggered_layer != "JudgeGate"
+            and _should_log_console_notice()
+        ):
+            _NOTIFIED_SNAPSHOT_HINT = True
+            sys.stderr.write(
+                f"[logitgate] Fast failure at {verdict.triggered_layer} without Layer-2 critique. "
+                "Set LOGITGATE_SAVE_FAILURES=1 (or pass save_on_fail=True) to save a snapshot "
+                "for 'logitgate explain'.\n"
+            )
         return verdict
     if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
         return verdict
@@ -64,9 +94,17 @@ def persist_failure_snapshot(
         gate_config=gate_config,
     )
     saved_path = snapshot.save(directory=snapshot_dir)
+    if len(_SESSION_SNAPSHOTS) >= 1000:
+        _SESSION_SNAPSHOTS.pop(0)
     _SESSION_SNAPSHOTS.append(saved_path)
     if verdict.traces:
         verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
+    if not _NOTIFIED_SNAPSHOT_SAVED and _should_log_console_notice():
+        _NOTIFIED_SNAPSHOT_SAVED = True
+        sys.stderr.write(
+            f"[logitgate] Saved failure snapshot to {saved_path}. "
+            f"Replay with Layer-2 critique: logitgate explain {saved_path}\n"
+        )
     return verdict
 
 
