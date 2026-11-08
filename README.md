@@ -377,7 +377,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   author = {Jason Bradley},
   title = {LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
-  version = {0.3.0},
+  version = {0.3.1},
   url = {https://github.com/jasonbdly/logitgate},
   license = {Apache-2.0}
 }

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-11-07
+
+### Added
+- **One-time failure replay notice:** When a fast Layer-1 failure occurs without a Layer-2 diagnostic critique and failure snapshots are not yet enabled, LogitGate prints a single-line hint to `stderr` (and appends a tip to `pytest` `@check` assertion errors) showing how to save and replay snapshots via `logitgate explain`. Suppress with `LOGITGATE_QUIET=1`.
+- **Automatic PyPI README sync in CI/CD:** Added `pypi_readme_sync` job in `.gitlab-ci.yml` that publishes a PEP 440 `.postN` release to PyPI whenever `README.md` is updated on `main`.
+- **Top-level exports:** Exported `CalibrationWarning` and `get_default_model` from `logitgate`.
+
+### Changed
+- **Sensible out-of-the-box defaults:**
+  - `OllamaBackend` now defaults to `model="qwen2.5:7b"` (~4.7 GB VRAM) instead of `"qwen2.5-coder:14b"` (~9 GB VRAM).
+  - `OllamaBackend` no longer forces `num_ctx=16384` on every request unless `num_ctx` or `LOGITGATE_NUM_CTX` is explicitly set, preventing unnecessary KV-cache reallocations and model reloads on warm Ollama instances.
+  - `ScoreGate` now defaults to `symmetric_debiasing=True` (matching `LogitGate` and `ChoiceGate`).
+  - `JudgeGate` now defaults to `trigger="on_ambiguous_only"` (matching the `logitgate benchmark` default so decisive Layer-1 failures short-circuit without paying for Layer-2 generation).
+  - `ChoiceGate` and `ScoreGate` now resolve `logit_temperature=None` and `"auto"` through `KNOWN_MODEL_TEMPERATURES` and `~/.cache/logitgate/calibration.json`, matching `LogitGate`.
+- **Packaging:** Removed unused `openai>=1.0.0` dependency from `logitgate[all]` and `logitgate[openai]` (`OpenAICompatBackend` uses `httpx` natively), and added Python 3.13 to the CI test matrix.
+
+### Fixed
+- **URI parsing for `openai://` and `vllm://`:** `resolve_logit_backend` now properly handles shorthand `openai://gpt-4o-mini` and model-embedded `vllm://localhost:8000/v1/Qwen/Qwen2.5-7B-Instruct` URIs, and `infer_backend_spec` preserves models across `OpenAICompatBackend`, `RecurrentPyTorchBackend`, and in-process `LlamaCppBackend`.
+- **Concurrency & event-loop safety:**
+  - Added thread synchronization locks to in-process `LlamaCppBackend`, `RecurrentPyTorchBackend`, and `StubBackend` so concurrent `asyncio.gather` calls in `aevaluate` cannot race on C++ `llama_context` KV caches or lazy model loading.
+  - `_HTTPClientMixin` now tracks event-loop affinity on auto-created `httpx.AsyncClient` instances and recreates the client when called across multiple `asyncio.run()` loops instead of raising `RuntimeError: Event loop is closed`.
+  - Bounded `LogitGate.aevaluate_batch` concurrency with an `asyncio.Semaphore(32)`.
+- **Numerical & gate hardening:**
+  - `LogitGate`, `ChoiceGate`, and `ScoreGate` now raise `BackendError` when a backend returns empty `top_logprobs` instead of silently returning `P=0.50` or passing on a uniform distribution.
+  - `extract_token_logprob` filters `NaN`/`inf` values, clamps positive fast-math logprob noise to `<= 0.0`, and deduplicates identical raw token entries.
+  - `get_model_temperature` checks exact model matches before longest-prefix substring matches in `calibration.json` and `KNOWN_MODEL_TEMPERATURES`.
+  - `JudgeGate`'s internal self-healing `_probe_gate` now runs with `save_on_fail=False` so it never overwrites `.logitgate/failures/latest.json`.
+  - `ASTGate` now rejects Python `bool` values for JSON schema `"integer"`/`"number"` fields, catches `from <pkg> import <submodule>` against `forbidden_imports`, and fails when `acyclic_dag=True` is given non-DAG input.
+
+---
+
 ## [0.3.0] - 2026-11-05
 
 ### Changed (behavior)
