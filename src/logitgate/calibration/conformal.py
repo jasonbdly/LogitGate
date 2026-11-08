@@ -109,6 +109,13 @@ def calibrate_cascade_thresholds(
             f"target_risk_alpha must be strictly between 0.0 and 1.0, got {target_risk_alpha}"
         )
 
+    for p in calibrated_probs:
+        pf = float(p)
+        if not math.isfinite(pf) or not (0.0 <= pf <= 1.0):
+            raise ValueError(
+                f"calibrated_probs must contain finite probabilities in [0.0, 1.0], got {p}"
+            )
+
     # For ground truth False (0), high P(Pass) is a false-acceptance risk
     neg_scores = sorted(float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if not y)
     # For ground truth True (1), low P(Pass) is a false-rejection risk
@@ -142,7 +149,7 @@ def calibrate_cascade_thresholds(
     # Thresholds outside [0, 1] mean "never decide on this side". LogitGate's range is [0, 1];
     # pinning there admits only exact saturation (P == 1.0 / P == 0.0, |log-odds| > 50), and
     # if a calibration point itself sits at saturation, the guarantee can't be expressed.
-    saturated = raw_accept >= 1.0 or raw_reject <= 0.0
+    saturated = raw_accept >= 1.0 or raw_reject <= 0.0 or tau_accept > 1.0 or tau_reject < 0.0
     tau_accept = min(tau_accept, 1.0)
     tau_reject = max(tau_reject, 0.0)
 
@@ -247,7 +254,9 @@ def _extract_samples_from_dicts(
         ).strip()
         raw_label = item.get("label", item.get("ground_truth", item.get("expected", None)))
         if raw_label is None:
-            raw_label = item.get("passed", item.get("pass", True))
+            raw_label = item.get("passed", item.get("pass", None))
+        if raw_label is None:
+            continue
 
         if isinstance(raw_label, bool):
             label = raw_label

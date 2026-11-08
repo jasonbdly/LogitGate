@@ -22,7 +22,10 @@ class CalibrationResult(BaseModel):
 KNOWN_MODEL_TEMPERATURES: dict[str, float] = {
     "qwen2.5-coder:14b": 1.05,
     "qwen2.5:14b": 1.05,
+    "qwen2.5:7b": 1.05,
+    "qwen2.5": 1.05,
     "gemma4:e4b": 0.95,
+    "gemma4": 0.95,
     "gpt-4o-mini": 1.15,
     "llama3": 1.10,
 }
@@ -86,6 +89,18 @@ def get_calibration_cache_path() -> Path:
     return Path.home() / ".cache" / "logitgate" / "calibration.json"
 
 
+def _lookup_temperature_in_mapping(m_lower: str, mapping: dict[str, Any]) -> float | None:
+    """Finds a temperature by exact case-insensitive match first, then longest-prefix substring match."""
+    for k, v in mapping.items():
+        if k.lower() == m_lower:
+            return float(v)
+    for k, v in sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True):
+        k_low = k.lower()
+        if k_low != "default" and k_low in m_lower:
+            return float(v)
+    return None
+
+
 def get_model_temperature(
     model_name: str | None,
     cache_path: Path | None = None,
@@ -103,16 +118,16 @@ def get_model_temperature(
             with open(target_cache, "r", encoding="utf-8") as f:
                 cached = json.load(f)
             if isinstance(cached, dict):
-                for k, v in cached.items():
-                    if k.lower() == m_lower or k.lower() in m_lower:
-                        return float(v)
+                found = _lookup_temperature_in_mapping(m_lower, cached)
+                if found is not None:
+                    return found
         except (OSError, ValueError, TypeError):
             cached = None
 
     # 2. KNOWN_MODEL_TEMPERATURES
-    for k, v in KNOWN_MODEL_TEMPERATURES.items():
-        if k.lower() == m_lower or k.lower() in m_lower:
-            return v
+    found_known = _lookup_temperature_in_mapping(m_lower, KNOWN_MODEL_TEMPERATURES)
+    if found_known is not None:
+        return found_known
 
     # 3. Default
     return 1.0
@@ -185,14 +200,11 @@ def combine_symmetric_log_odds(
     mean_log_odds = (forward_log_odds + reverse_log_odds) / (2.0 * max(logit_temperature, 1e-6))
     Returns 1.0 / (1.0 + exp(-mean_log_odds)).
     """
+    from logitgate.debiasing.softmax import clamped_sigmoid
+
     t = max(logit_temperature, 1e-6)
     mean_log_odds = (forward_log_odds + reverse_log_odds) / (2.0 * t)
-
-    if mean_log_odds > 50.0:
-        return 1.0
-    if mean_log_odds < -50.0:
-        return 0.0
-    return 1.0 / (1.0 + math.exp(-mean_log_odds))
+    return clamped_sigmoid(mean_log_odds)
 
 
 def compute_shannon_entropy(p_pass: float, eps: float = 1e-12) -> float:
@@ -213,6 +225,11 @@ class SurfaceTokenMap:
             object.__setattr__(self, "positive_token_ids", tuple(sorted(self.positive_token_ids)))
         if not isinstance(self.negative_token_ids, tuple):
             object.__setattr__(self, "negative_token_ids", tuple(sorted(self.negative_token_ids)))
+        overlap = set(self.positive_token_ids) & set(self.negative_token_ids)
+        if overlap:
+            raise ValueError(
+                f"Positive and negative token IDs must be disjoint, got overlapping IDs: {sorted(overlap)}"
+            )
 
     @classmethod
     def from_tokenizer(
@@ -350,15 +367,11 @@ def compute_symmetric_debiased_verdict(
     )
     delta_2 = lp_B2 - lp_A2
 
+    from logitgate.debiasing.softmax import clamped_sigmoid
+
     unbiased_log_odds = 0.5 * (delta_1 + delta_2)
     positional_bias = 0.5 * abs(delta_1 - delta_2)
-
-    if unbiased_log_odds > 50.0:
-        p_pass = 1.0
-    elif unbiased_log_odds < -50.0:
-        p_pass = 0.0
-    else:
-        p_pass = 1.0 / (1.0 + math.exp(-unbiased_log_odds))
+    p_pass = clamped_sigmoid(unbiased_log_odds)
 
     entropy = compute_shannon_entropy(p_pass)
 
