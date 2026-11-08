@@ -9,6 +9,7 @@ state space before producing first-token logits.
 from __future__ import annotations
 
 import math
+import threading
 from typing import Any
 
 from logitgate.backends.base import GenerativeBackend, LogitBackend
@@ -59,50 +60,55 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         self._tokenizer = tokenizer
         self.torch_dtype = torch_dtype
         self.spillover_guard = PCIeSpilloverGuard()
-        self.last_loops_executed: int = num_loops
+        self._lock = threading.RLock()
+
+    @property
+    def model(self) -> str:
+        return self.model_name
 
     def __repr__(self) -> str:
         return f"RecurrentPyTorchBackend(model='{self.model_name}', num_loops={self.num_loops}, device='{self.device}')"
 
     def _ensure_loaded(self) -> tuple[Any, Any]:
         """Lazy-loads model and tokenizer if not already provided."""
-        if self._model is not None and self._tokenizer is not None:
+        with self._lock:
+            if self._model is not None and self._tokenizer is not None:
+                return self._model, self._tokenizer
+
+            try:
+                import torch
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+            except ImportError as err:
+                raise ImportError(
+                    "PyTorch and Transformers are required for RecurrentPyTorchBackend. "
+                    "Install them via `pip install logitgate[recurrent]` or `pip install torch transformers`."
+                ) from err
+
+            if self._tokenizer is None:
+                self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+
+            if self._model is None:
+                target_dtype = self.torch_dtype or (torch.bfloat16 if torch.cuda.is_available() else torch.float32)
+                if "dory" in self.model_name.lower():
+                    from logitgate.backends.dory_pytorch import load_dory_model
+
+                    self._model = load_dory_model(
+                        model_name_or_path=self.model_name,
+                        device=self.device if self.device != "auto" else ("cuda:0" if torch.cuda.is_available() else "cpu"),
+                        num_loops=self.num_loops,
+                        torch_dtype=target_dtype,
+                    )
+                else:
+                    self._model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        torch_dtype=target_dtype,
+                        trust_remote_code=True,
+                        device_map=self.device if self.device != "auto" else "auto",
+                    )
+                    if self.device not in ("auto", "cuda") and hasattr(self._model, "to"):
+                        self._model = self._model.to(self.device)
+
             return self._model, self._tokenizer
-
-        try:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-        except ImportError as err:
-            raise ImportError(
-                "PyTorch and Transformers are required for RecurrentPyTorchBackend. "
-                "Install them via `pip install logitgate[recurrent]` or `pip install torch transformers`."
-            ) from err
-
-        if self._tokenizer is None:
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-
-        if self._model is None:
-            target_dtype = self.torch_dtype or (torch.bfloat16 if torch.cuda.is_available() else torch.float32)
-            if "dory" in self.model_name.lower():
-                from logitgate.backends.dory_pytorch import load_dory_model
-
-                self._model = load_dory_model(
-                    model_name_or_path=self.model_name,
-                    device=self.device if self.device != "auto" else ("cuda:0" if torch.cuda.is_available() else "cpu"),
-                    num_loops=self.num_loops,
-                    torch_dtype=target_dtype,
-                )
-            else:
-                self._model = AutoModelForCausalLM.from_pretrained(
-                    self.model_name,
-                    torch_dtype=target_dtype,
-                    trust_remote_code=True,
-                    device_map=self.device if self.device != "auto" else "auto",
-                )
-                if self.device not in ("auto", "cuda") and hasattr(self._model, "to"):
-                    self._model = self._model.to(self.device)
-
-        return self._model, self._tokenizer
 
     def query_top_logprobs(
         self,
@@ -142,7 +148,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             from contextlib import nullcontext
             no_grad_ctx = nullcontext()
 
-        with no_grad_ctx, self.spillover_guard.guard_forward_pass():
+        with self._lock, no_grad_ctx, self.spillover_guard.guard_forward_pass():
             outputs = model(**inputs, **kwargs)
         if hasattr(outputs, "logits"):
             if hasattr(outputs.logits, "ndim"):
@@ -243,7 +249,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         else:
             input_tensor = inputs
 
-        with self.spillover_guard.guard_forward_pass():
+        with self._lock, self.spillover_guard.guard_forward_pass():
             outputs = model.generate(input_tensor, **gen_kwargs)
         input_len = input_tensor.shape[-1]
         generated_ids = outputs[0][input_len:]

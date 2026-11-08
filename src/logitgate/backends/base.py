@@ -6,6 +6,7 @@ import functools
 import inspect
 import math
 import re
+import threading
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
@@ -21,6 +22,9 @@ from logitgate.exceptions import (
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 _OFFLINE_HINT = "Or set backend='stub://' for offline testing."
+EXCLUDED_INTERNAL_KWARGS: frozenset[str] = frozenset(
+    {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
+)
 
 
 def _response_detail(response: httpx.Response) -> str:
@@ -183,6 +187,69 @@ class GenerativeBackend(abc.ABC):
         await self.aclose()
 
 
+class _HTTPClientMixin:
+    """Shared lazy httpx.Client / httpx.AsyncClient lifecycle with event-loop affinity tracking."""
+
+    timeout: float
+    _client: httpx.Client | None
+    _async_client: httpx.AsyncClient | None
+    _async_client_loop: asyncio.AbstractEventLoop | None
+    _owns_async_client: bool
+
+    def _init_http_clients(
+        self,
+        client: httpx.Client | None = None,
+        async_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._client = client
+        self._async_client = async_client
+        self._async_client_loop = None
+        self._owns_async_client = async_client is None
+
+    @property
+    def client(self) -> httpx.Client:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.Client(timeout=self.timeout)
+        return self._client
+
+    @property
+    def async_client(self) -> httpx.AsyncClient:
+        try:
+            current_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        owns_client = getattr(self, "_owns_async_client", True)
+        bound_loop = getattr(self, "_async_client_loop", None)
+        loop_changed = (
+            owns_client
+            and current_loop is not None
+            and bound_loop is not None
+            and (bound_loop is not current_loop or bound_loop.is_closed())
+        )
+        if self._async_client is None or self._async_client.is_closed or loop_changed:
+            self._async_client = httpx.AsyncClient(timeout=self.timeout)
+            self._async_client_loop = current_loop
+            self._owns_async_client = True
+        elif bound_loop is None and current_loop is not None:
+            self._async_client_loop = current_loop
+        return self._async_client
+
+    def close(self) -> None:
+        """Closes the synchronous HTTP client session if initialized."""
+        if self._client is not None and not self._client.is_closed:
+            self._client.close()
+
+    async def aclose(self) -> None:
+        """Closes the asynchronous HTTP client session if initialized."""
+        if self._async_client is not None and not self._async_client.is_closed:
+            try:
+                await self._async_client.aclose()
+            except RuntimeError:
+                pass
+            self._async_client_loop = None
+
+
 class StubBackend(LogitBackend, GenerativeBackend):
     """
     Offline deterministic stub backend for sub-millisecond unit tests and CI.
@@ -206,6 +273,7 @@ class StubBackend(LogitBackend, GenerativeBackend):
         self.tokens_generated = tokens_generated
         self.prompt_log: list[str] = []
         self._response_idx = 0
+        self._lock = threading.Lock()
 
     def __repr__(self) -> str:
         return f"StubBackend(default_prob={self.default_prob})"
@@ -216,13 +284,72 @@ class StubBackend(LogitBackend, GenerativeBackend):
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        self.prompt_log.append(prompt)
+        with self._lock:
+            self.prompt_log.append(prompt)
+            resp_idx = self._response_idx
+            if self.logprob_responses:
+                self._response_idx += 1
 
         # 1. Explicit queue response
         if self.logprob_responses:
-            resp = self.logprob_responses[self._response_idx % len(self.logprob_responses)]
-            self._response_idx += 1
+            resp = self.logprob_responses[resp_idx % len(self.logprob_responses)]
+            if (
+                len(self.logprob_responses) == 1
+                and "on an inverted scale where" in prompt
+                and allowed_tokens
+            ):
+                int_toks = [int(t) for t in allowed_tokens if str(t).isdigit()]
+                if int_toks:
+                    mirror = min(int_toks) + max(int_toks)
+                    return [
+                        {
+                            **item,
+                            "token": str(mirror - int(item["token"]))
+                            if str(item.get("token", "")).strip().isdigit()
+                            else item["token"],
+                        }
+                        for item in resp
+                    ]
             return resp
+
+        if (
+            "on an inverted scale where" in prompt
+            and self.reverse_top_logprobs is None
+            and self.forward_top_logprobs is not None
+            and allowed_tokens
+        ):
+            int_toks = [int(t) for t in allowed_tokens if str(t).isdigit()]
+            if int_toks:
+                mirror = min(int_toks) + max(int_toks)
+                return [
+                    {
+                        **item,
+                        "token": str(mirror - int(item["token"]))
+                        if str(item.get("token", "")).strip().isdigit()
+                        else item["token"],
+                    }
+                    for item in self.forward_top_logprobs
+                ]
+
+        # Numeric score scale (e.g. ScoreGate 1..5) when no custom logprobs were supplied
+        if (
+            self.forward_top_logprobs is None
+            and self.reverse_top_logprobs is None
+            and allowed_tokens
+            and all(str(t).strip().isdigit() for t in allowed_tokens)
+        ):
+            int_toks = sorted(int(str(t).strip()) for t in allowed_tokens)
+            low_tok, high_tok = str(int_toks[0]), str(int_toks[-1])
+            p = max(min(self.default_prob, 0.9999), 0.0001)
+            if "on an inverted scale where" in prompt:
+                return [
+                    {"token": low_tok, "logprob": math.log(p)},
+                    {"token": high_tok, "logprob": math.log(1.0 - p)},
+                ]
+            return [
+                {"token": high_tok, "logprob": math.log(p)},
+                {"token": low_tok, "logprob": math.log(1.0 - p)},
+            ]
 
         # 2. Check if this is Pass 2 (reversed mapping where A is Fail / violates)
         is_reverse_pass = (
@@ -257,7 +384,8 @@ class StubBackend(LogitBackend, GenerativeBackend):
         return self.query_top_logprobs(prompt, top_k, allowed_tokens)
 
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
-        self.prompt_log.append(prompt)
+        with self._lock:
+            self.prompt_log.append(prompt)
         return self.diagnostic_text, self.tokens_generated
 
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
@@ -268,23 +396,29 @@ def infer_backend_spec(backend: Any) -> str:
     """Infers a canonical URI specifier string from a resolved backend instance."""
     if isinstance(backend, str):
         return backend
+    if hasattr(backend, "inner") and isinstance(backend.inner, LogitBackend):
+        backend = backend.inner
     if isinstance(backend, StubBackend):
         return f"stub://{backend.default_prob}" if backend.default_prob != 0.95 else "stub://default"
     cls_name = backend.__class__.__name__
     base_url = getattr(backend, "base_url", None) or ""
-    model = getattr(backend, "model", None) or ""
+    model = getattr(backend, "model", None) or getattr(backend, "model_name", None) or ""
     if cls_name == "OllamaBackend":
         host = base_url.replace("http://", "").replace("https://", "").rstrip("/") or "localhost:11434"
         return f"ollama://{host}/{model}" if model else f"ollama://{host}"
     if cls_name == "OpenAICompatBackend":
         host = base_url.replace("https://", "").replace("http://", "").rstrip("/")
         scheme = "openai" if base_url.startswith("https://") else "vllm"
-        return f"{scheme}://{host}"
+        if scheme == "openai" and host == "api.openai.com/v1":
+            return f"openai://{model}" if model else "openai://api.openai.com/v1"
+        return f"{scheme}://{host}/{model}" if model else f"{scheme}://{host}"
     if cls_name == "LlamaCppBackend":
-        if base_url:
+        if getattr(backend, "llm", None) is None and base_url:
             host = base_url.replace("http://", "").replace("https://", "").rstrip("/")
             return f"llamacpp://{host}/{model}" if model else f"llamacpp://{host}"
         return f"llamacpp:///{model}" if model else "llamacpp"
+    if cls_name == "RecurrentPyTorchBackend":
+        return f"recurrent://{model}" if model else "recurrent"
     return "stub://default"
 
 
@@ -339,15 +473,37 @@ def resolve_logit_backend(
         from logitgate.backends.ollama import OllamaBackend
         parsed = urlparse(spec)
         netloc = parsed.netloc or "localhost:11434"
-        effective_model = model or _uri_model(parsed.path) or env_model or "qwen2.5-coder:14b"
+        effective_model = model or _uri_model(parsed.path) or env_model or "qwen2.5:7b"
         return OllamaBackend(base_url=f"http://{netloc}", model=effective_model, **kwargs)
 
     if spec.startswith(("openai://", "vllm://")):
         from logitgate.backends.openai_compat import OpenAICompatBackend
         parsed = urlparse(spec)
-        scheme = "https" if spec.startswith("openai://") else "http"
-        base_url = f"{scheme}://{parsed.netloc}{parsed.path}"
-        return OpenAICompatBackend(base_url=base_url, model=model or env_model or "gpt-4o-mini", **kwargs)
+        is_openai = spec.startswith("openai://")
+        scheme = "https" if is_openai else "http"
+        netloc = parsed.netloc
+        path = parsed.path or ""
+        uri_model_opt: str | None = None
+
+        # Handle shorthand `openai://gpt-4o-mini` or `openai://` (where netloc is a model ID, not a host)
+        is_host = bool(netloc) and ("." in netloc or ":" in netloc or netloc == "localhost")
+        if is_openai and not is_host:
+            uri_model_opt = f"{netloc}{path}".strip("/") or None
+            base_url = "https://api.openai.com/v1"
+        else:
+            if not netloc:
+                netloc = "api.openai.com" if is_openai else "localhost:8000"
+            if "/v1" in path:
+                prefix, _, after = path.partition("/v1")
+                api_path = f"{prefix}/v1"
+                uri_model_opt = after.strip("/") or None
+            else:
+                api_path = "/v1"
+                uri_model_opt = path.strip("/") or None
+            base_url = f"{scheme}://{netloc}{api_path}"
+
+        effective_model = model or uri_model_opt or env_model or "gpt-4o-mini"
+        return OpenAICompatBackend(base_url=base_url, model=effective_model, **kwargs)
 
     if spec.startswith("llamacpp://") or spec == "llamacpp":
         from logitgate.backends.llamacpp import LlamaCppBackend

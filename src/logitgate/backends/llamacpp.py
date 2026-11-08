@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
 from typing import Any
 
 import httpx
-from typing_extensions import Self
 
 from logitgate.backends.base import (
+    EXCLUDED_INTERNAL_KWARGS,
     GenerativeBackend,
     LogitBackend,
+    _HTTPClientMixin,
     strip_reasoning_blocks,
     translate_transport_errors,
 )
 
 
-class LlamaCppBackend(LogitBackend, GenerativeBackend):
+class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
     """
     Backend for llama.cpp supporting:
       Mode A: In-process llama_cpp.Llama instance (via create_chat_completion)
@@ -38,46 +40,12 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         self.base_url = base_url.rstrip("/") if base_url else "http://localhost:8080"
         self.model = model
         self.timeout = timeout
-        self._client = client
-        self._async_client = async_client
+        self._init_http_clients(client=client, async_client=async_client)
         self._use_completion_fallback = False
+        self._llm_lock = threading.Lock()
 
     def __repr__(self) -> str:
         return f"LlamaCppBackend(model={self.model!r}, base_url='{self.base_url}')"
-
-    @property
-    def client(self) -> httpx.Client:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=self.timeout)
-        return self._client
-
-    @property
-    def async_client(self) -> httpx.AsyncClient:
-        if self._async_client is None or self._async_client.is_closed:
-            self._async_client = httpx.AsyncClient(timeout=self.timeout)
-        return self._async_client
-
-    def close(self) -> None:
-        """Closes the synchronous HTTP client session if initialized."""
-        if self._client is not None and not self._client.is_closed:
-            self._client.close()
-
-    async def aclose(self) -> None:
-        """Closes the asynchronous HTTP client session if initialized."""
-        if self._async_client is not None and not self._async_client.is_closed:
-            await self._async_client.aclose()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.aclose()
 
     @staticmethod
     def _extract_chat_top_logprobs(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -140,14 +108,16 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
             },
             {"role": "user", "content": prompt},
         ]
-        res = self.llm.create_chat_completion(
-            messages=messages,
-            max_tokens=1,
-            temperature=0.0,
-            logprobs=True,
-            top_logprobs=top_k,
-            **kwargs,
-        )
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
+        with self._llm_lock:
+            res = self.llm.create_chat_completion(
+                messages=messages,
+                max_tokens=1,
+                temperature=0.0,
+                logprobs=True,
+                top_logprobs=top_k,
+                **filtered_kwargs,
+            )
         return self._extract_chat_top_logprobs(res)
 
     def _in_process_generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
@@ -155,11 +125,14 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         call_kwargs: dict[str, Any] = {"temperature": 0.0}
         if max_tokens is not None:
             call_kwargs["max_tokens"] = max_tokens
-        call_kwargs.update(kwargs)
-        res = self.llm.create_chat_completion(
-            messages=messages,
-            **call_kwargs,
-        )
+        for k, v in kwargs.items():
+            if k not in EXCLUDED_INTERNAL_KWARGS:
+                call_kwargs[k] = v
+        with self._llm_lock:
+            res = self.llm.create_chat_completion(
+                messages=messages,
+                **call_kwargs,
+            )
         choices = res.get("choices", [])
         content = choices[0].get("message", {}).get("content", "") if choices else ""
         tokens = res.get("usage", {}).get("completion_tokens", 0)
@@ -189,7 +162,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         if "logit_bias" in kwargs:
             payload["logit_bias"] = kwargs["logit_bias"]
         for k, v in kwargs.items():
-            if k not in payload and k != "logit_bias":
+            if k not in payload and k != "logit_bias" and k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
         return payload
 
@@ -207,7 +180,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
             "n_probs": top_k,
         }
         for k, v in kwargs.items():
-            if k not in payload:
+            if k not in payload and k not in EXCLUDED_INTERNAL_KWARGS:
                 payload[k] = v
         return payload
 
@@ -256,7 +229,10 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         if self.llm is not None:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, self._in_process_query_top_logprobs, prompt, top_k, allowed_tokens
+                None,
+                lambda: self._in_process_query_top_logprobs(
+                    prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
+                ),
             )
 
         if not self._use_completion_fallback:
@@ -285,6 +261,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         if self.llm is not None:
             return self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs)
 
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
         if not self._use_completion_fallback:
             url = f"{self.base_url}/v1/chat/completions"
             payload: dict[str, Any] = {
@@ -294,7 +271,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
             }
             if max_tokens is not None:
                 payload["max_tokens"] = max_tokens
-            payload.update(kwargs)
+            payload.update(filtered_kwargs)
             resp = self.client.post(url, json=payload)
             if resp.status_code == 404:
                 self._use_completion_fallback = True
@@ -311,7 +288,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         payload = {"prompt": prompt, "temperature": 0.0}
         if max_tokens is not None:
             payload["n_predict"] = max_tokens
-        payload.update(kwargs)
+        payload.update(filtered_kwargs)
         resp = self.client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
@@ -325,6 +302,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, lambda: self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs))
 
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
         if not self._use_completion_fallback:
             url = f"{self.base_url}/v1/chat/completions"
             payload: dict[str, Any] = {
@@ -334,7 +312,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
             }
             if max_tokens is not None:
                 payload["max_tokens"] = max_tokens
-            payload.update(kwargs)
+            payload.update(filtered_kwargs)
             resp = await self.async_client.post(url, json=payload)
             if resp.status_code == 404:
                 self._use_completion_fallback = True
@@ -351,7 +329,7 @@ class LlamaCppBackend(LogitBackend, GenerativeBackend):
         payload = {"prompt": prompt, "temperature": 0.0}
         if max_tokens is not None:
             payload["n_predict"] = max_tokens
-        payload.update(kwargs)
+        payload.update(filtered_kwargs)
         resp = await self.async_client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()

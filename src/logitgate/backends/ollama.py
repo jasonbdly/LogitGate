@@ -3,20 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from typing_extensions import Self
 
 from logitgate.backends.base import (
+    EXCLUDED_INTERNAL_KWARGS,
     GenerativeBackend,
     LogitBackend,
+    _HTTPClientMixin,
     strip_reasoning_blocks,
     translate_transport_errors,
 )
 from logitgate.config import LogitGateDefaults
 
-EXCLUDED_INTERNAL_KWARGS = {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
 
-
-class OllamaBackend(LogitBackend, GenerativeBackend):
+class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
     """
     Ollama backend supporting first-token logprob extraction with reasoning suppression
     (think: False), persistent connection pooling, and generative diagnostic critiques.
@@ -34,7 +33,7 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-coder:14b",
+        model: str = "qwen2.5:7b",
         timeout: float = 30.0,
         num_ctx: int | None = None,
         options: dict[str, Any] | None = None,
@@ -45,49 +44,13 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
-        eff_num_ctx = num_ctx if num_ctx is not None else (LogitGateDefaults.num_ctx or 16384)
-        self.num_ctx = eff_num_ctx
+        self.num_ctx: int | None = num_ctx if num_ctx is not None else LogitGateDefaults.num_ctx
         self.options = dict(options) if options else {}
         self.keep_alive = keep_alive
-        self._client = client
-        self._async_client = async_client
+        self._init_http_clients(client=client, async_client=async_client)
 
     def __repr__(self) -> str:
         return f"OllamaBackend(model='{self.model}', base_url='{self.base_url}')"
-
-    @property
-    def client(self) -> httpx.Client:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=self.timeout)
-        return self._client
-
-    @property
-    def async_client(self) -> httpx.AsyncClient:
-        if self._async_client is None or self._async_client.is_closed:
-            self._async_client = httpx.AsyncClient(timeout=self.timeout)
-        return self._async_client
-
-    def close(self) -> None:
-        """Closes the synchronous HTTP client session if initialized."""
-        if self._client is not None and not self._client.is_closed:
-            self._client.close()
-
-    async def aclose(self) -> None:
-        """Closes the asynchronous HTTP client session if initialized."""
-        if self._async_client is not None and not self._async_client.is_closed:
-            await self._async_client.aclose()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.aclose()
 
     def build_query_payload(
         self,
@@ -107,8 +70,9 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         opts: dict[str, Any] = {
             "num_predict": 1,
             "temperature": 0.0,
-            "num_ctx": self.num_ctx,
         }
+        if self.num_ctx is not None:
+            opts["num_ctx"] = self.num_ctx
         if self.options:
             opts.update(self.options)
         payload: dict[str, Any] = {
@@ -181,8 +145,9 @@ class OllamaBackend(LogitBackend, GenerativeBackend):
         """
         opts: dict[str, Any] = {
             "temperature": 0.0,
-            "num_ctx": self.num_ctx,
         }
+        if self.num_ctx is not None:
+            opts["num_ctx"] = self.num_ctx
         if max_tokens is not None:
             opts["num_predict"] = max_tokens
         if self.options:

@@ -4,19 +4,18 @@ import os
 from typing import Any
 
 import httpx
-from typing_extensions import Self
 
 from logitgate.backends.base import (
+    EXCLUDED_INTERNAL_KWARGS,
     GenerativeBackend,
     LogitBackend,
+    _HTTPClientMixin,
     strip_reasoning_blocks,
     translate_transport_errors,
 )
 
-EXCLUDED_INTERNAL_KWARGS = {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
 
-
-class OpenAICompatBackend(LogitBackend, GenerativeBackend):
+class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
     """
     OpenAI-compatible backend (vLLM, Groq, OpenRouter, Together, OpenAI)
     supporting first-token logprob extraction, persistent connection pooling,
@@ -50,45 +49,10 @@ class OpenAICompatBackend(LogitBackend, GenerativeBackend):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "sk-dummy")
         self.timeout = timeout
         self.logit_bias = logit_bias
-        self._client = client
-        self._async_client = async_client
+        self._init_http_clients(client=client, async_client=async_client)
 
     def __repr__(self) -> str:
         return f"OpenAICompatBackend(model='{self.model}', base_url='{self.base_url}')"
-
-    @property
-    def client(self) -> httpx.Client:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=self.timeout)
-        return self._client
-
-    @property
-    def async_client(self) -> httpx.AsyncClient:
-        if self._async_client is None or self._async_client.is_closed:
-            self._async_client = httpx.AsyncClient(timeout=self.timeout)
-        return self._async_client
-
-    def close(self) -> None:
-        """Closes the synchronous HTTP client session if initialized."""
-        if self._client is not None and not self._client.is_closed:
-            self._client.close()
-
-    async def aclose(self) -> None:
-        """Closes the asynchronous HTTP client session if initialized."""
-        if self._async_client is not None and not self._async_client.is_closed:
-            await self._async_client.aclose()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.aclose()
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}

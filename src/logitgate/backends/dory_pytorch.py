@@ -327,5 +327,9 @@ def load_dory_model(
     model = model.to(device)
     model.eval()
     elapsed = time.perf_counter() - t0
-    print(f"Loaded Dory model ({num_loops} loops) onto {device} in {elapsed:.2f}s", flush=True)
+    import logging
+
+    logging.getLogger(__name__).info(
+        "Loaded Dory model (%d loops) onto %s in %.2fs", num_loops, device, elapsed
+    )
     return model
