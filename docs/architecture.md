@@ -52,8 +52,8 @@ flowchart TD
 3. **Layer 2 (`JudgeGate`)**:
    - **Latency**: 1,500–5,000 ms (generative autoregressive decoding).
    - **Trigger Policies**:
-     - `on_ambiguous_or_fail` (default): Executes if Layer 1 was ambiguous ($0.20 < P < 0.85$) OR if Layer 1 failed, providing actionable diagnostic feedback.
-     - `on_ambiguous_only`: Executes ONLY when Layer 1 confidence is genuinely ambiguous ($0.20 < P < 0.85$). Clean passes and decisive failures bypass Layer 2.
+     - `on_ambiguous_only` (default): Executes ONLY when Layer 1 confidence is genuinely ambiguous ($0.20 < P < 0.85$). Clean passes and decisive failures bypass Layer 2.
+     - `on_ambiguous_or_fail`: Executes if Layer 1 was ambiguous ($0.20 < P < 0.85$) OR if Layer 1 failed, providing actionable diagnostic feedback.
      - `always`: Forces generative critique on every artifact regardless of upstream confidence.
    - **Monotonic Failure Preservation**:
      - When Layer 1 decisively fails ($P \le \text{fail\_threshold}$) and escalates to Layer 2 for diagnostic reporting, the final Verdict preserves `passed=False` even if the downstream generative judge's text critique phrasing is lenient.
@@ -85,7 +85,7 @@ When deploying LLM evaluation pipelines, a common production failure mode is **K
 
 ### Topology 1: Single-Model Shared KV-Cache (Batch Evaluation Suites)
 - **Use Case**: Evaluating multiple rubrics on the same candidate artifact.
-- **Mechanics**: Using `MultiRubricGate` (or `evaluate_batch(candidate, rubrics)`), the candidate tokens are evaluated once. Subsequent rubric logit probes reuse the shared `[EVALUATION RUBRICS] + [CANDIDATE ARTIFACT]` prompt prefix in the KV-cache without evicting the context, reducing per-rubric latency to ~110 ms on GPU and ~450–925 ms on CPU.
+- **Mechanics**: Using `MultiRubricGate` (or `evaluate_batch(candidate, rubrics)`), the candidate tokens are evaluated once at the root of the prompt. Subsequent rubric logit probes reuse the shared `[CANDIDATE ARTIFACT]` prompt prefix in the KV-cache without evicting the context, reducing per-rubric latency to ~110 ms on GPU and ~450–925 ms on CPU.
 
 ### Topology 2: Heterogeneous Dual-GPU Sidecar (High-Throughput Production)
 - **GPU 0**: Pinned exclusively to the primary generator model (e.g., `gemma4:26b` MoE or `gemma4:31b` Dense) with 16k–32k context. Its generation KV-cache is **never evicted**.
