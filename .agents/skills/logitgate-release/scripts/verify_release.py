@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import re
 import subprocess
 import sys
@@ -214,7 +215,11 @@ def bump_version(root: Path, new_version: str) -> None:
 
 def run_command(cmd: list[str], cwd: Path, desc: str) -> bool:
     print(f"Running: {desc} ({' '.join(cmd)})...")
-    result = subprocess.run(cmd, check=False, cwd=cwd, capture_output=True, text=True)
+    env = os.environ.copy()
+    local_bin = str(Path.home() / ".local" / "bin")
+    if local_bin not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = f"{local_bin}{os.pathsep}{env.get('PATH', '')}"
+    result = subprocess.run(cmd, check=False, cwd=cwd, env=env, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"FAILED: {desc} (exit code {result.returncode})")
         if result.stdout:
@@ -227,12 +232,20 @@ def run_command(cmd: list[str], cwd: Path, desc: str) -> bool:
 
 
 def run_full_check(root: Path) -> bool:
-    print("=== Step 1: Checking Version Synchronization ===")
+    print("=== Step 1: Checking Version Synchronization & Changelog Notes ===")
     synced, info = check_sync(root)
     if not synced:
         print(f"FAIL: Version mismatch detected!\n{info}")
         return False
     print(f"  ✓ All 5 metadata locations synchronized at version {info}")
+
+    changelog_text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    notes_pattern = rf"## \[{re.escape(info)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
+    notes_match = re.search(notes_pattern, changelog_text, flags=re.DOTALL)
+    if not notes_match or len(notes_match.group(1).strip()) < 20:
+        print(f"FAIL: CHANGELOG.md section for [{info}] is missing or empty.")
+        return False
+    print(f"  ✓ CHANGELOG.md release notes verified ({len(notes_match.group(1).strip())} chars)")
 
     print("\n=== Step 2: Quality Gates ===")
     if not run_command(["uvx", "ruff", "check", "src/logitgate", "tests"], root, "Ruff lint"):
@@ -241,7 +254,26 @@ def run_full_check(root: Path) -> bool:
     if not run_command(["uv", "run", "--with", "mypy", "mypy", "src/logitgate", "tests"], root, "Mypy type check"):
         return False
 
-    if not run_command(["uv", "run", "pytest"], root, "Pytest test suite"):
+    if not run_command(["uv", "run", "pytest"], root, "Pytest test suite (full environment)"):
+        return False
+
+    slim_check_code = (
+        "import sys, pytest\n"
+        "BLOCKED = {'torch', 'deepeval', 'langgraph', 'llama_cpp', 'transformers', 'safetensors', 'huggingface_hub'}\n"
+        "class BlockOptionalImports:\n"
+        "    def find_spec(self, fullname, path, target=None):\n"
+        "        top = fullname.split('.')[0]\n"
+        "        if top in BLOCKED:\n"
+        "            raise ModuleNotFoundError(f\"No module named '{top}'\", name=top)\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, BlockOptionalImports())\n"
+        "raise SystemExit(pytest.main(['tests', '-q']))\n"
+    )
+    if not run_command(
+        ["uv", "run", "python", "-c", slim_check_code],
+        root,
+        "Pytest test suite (slim CI environment without optional extras)",
+    ):
         return False
 
     print("\n=== Step 3: Package Build Verification ===")
