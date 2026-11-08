@@ -45,7 +45,7 @@ uv run --with mypy mypy src/logitgate tests
 uv run pytest
 ```
 
-> **CRITICAL GIT HYGIENE RULE:** Never bundle functional code, test, or CI changes into a `chore(release): bump version to X.Y.Z` commit. Commit all feature, fix, test, and CI changes in dedicated atomic commits *before* running `--bump`.
+> **CRITICAL GIT HYGIENE RULE:** Never bundle functional code, test, or CI changes into a `chore(release): bump version to X.Y.Z` commit, and never split code changes from their tests into separate horizontal `test:` commits. Each logical change must be committed with its corresponding tests and documentation as a self-contained, `git bisect`-safe vertical commit (`pytest`, `mypy`, and `ruff` passing at every commit) *before* running `--bump`.
 
 ### Step 2: Atomic Version Bump
 

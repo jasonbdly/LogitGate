@@ -39,9 +39,19 @@ These standards apply to all code, documentation, tests, and commits in the Logi
 
 ## 5. Git Hygiene & Command Execution
 
-- **Atomic Conventional Commits:**
-  Commit each logical unit of work separately (`feat(scope):`, `fix(scope):`, `ci:`, `test:`, `docs:`, `chore(scope):`) with a multi-line bulleted commit body explaining what changed and why.
-- **Pure Release Commits:**
-  Never mix functional code, test, or CI changes into a `chore(release): bump version to X.Y.Z` commit. Release bump commits must only modify the 5 synchronized metadata files (`pyproject.toml`, `src/logitgate/__init__.py`, `CITATION.cff`, `README.md`, `CHANGELOG.md`).
+Follow standard industry Git practices (Conventional Commits, 50/72 formatting, and `git bisect`-safe vertical commits):
+
+- **Vertical Slices (Code + Tests + Docs Together):**
+  - Each commit must represent **one cohesive logical change** (one feature, one bug fix, or one refactor) along with the unit tests and documentation updates for that change.
+  - **Anti-pattern to avoid:** Never split implementation into one commit and its corresponding test updates into a separate `test:` commit, and never group unrelated fixes into a single "grab-bag" commit just because they touch the same directory (`backends/`, `gates/`).
+- **Every Commit Must Pass Quality Gates (`git bisect` Safety):**
+  - Every individual commit must leave the repository in a green, working state where `ruff check`, `mypy`, and `pytest` pass. Never create intermediate commits that break existing test assertions until a later commit updates the tests.
+- **Commit Message Structure (50/72 Rule, Focus on *Why*):**
+  - **Subject line:** `<type>(<scope>): <imperative summary>` (`<= 72` characters, ideally `<= 50`, lowercase summary, no trailing period).
+  - **Body:** Wrap lines at 72 characters. Explain **why** the change is necessary (the root cause, trade-off, or motivation), not a mechanical bullet-by-bullet inventory repeating the code diff. If a commit requires a long list of unrelated bullets to describe, it is not atomic and must be split into separate commits before committing.
+- **Pure Release Commits (`chore(release)`):**
+  - `chore(release): bump version to X.Y.Z` commits must only modify the 5 synchronized metadata files (`pyproject.toml`, `src/logitgate/__init__.py`, `CITATION.cff`, `README.md`, `CHANGELOG.md`). All functional changes must be committed in their own vertical commits beforehand.
+- **Immutable Published History:**
+  - Never amend, rebase, or force-push commits or tags that have already been pushed to `origin/main`.
 - **Deterministic Subprocess Timeouts:**
-  Wrap networked CLI commands (`git push`, `git fetch`, remote probes) in `timeout -k 1 <seconds>` so hung network sockets fail deterministically rather than blocking indefinitely.
+  - Wrap networked CLI commands (`git push`, `git fetch`, remote probes) in `timeout -k 1 <seconds>` so hung network sockets fail deterministically rather than blocking indefinitely.
