@@ -10,6 +10,7 @@ from logitgate.calibration.conformal import (
     calibrate_cascade_thresholds,
     load_calibration_dataset,
 )
+from logitgate.exceptions import CalibrationWarning
 
 
 def test_calibrate_cascade_thresholds_guarantees():
@@ -20,11 +21,12 @@ def test_calibrate_cascade_thresholds_guarantees():
     ]
     labels = [False] * 10 + [True] * 10
 
-    thresholds = calibrate_cascade_thresholds(
-        calibrated_probs=calibrated_probs,
-        ground_truth_labels=labels,
-        target_risk_alpha=0.10,
-    )
+    with pytest.warns(CalibrationWarning):
+        thresholds = calibrate_cascade_thresholds(
+            calibrated_probs=calibrated_probs,
+            ground_truth_labels=labels,
+            target_risk_alpha=0.10,
+        )
 
     assert isinstance(thresholds, ConformalCascadeThresholds)
     assert thresholds.calibration_set_size == 20
@@ -49,11 +51,12 @@ def test_conformal_non_crossing_correction():
     calibrated_probs = [0.4] * 10 + [0.4] * 10
     labels = [False] * 10 + [True] * 10
 
-    thresholds = calibrate_cascade_thresholds(
-        calibrated_probs=calibrated_probs,
-        ground_truth_labels=labels,
-        target_risk_alpha=0.05,
-    )
+    with pytest.warns(CalibrationWarning):
+        thresholds = calibrate_cascade_thresholds(
+            calibrated_probs=calibrated_probs,
+            ground_truth_labels=labels,
+            target_risk_alpha=0.05,
+        )
     # Midpoint non-crossing logic must ensure tau_reject < tau_accept
     assert thresholds.tau_reject < thresholds.tau_accept
     assert thresholds.tau_reject == 0.35

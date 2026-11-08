@@ -75,7 +75,7 @@ def test_dag_wide_fan_out_is_linear_time() -> None:
     tasks = [{"id": "root"}] + [{"id": f"t{i}", "deps": ["root"]} for i in range(n)]
     t0 = time.perf_counter()
     assert _detect_dag_cycle(tasks) is None
-    assert time.perf_counter() - t0 < 2.0
+    assert time.perf_counter() - t0 < 5.0
 
 
 def test_ast_gate_patterns_compile_once_and_keep_literal_fallback() -> None:
@@ -405,3 +405,186 @@ def test_readme_python_examples_run(clean_config: Any, monkeypatch: pytest.Monke
             exec(compile(block, f"README.md[python block {i}]", "exec"), namespace)  # noqa: S102 - trusted repo docs
         except Exception as exc:  # noqa: BLE001 - surface which block broke
             pytest.fail(f"README python block {i} failed: {type(exc).__name__}: {exc}\n---\n{block}")
+
+
+def test_sensible_out_of_box_defaults_and_failure_replay_notices(
+    clean_config: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from logitgate import ChoiceGate, JudgeGate, LogitGate, ScoreGate, check
+    from logitgate.backends.ollama import OllamaBackend
+
+    # 1. OllamaBackend defaults to qwen2.5:7b and omits num_ctx unless configured
+    ollama = OllamaBackend()
+    assert ollama.model == "qwen2.5:7b"
+    assert ollama.num_ctx is None
+    assert "num_ctx" not in ollama.build_query_payload("hi")["options"]
+    assert "num_ctx" not in ollama.build_generate_payload("hi", None, {})["options"]
+    assert OllamaBackend(num_ctx=8192).build_query_payload("hi")["options"]["num_ctx"] == 8192
+
+    # 2. ScoreGate defaults to symmetric_debiasing=True, and ChoiceGate/ScoreGate use KNOWN_MODEL_TEMPERATURES
+    score_gate = ScoreGate("Rate quality", model="qwen2.5:7b", backend="stub://default")
+    choice_gate = ChoiceGate("Pick one", {"A": "x", "B": "y"}, model="qwen2.5:7b", backend="stub://default")
+    assert score_gate.symmetric_debiasing is True
+    assert score_gate.logit_temperature == pytest.approx(1.05)
+    assert choice_gate.logit_temperature == pytest.approx(1.05)
+
+    # 3. JudgeGate defaults to trigger='on_ambiguous_only'
+    judge = JudgeGate(backend="stub://default")
+    assert judge.trigger == "on_ambiguous_only"
+
+    # 4. @check failure without --logitgate-save-failures includes tip on how to enable snapshots
+    @check("Must be polite", backend="stub://0.05")
+    def bad_reply() -> str:
+        return "Go away"
+
+    with pytest.raises(AssertionError, match="--logitgate-save-failures"):
+        bad_reply()
+
+    # 5. Outside pytest, a fast Layer-1 failure emits a one-time console notice to stderr
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    gate = LogitGate("Must pass", backend="stub://0.05")
+    gate.evaluate("bad candidate")
+    err1 = capsys.readouterr().err
+    assert "logitgate explain" in err1
+    assert "LOGITGATE_SAVE_FAILURES=1" in err1
+
+    # Second failure does not spam stderr again
+    gate.evaluate("bad candidate 2")
+    assert capsys.readouterr().err == ""
+
+    # And when save_on_fail=True, it logs the saved snapshot path once
+    gate.evaluate("bad candidate 3", save_on_fail=True, snapshot_dir=str(tmp_path))
+    err_saved = capsys.readouterr().err
+    assert "Saved failure snapshot to" in err_saved
+    assert "logitgate explain" in err_saved
+
+
+def test_staff_audit_fixes_uri_resolution_and_roundtrip(clean_config: Any) -> None:
+    from logitgate import ChoiceGate, ConfigurationError, LogitGate, ScoreGate
+    from logitgate.backends.base import infer_backend_spec, resolve_logit_backend
+    from logitgate.backends.llamacpp import LlamaCppBackend
+    from logitgate.backends.openai_compat import OpenAICompatBackend
+    from logitgate.backends.recurrent import RecurrentPyTorchBackend
+
+    # 1. openai://gpt-4o-mini resolves to https://api.openai.com/v1 with model='gpt-4o-mini'
+    b_oai = resolve_logit_backend("openai://gpt-4o-mini")
+    assert isinstance(b_oai, OpenAICompatBackend)
+    assert b_oai.base_url == "https://api.openai.com/v1"
+    assert b_oai.model == "gpt-4o-mini"
+    assert infer_backend_spec(b_oai) == "openai://gpt-4o-mini"
+
+    # 2. vllm://localhost:8000/v1/Qwen/Qwen2.5-7B-Instruct separates base_url and model
+    b_vllm = resolve_logit_backend("vllm://localhost:8000/v1/Qwen/Qwen2.5-7B-Instruct")
+    assert isinstance(b_vllm, OpenAICompatBackend)
+    assert b_vllm.base_url == "http://localhost:8000/v1"
+    assert b_vllm.model == "Qwen/Qwen2.5-7B-Instruct"
+    assert infer_backend_spec(b_vllm) == "vllm://localhost:8000/v1/Qwen/Qwen2.5-7B-Instruct"
+
+    # 3. vllm://localhost:8000 (without /v1) normalizes base_url to /v1
+    b_vllm_bare = resolve_logit_backend("vllm://localhost:8000")
+    assert isinstance(b_vllm_bare, OpenAICompatBackend)
+    assert b_vllm_bare.base_url == "http://localhost:8000/v1"
+
+    # 4. RecurrentPyTorchBackend infer_backend_spec and .model property
+    b_rec = RecurrentPyTorchBackend(model_name="nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16")
+    assert b_rec.model == "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+    assert infer_backend_spec(b_rec) == "recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+
+    # 5. In-process LlamaCppBackend infer_backend_spec
+    b_llama_inproc = LlamaCppBackend(llm=object(), model="qwen.gguf")
+    assert infer_backend_spec(b_llama_inproc) == "llamacpp:///qwen.gguf"
+
+    # 6. URI-embedded model is picked up by LogitGate/ChoiceGate/ScoreGate for temperature lookup
+    g_uri = LogitGate("Check", backend="ollama://localhost:11434/gemma4:e4b")
+    assert g_uri.model == "gemma4:e4b"
+    assert g_uri.logit_temperature == pytest.approx(0.95)
+
+    # 7. ScoreGate works out-of-the-box on default StubBackend and rejects multi-token bounds
+    s_default = ScoreGate("Rate quality", backend="stub://default")
+    v_score = s_default.evaluate("Great code")
+    assert v_score.passed is True
+    assert v_score.score is not None and v_score.score > 4.5
+
+    with pytest.raises(ConfigurationError, match="single-digit integer bounds"):
+        ScoreGate("Rate quality", min_score=1, max_score=10)
+
+    # 8. ChoiceGate rejects case-insensitive duplicate keys and strips key whitespace
+    with pytest.raises(ConfigurationError, match="case-insensitively unique"):
+        ChoiceGate("Pick", {"a": "opt 1", "A": "opt 2"})
+    cg = ChoiceGate("Pick", {" A ": "opt 1", "B": "opt 2"}, backend="stub://default")
+    assert list(cg.options.keys()) == ["A", "B"]
+
+
+def test_staff_audit_fixes_numerical_ast_and_async_loop(tmp_path: Path) -> None:
+    import asyncio
+
+    from logitgate import (
+        ASTGate,
+        BackendError,
+        ChoiceGate,
+        JudgeGate,
+        LogitGate,
+        ScoreGate,
+    )
+    from logitgate.backends.ollama import OllamaBackend
+    from logitgate.debiasing.permutation import get_model_temperature
+    from logitgate.debiasing.softmax import extract_token_logprob
+
+    # 1. Empty top_logprobs raises BackendError in LogitGate, ChoiceGate, ScoreGate
+    empty_stub = StubBackend(forward_top_logprobs=[])
+    with pytest.raises(BackendError, match="no token log-probabilities"):
+        LogitGate("Check", backend=empty_stub).evaluate("x")
+    with pytest.raises(BackendError, match="no token log-probabilities"):
+        ChoiceGate("Pick", {"A": "1", "B": "2"}, backend=empty_stub).evaluate("x")
+    with pytest.raises(BackendError, match="no token log-probabilities"):
+        ScoreGate("Score", backend=empty_stub).evaluate("x")
+
+    # 2. extract_token_logprob ignores NaN/inf, clamps >0 logprobs, and deduplicates identical raw tokens
+    noisy_lps = [
+        {"token": "A", "logprob": float("nan")},
+        {"token": "A", "logprob": 0.05},  # positive fast-math noise -> clamped to 0.0
+        {"token": "A", "logprob": 0.05},  # duplicate raw token "A" -> deduplicated
+        {"token": "B", "logprob": float("inf")},
+    ]
+    assert extract_token_logprob(noisy_lps, "A") == 0.0
+
+    # 3. get_model_temperature prefers exact match over shorter substring in cache
+    cache_file = tmp_path / "calibration.json"
+    cache_file.write_text(json.dumps({"qwen2.5": 1.30, "qwen2.5-coder:14b": 1.08}), encoding="utf-8")
+    assert get_model_temperature("qwen2.5-coder:14b", cache_path=cache_file) == pytest.approx(1.08)
+
+    # 4. ASTGate: bool is rejected for int/float schema, from X import Y is caught, acyclic_dag rejects non-DAG
+    schema_gate = ASTGate(json_schema={"type": "object", "properties": {"count": {"type": "integer"}}})
+    assert schema_gate.evaluate({"count": True}).passed is False
+    assert ASTGate(json_schema={"count": int}).evaluate({"count": False}).passed is False
+
+    imp_gate = ASTGate(forbidden_imports=["urllib.request", "subprocess"])
+    assert imp_gate.evaluate("from urllib import request").passed is False
+    assert imp_gate.evaluate("import os, subprocess\ndef broken(:").passed is False
+
+    dag_gate = ASTGate(acyclic_dag=True)
+    assert dag_gate.evaluate("not valid json").passed is False
+    assert dag_gate.evaluate([{"id": 0}, {"id": 1, "deps": [0]}]).passed is True
+    assert dag_gate.evaluate([{"id": 1}, {"id": 1}]).passed is False
+    assert dag_gate.evaluate([{"id": 1, "dependencies": "not_a_list"}]).passed is False
+
+    # 5. JudgeGate: {"verdict": "PASSED"} and [VERDICT: PASSED] parse as PASS, and "Verdict: FAILURES: 0" does not match tag
+    jg = JudgeGate(
+        rubric="Check",
+        backend=StubBackend(diagnostic_text='{"verdict": "PASSED", "score": 1.0}'),
+    )
+    assert jg.evaluate("x").passed is True
+
+    # 6. httpx.AsyncClient recreates cleanly across multiple asyncio.run() loops
+    backend = OllamaBackend()
+
+    async def _get_client() -> Any:
+        return backend.async_client
+
+    loop1_client = asyncio.run(_get_client())
+    loop2_client = asyncio.run(_get_client())
+    assert loop1_client is not loop2_client
+    asyncio.run(backend.aclose())

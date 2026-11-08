@@ -1082,13 +1082,16 @@ def test_pcie_spillover_guard_reserved_memory_risk():
 # ---------------------------------------------------------------------------
 
 def test_cli_calibrate_conformal_md(capsys):
-    ret = main([
-        "calibrate",
-        "--dataset",
-        "EPISTEMIC_REASONING_TEST_CASES.md",
-        "--alpha",
-        "0.05",
-    ])
+    from logitgate.exceptions import CalibrationWarning
+
+    with pytest.warns(CalibrationWarning):
+        ret = main([
+            "calibrate",
+            "--dataset",
+            "EPISTEMIC_REASONING_TEST_CASES.md",
+            "--alpha",
+            "0.05",
+        ])
     assert ret == 0
     captured = capsys.readouterr().out
     assert "LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION" in captured
@@ -1098,20 +1101,23 @@ def test_cli_calibrate_conformal_md(capsys):
 
 
 def test_cli_calibrate_json_dataset(tmp_path, capsys):
+    from logitgate.exceptions import CalibrationWarning
+
     dataset_path = tmp_path / "calibration.json"
     dataset_path.write_text(json.dumps([
         {"rubric": "Is it valid?", "candidate": "valid", "ground_truth": True},
         {"rubric": "Is it valid?", "candidate": "invalid", "ground_truth": False},
     ] * 6))
 
-    ret = main([
-        "calibrate",
-        "--dataset",
-        str(dataset_path),
-        "--alpha",
-        "0.10",
-        "--json",
-    ])
+    with pytest.warns(CalibrationWarning):
+        ret = main([
+            "calibrate",
+            "--dataset",
+            str(dataset_path),
+            "--alpha",
+            "0.10",
+            "--json",
+        ])
     assert ret == 0
     captured = capsys.readouterr().out
     data = json.loads(captured)
