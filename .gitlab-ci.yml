@@ -13,7 +13,7 @@ pytest:
   stage: test
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.10-slim", "3.11-slim", "3.12-slim"]
+      - PYTHON_VERSION: ["3.10-slim", "3.11-slim", "3.12-slim", "3.13-slim"]
   image: python:$PYTHON_VERSION
   script:
     - pip install -e ".[test]"
@@ -26,7 +26,7 @@ lint:
     - pip install -e ".[test]"
     - pip install ruff mypy
     - ruff check src/logitgate tests
-    - mypy src/logitgate
+    - mypy src/logitgate tests
 
 release:
   stage: release
@@ -156,3 +156,80 @@ release:
     name: "logitgate-$CI_COMMIT_TAG"
     paths:
       - dist/*
+
+pypi_readme_sync:
+  stage: release
+  image: python:3.11-slim
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE !~ /^(feat|chore)\(release\):/
+      changes:
+        - README.md
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
+  script:
+    - pip install build twine
+    - |
+      python - <<'EOF'
+      import json
+      import re
+      import urllib.error
+      import urllib.request
+      from pathlib import Path
+
+      pyproject_path = Path("pyproject.toml")
+      text = pyproject_path.read_text(encoding="utf-8")
+      m = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', text, flags=re.MULTILINE)
+      if not m:
+          raise SystemExit("Could not find version in pyproject.toml")
+      base_version = m.group(1)
+
+      try:
+          with urllib.request.urlopen("https://pypi.org/pypi/logitgate/json", timeout=15) as resp:
+              pypi_data = json.load(resp)
+          published = set(pypi_data.get("releases", {}).keys())
+      except urllib.error.URLError as exc:
+          raise SystemExit(f"Failed to query PyPI releases: {exc}")
+
+      if base_version not in published:
+          print(
+              f"Base version {base_version} is not yet published on PyPI; "
+              "skipping post-release README sync (will publish via tag release)."
+          )
+          raise SystemExit(0)
+
+      post_nums = [0]
+      post_re = re.compile(rf"^{re.escape(base_version)}\.post(\d+)$")
+      for ver in published:
+          pm = post_re.match(ver)
+          if pm:
+              post_nums.append(int(pm.group(1)))
+      next_version = f"{base_version}.post{max(post_nums) + 1}"
+
+      updated = re.sub(
+          r'^version\s*=\s*["\'][^"\']+["\']',
+          f'version = "{next_version}"',
+          text,
+          count=1,
+          flags=re.MULTILINE,
+      )
+      pyproject_path.write_text(updated, encoding="utf-8")
+      init_path = Path("src/logitgate/__init__.py")
+      init_text = init_path.read_text(encoding="utf-8")
+      init_updated = re.sub(
+          r'^__version__\s*=\s*["\'][^"\']+["\']',
+          f'__version__ = "{next_version}"',
+          init_text,
+          count=1,
+          flags=re.MULTILINE,
+      )
+      init_path.write_text(init_updated, encoding="utf-8")
+      Path(".pypi_sync_version").write_text(next_version, encoding="utf-8")
+      print(f"Prepared PEP 440 post-release {next_version} to sync README.md to PyPI")
+      EOF
+    - |
+      if [ -f .pypi_sync_version ]; then
+        python -m build
+        twine check dist/*
+        twine upload --skip-existing dist/*
+      fi
