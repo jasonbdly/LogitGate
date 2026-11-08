@@ -84,9 +84,47 @@ def check_sync(root: Path) -> tuple[bool, str]:
     return False, ", ".join(f"{k}: {val}" for k, val in versions.items())
 
 
+RELEASE_METADATA_FILES = frozenset({
+    "pyproject.toml",
+    "src/logitgate/__init__.py",
+    "CITATION.cff",
+    "README.md",
+    "CHANGELOG.md",
+})
+
+
+def get_dirty_non_release_files(root: Path) -> list[str]:
+    git_status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        check=False,
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    dirty_non_release: list[str] = []
+    for line in git_status.stdout.splitlines():
+        if not line.strip():
+            continue
+        path_part = line[3:].strip().strip('"')
+        if " -> " in path_part:
+            path_part = path_part.split(" -> ", 1)[1].strip('"')
+        if path_part not in RELEASE_METADATA_FILES:
+            dirty_non_release.append(line)
+    return dirty_non_release
+
+
 def bump_version(root: Path, new_version: str) -> None:
     if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", new_version):
         raise ValueError(f"Invalid semver version: '{new_version}' (expected X.Y.Z)")
+
+    dirty_non_release = get_dirty_non_release_files(root)
+    if dirty_non_release:
+        dirty_list = "\n  ".join(dirty_non_release)
+        raise RuntimeError(
+            "Refusing to bump version while non-release files have uncommitted changes.\n"
+            "Commit all functional, test, and CI changes in separate atomic commits first:\n"
+            f"  {dirty_list}"
+        )
 
     today = datetime.date.today().isoformat()
     print(f"Bumping LogitGate version to {new_version} (Release date: {today})")
@@ -210,11 +248,21 @@ def run_full_check(root: Path) -> bool:
     if not run_command(["uv", "build"], root, "uv build (sdist and wheel)"):
         return False
 
-    print("\n=== Step 4: Git Status Check ===")
+    print("\n=== Step 4: Git Status & Release Hygiene Check ===")
+    dirty_non_release = get_dirty_non_release_files(root)
+    if dirty_non_release:
+        print(
+            "FAIL: Working tree contains uncommitted changes outside release metadata files.\n"
+            "Commit all functional, test, and CI changes in separate atomic commits before releasing:"
+        )
+        for item in dirty_non_release:
+            print(f"  {item}")
+        return False
     git_status = subprocess.run(["git", "status", "--porcelain"], check=False, cwd=root, capture_output=True, text=True)
     if git_status.stdout.strip():
-        print("Note: Working directory has uncommitted changes:")
-        print(git_status.stdout)
+        print("  ✓ Only release metadata files have pending changes:")
+        for line in git_status.stdout.splitlines():
+            print(f"    {line}")
     else:
         print("  ✓ Working tree is clean.")
 

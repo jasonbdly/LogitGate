@@ -27,11 +27,14 @@ Refer to [Version Locations Reference](./references/version_locations.md) for de
 
 Use the bundled verification script [verify_release.py](./scripts/verify_release.py) to automate and validate the entire release lifecycle.
 
-### Step 1: Pre-Flight Verification & Quality Gates
+### Step 1: Pre-Flight Verification, Clean Working Tree, & Quality Gates
 
-Before touching any version numbers, ensure the current codebase is 100% green:
+Before touching any version numbers, ensure **all functional changes are already committed in separate, atomic Conventional Commits** with descriptive bodies (`git status` must be completely clean), and that the codebase is 100% green:
 
 ```bash
+# 0. Verify no uncommitted functional changes exist
+git status --porcelain
+
 # 1. Check linter
 uvx ruff check src/logitgate tests
 
@@ -41,6 +44,8 @@ uv run --with mypy mypy src/logitgate tests
 # 3. Full test suite (including executable README snippets)
 uv run pytest
 ```
+
+> **CRITICAL GIT HYGIENE RULE:** Never bundle functional code, test, or CI changes into a `chore(release): bump version to X.Y.Z` commit. Commit all feature, fix, test, and CI changes in dedicated atomic commits *before* running `--bump`.
 
 ### Step 2: Atomic Version Bump
 
@@ -76,17 +81,17 @@ python3 .agents/skills/logitgate-release/scripts/verify_release.py --full-check
 
 ### Step 5: Git Commit & Annotated Tag
 
-Once `--full-check` passes:
+Once `--full-check` passes, stage **only** the 5 release metadata files (never use `git add -A` on a release bump commit):
 
 ```bash
-# Stage all synchronized metadata and files
-git add -A
+# Stage strictly the 5 synchronized release metadata files
+git add pyproject.toml src/logitgate/__init__.py CITATION.cff README.md CHANGELOG.md
 
-# Commit using conventional format
-git commit -m "feat(release): bump version to X.Y.Z and <summary of major release highlights>"
+# Commit using conventional format with a body summarizing the release metadata sync
+git commit -m "chore(release): bump version to X.Y.Z" -m "Synchronize version metadata across pyproject.toml, src/logitgate/__init__.py, CITATION.cff, README.md, and CHANGELOG.md for the X.Y.Z release."
 
 # Create annotated release tag
-git tag -a vX.Y.Z -m "Release vX.Y.Z: <brief release description>"
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
 ```
 
 ### Step 6: Push to Remote
