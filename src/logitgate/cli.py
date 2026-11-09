@@ -80,6 +80,11 @@ def create_parser() -> argparse.ArgumentParser:
         help="Enable Layer 0 AST syntax validation before logit evaluation",
     )
     eval_parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Strip <think> blocks and unwrap markdown code fences before Layer 0 validation",
+    )
+    eval_parser.add_argument(
         "--json",
         action="store_true",
         help="Output verdict and traces in JSON format",
@@ -232,6 +237,13 @@ def create_parser() -> argparse.ArgumentParser:
 _ANSI_CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33", "cyan": "36"}
 
 
+def _sanitize_terminal_text(text: str) -> str:
+    """Strips raw terminal control/escape sequences from untrusted candidate or critique text."""
+    return "".join(
+        ch for ch in text if ch in ("\n", "\t") or (ord(ch) >= 32 and not (127 <= ord(ch) <= 159))
+    )
+
+
 class _Style:
     """ANSI styling that degrades to plain text (pipes, CI logs, NO_COLOR) and ASCII glyphs."""
 
@@ -304,6 +316,19 @@ def _bias_hint(bias: float) -> tuple[str, str]:
 
 
 def _decisive_logit_trace(traces: Sequence[LayerTrace]) -> LayerTrace | None:
+    non_passing = [
+        t for t in traces
+        if t.status != DecisionStatus.PASSED
+        and (t.log_odds_pass is not None or t.calibrated_prob is not None)
+    ]
+    if non_passing:
+        non_passing.sort(
+            key=lambda t: (
+                0 if t.status == DecisionStatus.FAILED else 1,
+                t.calibrated_prob if t.calibrated_prob is not None else 1.0,
+            )
+        )
+        return non_passing[0]
     for trace in reversed(traces):
         if trace.log_odds_pass is not None or trace.calibrated_prob is not None:
             return trace
@@ -333,17 +358,19 @@ def render_snapshot_report(
     verdict = snapshot.verdict
     out.append(style("LOGITGATE FAILURE REPLAY & EXPLANATION", "bold"))
     out.append(style.rule(heavy=True))
-    kv("Snapshot ID:", snapshot.snapshot_id)
+    kv("Snapshot ID:", _sanitize_terminal_text(str(snapshot.snapshot_id)))
     if snapshot.test_name:
-        kv("Test Name:", snapshot.test_name)
-    kv("Timestamp:", snapshot.timestamp)
-    rubric_lines = textwrap.wrap(snapshot.rubric, width=72 - lab) or [""]
+        kv("Test Name:", _sanitize_terminal_text(snapshot.test_name))
+    kv("Timestamp:", _sanitize_terminal_text(snapshot.timestamp))
+    safe_rubric = _sanitize_terminal_text(snapshot.rubric)
+    rubric_lines = textwrap.wrap(safe_rubric, width=72 - lab) or [""]
     kv("Rubric:", rubric_lines[0])
     out.extend(" " * lab + line for line in rubric_lines[1:])
-    candidate = str(snapshot.candidate)
+    raw_candidate = str(snapshot.candidate)
+    candidate = _sanitize_terminal_text(raw_candidate)
     width = 72 - lab
     wrapped = [w for line in candidate.strip().splitlines() for w in (textwrap.wrap(line, width) or [""])]
-    kv("Candidate:", style(wrapped[0] if wrapped else "(empty)", "cyan"), f"{len(candidate)} chars")
+    kv("Candidate:", style(wrapped[0] if wrapped else "(empty)", "cyan"), f"{len(raw_candidate)} chars")
     out.extend(" " * lab + style(line, "cyan") for line in wrapped[1:6])
     if len(wrapped) > 6:
         out.append(" " * lab + style(f"... ({len(wrapped) - 6} more lines)", "dim"))
@@ -356,9 +383,18 @@ def render_snapshot_report(
     for idx, t in enumerate(verdict.traces, start=1):
         # Pad the status *before* styling so ANSI codes don't break column alignment.
         status_cell = style.status(t.status) + " " * max(0, 13 - len(t.status.value) - 2)
+        prob_or_score = (
+            _fmt(t.calibrated_prob, ".4f")
+            if t.calibrated_prob is not None
+            else (
+                f"s={t.metadata['expected_score']:.2f}"
+                if isinstance(t.metadata.get("expected_score"), (int, float))
+                else "-"
+            )
+        )
         out.append(
-            f"  {idx:<3}{t.layer_name[:13]:<14}{status_cell}{t.latency_ms:>8.2f}ms"
-            f"{_fmt(t.calibrated_prob, '.4f'):>9}{_fmt(t.log_odds_pass, '+.3f'):>10}"
+            f"  {idx:<3}{_sanitize_terminal_text(t.layer_name)[:13]:<14}{status_cell}{t.latency_ms:>8.2f}ms"
+            f"{prob_or_score:>9}{_fmt(t.log_odds_pass, '+.3f'):>10}"
             f"{_fmt(t.shannon_entropy, '.3f'):>9}{_fmt(t.positional_bias_magnitude, '.2f'):>7}{t.tokens_generated:>8}"
         )
 
@@ -366,7 +402,11 @@ def render_snapshot_report(
     out.append(style.rule())
     out.append(style("Diagnostics", "bold"))
     prob = verdict.probability
-    kv("Original Prob:", f"{prob:.4f}" if prob is not None else "N/A", f"{verdict.status.value.upper()} at {verdict.triggered_layer}")
+    kv("Original Prob:", f"{prob:.4f}" if prob is not None else "N/A", f"{verdict.status.value.upper()} at {_sanitize_terminal_text(verdict.triggered_layer or '')}")
+    if verdict.score is not None:
+        thresh = snapshot.gate_config.get("threshold")
+        score_hint = f"threshold={thresh}" if thresh is not None else None
+        kv("Original Score:", f"{verdict.score:.4f}", score_hint)
 
     log_odds = snapshot.log_odds_pass
     pass_th = snapshot.gate_config.get("pass_threshold")
@@ -398,19 +438,19 @@ def render_snapshot_report(
     if snapshot.loops_executed is not None:
         kv("Recurrent Loops:", str(snapshot.loops_executed))
     if snapshot.failure_code:
-        kv("Failure Code:", style(snapshot.failure_code, "red"))
+        kv("Failure Code:", style(_sanitize_terminal_text(snapshot.failure_code), "red"))
     failing = next((t for t in reversed(verdict.traces) if t.status != DecisionStatus.PASSED), None)
     if failing is not None and failing.diagnostic_report and failing.tokens_generated == 0:
-        kv("Detail:", failing.diagnostic_report[:200])
-    kv("Triggered Layer:", verdict.triggered_layer)
+        kv("Detail:", _sanitize_terminal_text(failing.diagnostic_report)[:200])
+    kv("Triggered Layer:", _sanitize_terminal_text(verdict.triggered_layer or ""))
 
     # Replay
     out.append(style.rule())
     if replay is None:
         recorded = next((t for t in reversed(verdict.traces) if t.tokens_generated > 0 and t.diagnostic_report), None)
         if recorded is not None:
-            out.append(style(f"Recorded critique ({recorded.layer_name}, {recorded.tokens_generated} tokens):", "bold"))
-            out.extend("  " + line for line in (recorded.diagnostic_report or "").strip().splitlines())
+            out.append(style(f"Recorded critique ({_sanitize_terminal_text(recorded.layer_name)}, {recorded.tokens_generated} tokens):", "bold"))
+            out.extend("  " + line for line in _sanitize_terminal_text(recorded.diagnostic_report or "").strip().splitlines())
             out.append(style.rule())
         out.append(style(replay_note or "Replay skipped.", "dim"))
         out.append(style.rule(heavy=True))
@@ -421,7 +461,7 @@ def render_snapshot_report(
     kv("Tokens Spent:", str(replay.total_tokens_generated))
     out.append(style.rule())
     out.append(style("Diagnostic Critique:", "bold"))
-    critique = (replay.reason or "(No reason provided)").strip()
+    critique = _sanitize_terminal_text(replay.reason or "(No reason provided)").strip()
     out.extend("  " + line for line in critique.splitlines())
     out.append(style.rule(heavy=True))
     return "\n".join(out)
@@ -437,97 +477,119 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
 
     from logitgate.backends.base import resolve_logit_backend
 
+    if args.dataset and (
+        isinstance(args.alpha, bool) or not math.isfinite(args.alpha) or not (0.0 < args.alpha < 1.0)
+    ):
+        sys.stderr.write(f"Error: --alpha must be strictly between 0.0 and 1.0, got {args.alpha}\n")
+        return EXIT_FAILED
+
     backend = resolve_logit_backend(args.backend, model=args.model)
-    effective_model = args.model or getattr(backend, "model", "default")
+    effective_model = args.model or getattr(backend, "model", None) or getattr(backend, "model_name", None) or "default"
+    try:
+        if args.dataset:
+            import json
+            from dataclasses import asdict
 
-    if args.dataset:
-        import json
-        from dataclasses import asdict
-
-        from logitgate.calibration.conformal import (
-            calibrate_cascade_thresholds,
-            load_calibration_dataset,
-        )
-
-        try:
-            samples = load_calibration_dataset(args.dataset)
-        except (OSError, ValueError) as e:
-            sys.stderr.write(f"Error loading dataset '{args.dataset}': {e}\n")
-            return EXIT_FAILED
-        if not samples:
-            sys.stderr.write(f"Error: No valid samples found in dataset '{args.dataset}'\n")
-            return EXIT_FAILED
-
-        calibrated_probs: list[float] = []
-        ground_truth_labels: list[bool] = []
-
-        for sample_rubric, sample_candidate, sample_y in samples:
-            gate = LogitGate(rubric=sample_rubric, backend=backend, model=args.model)
-            v = gate.evaluate(sample_candidate)
-            prob = v.probability if v.probability is not None else (1.0 if v.passed else 0.0)
-            calibrated_probs.append(prob)
-            ground_truth_labels.append(bool(sample_y))
-
-        try:
-            thresholds = calibrate_cascade_thresholds(
-                calibrated_probs=calibrated_probs,
-                ground_truth_labels=ground_truth_labels,
-                target_risk_alpha=args.alpha,
+            from logitgate.calibration.conformal import (
+                calibrate_cascade_thresholds,
+                load_calibration_dataset,
             )
-        except ValueError as e:
-            sys.stderr.write(f"Error: {e}\n")
-            return EXIT_FAILED
 
-        if args.json:
-            print(json.dumps(asdict(thresholds), indent=2))
-        else:
-            print("=" * 60)
-            print("LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION")
-            print("=" * 60)
-            print(f"Dataset:                   {args.dataset}")
-            print(f"Calibration Samples:       {thresholds.calibration_set_size}")
-            print(f"Target Risk (Alpha):       {thresholds.target_risk_alpha:.4f}")
-            print("-" * 60)
-            print(f"Layer 1 Tau Reject:        {thresholds.tau_reject:.4f}")
-            print(f"Layer 1 Tau Accept:        {thresholds.tau_accept:.4f}")
-            print(f"Layer 2 Escalation Rate:   {thresholds.empirical_escalation_rate:.2%}")
-            print("-" * 60)
-            if thresholds.guarantee_holds:
-                print(f"Guaranteed Layer 1 Error: <= {thresholds.target_risk_alpha:.2%} "
-                      "(marginal; assumes production inputs resemble this dataset)")
-            else:
-                print(
-                    f"Guaranteed Layer 1 Error: NONE. Need >= {thresholds.min_samples_per_class} positives "
-                    f"and negatives (have {thresholds.num_positive} / {thresholds.num_negative}); "
-                    "thresholds are best-effort."
+            try:
+                samples = load_calibration_dataset(args.dataset)
+            except (OSError, ValueError) as e:
+                sys.stderr.write(f"Error loading dataset '{args.dataset}': {e}\n")
+                return EXIT_FAILED
+            if not samples:
+                sys.stderr.write(f"Error: No valid samples found in dataset '{args.dataset}'\n")
+                return EXIT_FAILED
+            if len(samples) < 10:
+                sys.stderr.write(
+                    f"Error: Calibration requires at least 10 samples, got {len(samples)} in '{args.dataset}'\n"
                 )
-            print(
-                f"Use: LogitGate(..., pass_threshold={thresholds.tau_accept}, "
-                f"fail_threshold={thresholds.tau_reject})"
+                return EXIT_FAILED
+            if len({bool(y) for _, _, y in samples}) < 2:
+                sys.stderr.write(
+                    f"Error: Calibration set '{args.dataset}' must contain both positive and negative ground truth labels.\n"
+                )
+                return EXIT_FAILED
+
+            calibrated_probs: list[float] = []
+            ground_truth_labels: list[bool] = []
+
+            for sample_rubric, sample_candidate, sample_y in samples:
+                gate = LogitGate(rubric=sample_rubric, backend=backend, model=args.model, save_on_fail=False)
+                v = gate.evaluate(sample_candidate, save_on_fail=False)
+                prob = v.probability if v.probability is not None else (1.0 if v.passed else 0.0)
+                calibrated_probs.append(prob)
+                ground_truth_labels.append(bool(sample_y))
+
+            try:
+                thresholds = calibrate_cascade_thresholds(
+                    calibrated_probs=calibrated_probs,
+                    ground_truth_labels=ground_truth_labels,
+                    target_risk_alpha=args.alpha,
+                )
+            except ValueError as e:
+                sys.stderr.write(f"Error: {e}\n")
+                return EXIT_FAILED
+
+            if args.json:
+                print(json.dumps(asdict(thresholds), indent=2))
+            else:
+                print("=" * 60)
+                print("LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION")
+                print("=" * 60)
+                print(f"Dataset:                   {args.dataset}")
+                print(f"Calibration Samples:       {thresholds.calibration_set_size}")
+                print(f"Target Risk (Alpha):       {thresholds.target_risk_alpha:.4f}")
+                print("-" * 60)
+                print(f"Layer 1 Tau Reject:        {thresholds.tau_reject:.4f}")
+                print(f"Layer 1 Tau Accept:        {thresholds.tau_accept:.4f}")
+                print(f"Layer 2 Escalation Rate:   {thresholds.empirical_escalation_rate:.2%}")
+                print("-" * 60)
+                if thresholds.guarantee_holds:
+                    print(f"Guaranteed Layer 1 Error: <= {thresholds.target_risk_alpha:.2%} "
+                          "(marginal; assumes production inputs resemble this dataset)")
+                else:
+                    print(
+                        f"Guaranteed Layer 1 Error: NONE. Need >= {thresholds.min_samples_per_class} positives "
+                        f"and negatives (have {thresholds.num_positive} / {thresholds.num_negative}); "
+                        "thresholds are best-effort."
+                    )
+                print(
+                    f"Use: LogitGate(..., pass_threshold={thresholds.tau_accept}, "
+                    f"fail_threshold={thresholds.tau_reject})"
+                )
+                print("=" * 60)
+            return EXIT_OK
+
+        from logitgate.debiasing.permutation import auto_calibrate_backend
+
+        cache_path = Path(args.cache_path) if args.cache_path else None
+
+        if not args.json:
+            print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
+        try:
+            result = auto_calibrate_backend(
+                backend,
+                model_key=effective_model,
+                save_cache=True,
+                cache_path=cache_path,
             )
-            print("=" * 60)
+        except (OSError, ValueError) as e:
+            sys.stderr.write(f"Error saving calibration cache: {e}\n")
+            return EXIT_FAILED
+        if args.json:
+            print(result.model_dump_json(indent=2))
+        else:
+            print(f"Optimal Temperature: {result.optimal_temperature:.4f}")
+            print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
+            print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
+            print("Calibration successfully saved to cache.")
         return EXIT_OK
-
-    from logitgate.debiasing.permutation import auto_calibrate_backend
-
-    cache_path = Path(args.cache_path) if args.cache_path else None
-
-    if not args.json:
-        print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
-    result = auto_calibrate_backend(
-        backend,
-        model_key=effective_model,
-        save_cache=True,
-        cache_path=cache_path,
-    )
-    if args.json:
-        print(result.model_dump_json(indent=2))
-    else:
-        print(f"Optimal Temperature: {result.optimal_temperature:.4f}")
-        print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
-        print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
-        print("Calibration successfully saved to cache.")
-    return EXIT_OK
+    finally:
+        backend.close()
 
 
 def _cmd_explain(args: argparse.Namespace) -> int:
@@ -535,7 +597,7 @@ def _cmd_explain(args: argparse.Namespace) -> int:
 
     try:
         snapshot = VerdictSnapshot.load(args.snapshot_path)
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, TypeError) as e:
         sys.stderr.write(f"Error loading snapshot from '{args.snapshot_path}': {e}\n")
         return EXIT_FAILED
 
@@ -560,6 +622,9 @@ def _cmd_explain(args: argparse.Namespace) -> int:
             print(render_snapshot_report(snapshot, style, replay_note="Replay failed; see error below."))
         sys.stderr.write(f"error: {exc}\nTip: `logitgate explain --offline {args.snapshot_path}` shows diagnostics without a model.\n")
         return EXIT_BACKEND_ERROR
+    except TypeError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return EXIT_FAILED
 
     if args.json:
         print(verdict.model_dump_json(indent=2))
@@ -613,18 +678,22 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
 
 def _cmd_eval(args: argparse.Namespace) -> int:
     candidate: str | None = None
-    if args.file:
+    if args.file is not None:
         try:
             with open(args.file, "r", encoding="utf-8") as f:
                 candidate = f.read()
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
             sys.stderr.write(f"Error reading file '{args.file}': {e}\n")
             return EXIT_FAILED
     elif args.candidate is not None:
         candidate = args.candidate
     else:
         if not sys.stdin.isatty():
-            candidate = sys.stdin.read()
+            try:
+                candidate = sys.stdin.read()
+            except (OSError, UnicodeDecodeError) as e:
+                sys.stderr.write(f"Error reading stdin: {e}\n")
+                return EXIT_FAILED
         else:
             sys.stderr.write("Error: Either --candidate or --file must be specified.\n")
             return EXIT_FAILED
@@ -636,22 +705,24 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         pass_threshold=args.threshold,
         fail_threshold=args.fail_threshold,
     )
+    try:
+        evaluator: Cascade | LogitGate
+        if args.ast_syntax or getattr(args, "normalize", False):
+            evaluator = Cascade([
+                ASTGate(syntax=args.ast_syntax, normalize=getattr(args, "normalize", False)),
+                logit_gate,
+            ])
+        else:
+            evaluator = logit_gate
 
-    evaluator: Cascade | LogitGate
-    if args.ast_syntax:
-        evaluator = Cascade([
-            ASTGate(syntax=True),
-            logit_gate,
-        ])
-    else:
-        evaluator = logit_gate
-
-    verdict = evaluator.evaluate(candidate)
+        verdict = evaluator.evaluate(candidate)
+    finally:
+        logit_gate.backend.close()
 
     if args.json:
         print(verdict.model_dump_json(indent=2))
     else:
-        verdict_str = "PASSED" if verdict.passed else "FAILED"
+        verdict_str = verdict.status.value.upper()
         print(f"Verdict: {verdict_str} (status: {verdict.status.value})")
         if verdict.probability is not None:
             print(f"Confidence: {verdict.probability:.4f}")

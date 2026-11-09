@@ -151,6 +151,12 @@ When checking multiple criteria against a single output, combining them into one
 ```python
 from logitgate import MultiRubricGate
 
+candidate_code = """
+def get_user_by_id(cursor, user_id: int) -> tuple | None:
+    cursor.execute("SELECT id, email FROM users WHERE id = ?", (user_id,))
+    return cursor.fetchone()
+"""
+
 rubrics = [
     "Does the function use parameterized SQL placeholders instead of f-strings?",
     "Does the function include parameter and return type annotations?",
@@ -172,11 +178,11 @@ for rubric, v in zip(rubrics, gate.evaluate_each(candidate_code)):
 
 | Gate | Layer | Latency (GPU) | Tokens Generated | Purpose & Behavior |
 | :--- | :---: | :---: | :---: | :--- |
-| **`ASTGate`** | Layer 0 | **< 0.1 ms** | 0 | Sub-millisecond deterministic checks: Python syntax, forbidden imports, regex, acyclic DAGs, custom callables. |
+| **`ASTGate`** | Layer 0 | **< 0.1 ms** | 0 | Sub-millisecond deterministic adapter: BYO parsers/validators (`ASTGate(PydanticModel, normalize=True)`), Python AST, JSON schema, regex, DAGs. |
 | **`ContractGate`** | Layer 0 | **< 0.1 ms** | 0 | General-domain contract validation: Pydantic models, JSON Schemas, length bounds, required sections. |
 | **`LogitGate`** | Layer 1 | **~36-113 ms** | 0 | Calibrated binary classification from first-token logits using symmetric log-odds debiasing ($\bar{L} = \frac{L_1 + L_2}{2T}$). |
 | **`MultiRubricGate`** | Layer 1 | **~50-140 ms** | 0 | Atomic multi-rubric verification sharing the candidate KV-cache prefix with weakest-link (`min(P)`) aggregation. |
-| **`ChoiceGate`** | Layer 1 | **~40-140 ms** | 0 | Discrete K-way routing and classification across options with cyclic permutation debiasing. |
+| **`ChoiceGate`** | Layer 1 | **~40-140 ms** | 0 | Discrete K-way routing and classification across options with symmetric order-reversal debiasing. |
 | **`ScoreGate`** | Layer 1 | **~50-165 ms** | 0 | Continuous probability-weighted rubric scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with 2-pass scale-reversal debiasing. |
 | **`JudgeGate`** | Layer 2 | **1.5-5.0 s** | 60-300 | Generative step-by-step reasoning judge with reason-then-verdict parsing and a self-healing 1-token logit fallback. |
 | **`Cascade`** | 0 $\to$ 2 | **~40-120 ms\*** | 0\* | Chained pipeline (`gate_a >> gate_b`). Clear passes and failures at Layer 0/1 skip Layer 2. |
@@ -373,12 +379,12 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
 ## BibTeX Citation
 
 ```bibtex
-@software{logitgate2026,
-  author = {Jason Bradley},
-  title = {LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
+@software{bradley2026logitgate,
+  author = {Bradley, Jason},
+  title = {LogitGate: Fast, Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
   version = {0.3.1},
-  url = {https://github.com/jasonbdly/logitgate},
+  url = {https://github.com/jasonbdly/LogitGate},
   license = {Apache-2.0}
 }
 ```

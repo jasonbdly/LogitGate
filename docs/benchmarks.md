@@ -318,13 +318,15 @@ In traditional LLM-as-a-judge frameworks, evaluators often ask for a verdict bef
 1. **Reason-Then-Verdict Prompting**: On standard calls, `JudgeGate` instructs the model to verify each requirement or calculation step-by-step in 2–4 concise bullet points first, and emit `[VERDICT: PASS]` or `[VERDICT: FAIL]` on the concluding line (matching the final tag via `re.finditer`). For ultra-short CPU caps (`max_tokens <= 80`), it switches to Verdict-First on Line 1 so the tag is never truncated.
 2. **Self-Healing 1-Token Logit Probe**: If an upstream model omits the explicit `[VERDICT: ...]` tag or JSON field, **`JudgeGate` runs a 1-token `LogitGate` probe on its own generated critique text** before falling back to heuristics:
    ```python
-# Inside JudgeGate._parse_verdict:
-probe_gate = LogitGate(
-    rubric="Does this review critique conclude that the candidate artifact PASSED the evaluation?",
+# Inside JudgeGate._probe:
+probe = LogitGate(
+    rubric=_PROBE_RUBRIC,
     backend=self.backend,
+    model=self.model,
     symmetric_debiasing=False,
+    save_on_fail=False,
 )
-is_pass = probe_gate.evaluate(critique_text).probability >= 0.5
+is_pass = probe.evaluate(critique_text).probability >= 0.5
    ```
 3. **Negation-Safe Line Fallback**: If the backend does not implement `LogitBackend`, it falls back to negation-safe parsing of concluding lines.
 
@@ -350,8 +352,7 @@ from logitgate import LogitGate
 # Elastic recurrent depth: 2 internal latent loops before first-token projection
 gate = LogitGate(
     rubric="Does the SQL query use proper parameterized statements without dynamic string interpolation?",
-    backend="recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16",
-    num_loops=2,
+    backend="recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16?num_loops=2",
 )
 
 verdict = gate.evaluate(candidate_sql)
@@ -376,7 +377,7 @@ Evaluating the 32-item reasoning depth suite (8 items per tier) across recurrent
 | **Dory-4B (RTX 5090)** | $K=4$ | 4/8 (50.0%) | 4/8 (50.0%) | 5/8 (62.5%) | 5/8 (62.5%) | **18/32 (56.2%)** |
 | **Dory-4B (RTX 4070)** | $K=1$ | 4/8 (50.0%) | 3/8 (37.5%) | 6/8 (75.0%) | 3/8 (37.5%) | **16/32 (50.0%)** |
 | **Dory-4B (RTX 4070)** | $K=2$ | 5/8 (62.5%) | **5/8 (62.5%)** | 6/8 (75.0%) | 4/8 (50.0%) | **20/32 (62.5%)** *(+12.5% jump)* |
-| **Dory-4B (RTX 4070)** | $K=4$ | 4/8 (50.0%) | 4/8 (50.0%) | 5/8 (62.5%) | 5/8 (62.5%) | **18/32 (56.2%)** |
+| **Dory-4B (RTX 4070)** | $K=4$ | 5/8 (62.5%) | 4/8 (50.0%) | 4/8 (50.0%) | 5/8 (62.5%) | **18/32 (56.2%)** |
 | *Baseline Feed-Forward 4B (`gemma4:e4b`)* | *N/A ($K=1$)* | *6/8 (75.0%)* | *4/8 (50.0%)* | *4/8 (50.0%)* | *4/8 (50.0%)* | *18/32 (56.2%)* |
 | *Baseline Feed-Forward 14B (`qwen2.5:14b`)* | *N/A ($K=1$)* | *8/8 (100.0%)* | *5/8 (62.5%)* | *5/8 (62.5%)* | *4/8 (50.0%)* | *22/32 (68.8%)* |
 

@@ -44,13 +44,13 @@ Run the full test suite with `pytest`:
 pytest tests -q
 ```
 
-All 81 unit tests execute in ~0.3s. If your changes introduce new gates or debiasing math, ensure they include comprehensive offline tests using `StubBackend`.
+The entire unit test suite executes offline in ~1-2 seconds. If your changes introduce new gates or debiasing math, ensure they include comprehensive offline tests using `StubBackend`.
 
 ### Type Checking & Linting
 
 ```bash
 # Type check with mypy
-mypy src/logitgate
+mypy src/logitgate tests
 
 # Lint checks
 ruff check src/logitgate tests
@@ -78,6 +78,7 @@ class MyCustomBackend(LogitBackend, GenerativeBackend):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         # Return [{'token': 'A', 'logprob': -0.15}, ...]
         ...

@@ -149,8 +149,8 @@ BUILTIN_CASES: tuple[BenchmarkCase, ...] = (
 class _MeteredBackend(LogitBackend, GenerativeBackend):
     """Counts forward passes and generation calls without changing backend behavior."""
 
-    def __init__(self, inner: LogitBackend) -> None:
-        if not isinstance(inner, GenerativeBackend):
+    def __init__(self, inner: LogitBackend, *, require_generative: bool = True) -> None:
+        if require_generative and not isinstance(inner, GenerativeBackend):
             raise TypeError(f"Benchmarking the judge requires a generative backend, got {inner!r}")
         self.inner = inner
         self.logit_calls = 0
@@ -165,20 +165,21 @@ class _MeteredBackend(LogitBackend, GenerativeBackend):
         return repr(self.inner)
 
     def query_top_logprobs(
-        self, prompt: str, top_k: int = 10, allowed_tokens: list[str] | None = None
+        self, prompt: str, top_k: int = 10, allowed_tokens: list[str] | None = None, **kwargs: Any
     ) -> list[dict[str, Any]]:
         self.logit_calls += 1
-        return self.inner.query_top_logprobs(prompt, top_k, allowed_tokens)
+        return self.inner.query_top_logprobs(prompt, top_k, allowed_tokens, **kwargs)
 
     async def aquery_top_logprobs(
-        self, prompt: str, top_k: int = 10, allowed_tokens: list[str] | None = None
+        self, prompt: str, top_k: int = 10, allowed_tokens: list[str] | None = None, **kwargs: Any
     ) -> list[dict[str, Any]]:
         self.logit_calls += 1
-        return await self.inner.aquery_top_logprobs(prompt, top_k, allowed_tokens)
+        return await self.inner.aquery_top_logprobs(prompt, top_k, allowed_tokens, **kwargs)
 
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+        if not isinstance(self.inner, GenerativeBackend):
+            raise TypeError(f"Benchmarking the judge requires a generative backend, got {self.inner!r}")
         self.generate_calls += 1
-        assert isinstance(self.inner, GenerativeBackend)
         return self.inner.generate(prompt, max_tokens=max_tokens, **kwargs)
 
     def close(self) -> None:
@@ -245,45 +246,60 @@ def run_benchmark(
     """Runs each mode over every case ``repeat`` times and collects per-call measurements."""
     if not cases:
         raise ValueError("Benchmark needs at least one case")
+    if not modes:
+        raise ValueError(f"Benchmark needs at least one mode; choose from {list(MODES)}")
     unknown = [m for m in modes if m not in MODES]
     if unknown:
         raise ValueError(f"Unknown benchmark modes {unknown}; choose from {list(MODES)}")
     if repeat < 1 or warmup < 0:
         raise ValueError("repeat must be >= 1 and warmup >= 0")
 
+    owns_backend = not isinstance(backend, LogitBackend)
     resolved = resolve_logit_backend(backend, model=model)
-    effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
-    metered = _MeteredBackend(resolved)
-    # Only Ollama understands `think`; OpenAI-compatible servers may reject unknown fields.
-    from logitgate.backends.ollama import OllamaBackend
-
-    effective_think = judge_think if isinstance(resolved, (OllamaBackend, StubBackend)) else None
-
-    def build(mode: str, rubric: str) -> BaseGate:
-        logit = LogitGate(rubric=rubric, backend=metered, model=effective_model)
-        if mode == "logit":
-            return logit
-        judge = JudgeGate(
-            rubric=rubric if mode == "judge" else None,
-            backend=metered,
-            model=effective_model,
-            trigger="always" if mode == "judge" else cascade_trigger,
-            max_tokens=judge_max_tokens,
-            think=effective_think,
-        )
-        return judge if mode == "judge" else logit >> judge
-
-    stats = {mode: ModeStats(mode) for mode in modes}
     try:
+        effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
+        needs_generative = any(m in ("judge", "cascade") for m in modes)
+        metered = _MeteredBackend(resolved, require_generative=needs_generative)
+        # Only Ollama understands `think`; OpenAI-compatible servers may reject unknown fields.
+        from logitgate.backends.ollama import OllamaBackend
+
+        effective_think = judge_think if isinstance(resolved, (OllamaBackend, StubBackend)) else None
+
+        def build(mode: str, rubric: str) -> BaseGate:
+            if mode == "judge":
+                return JudgeGate(
+                    rubric=rubric,
+                    backend=metered,
+                    model=effective_model,
+                    trigger="always",
+                    max_tokens=judge_max_tokens,
+                    think=effective_think,
+                )
+            logit = LogitGate(rubric=rubric, backend=metered, model=effective_model, save_on_fail=False)
+            if mode == "logit":
+                return logit
+            judge = JudgeGate(
+                rubric=None,
+                backend=metered,
+                model=effective_model,
+                trigger=cascade_trigger,
+                max_tokens=judge_max_tokens,
+                think=effective_think,
+            )
+            return logit >> judge
+
+        stats = {mode: ModeStats(mode) for mode in modes}
         for mode in modes:
-            for case in cases[:warmup]:
-                build(mode, case.rubric).evaluate(case.candidate)
+            if cases:
+                for w_idx in range(warmup):
+                    w_case = cases[w_idx % len(cases)]
+                    build(mode, w_case.rubric).evaluate(w_case.candidate, save_on_fail=False)
             for rep in range(repeat):
                 for idx, case in enumerate(cases):
                     gate = build(mode, case.rubric)
                     logit_before, gen_before = metered.logit_calls, metered.generate_calls
                     t0 = time.perf_counter()
-                    verdict = gate.evaluate(case.candidate)
+                    verdict = gate.evaluate(case.candidate, save_on_fail=False)
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
                     generate_calls = metered.generate_calls - gen_before
 
@@ -297,7 +313,8 @@ def run_benchmark(
                     if progress is not None:
                         progress(f"{mode:<8} rep {rep + 1}/{repeat} case {idx + 1}/{len(cases)} {elapsed_ms:9.1f} ms")
     finally:
-        resolved.close()
+        if owns_backend:
+            resolved.close()
 
     from logitgate import __version__
 
@@ -309,7 +326,7 @@ def run_benchmark(
         "python": platform.python_version(),
         "platform": platform.platform(),
         "backend": infer_backend_spec(resolved),
-        "model": model or getattr(resolved, "model", None),
+        "model": effective_model,
         "is_stub": isinstance(resolved, StubBackend),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset": {"source": dataset_label, "cases": len(cases), "sha256_12": digest},
@@ -348,14 +365,17 @@ def format_report(report: BenchmarkReport) -> str:
     judge = report.modes.get("judge")
     if judge is not None and not meta["is_stub"]:
         base = judge.summary()
-        lines.append("")
+        comp_lines: list[str] = []
         for r in rows:
             if r["mode"] == "judge" or r["mean_ms"] <= 0:
                 continue
             speedup = base["mean_ms"] / r["mean_ms"]
             tokens = base["generated_tokens_per_case"]
             saved = 1.0 - r["generated_tokens_per_case"] / tokens if tokens else 0.0
-            lines.append(f"{r['mode']} vs judge: {speedup:.1f}x faster (mean), {saved:.0%} fewer generated tokens")
+            comp_lines.append(f"{r['mode']} vs judge: {speedup:.1f}x faster (mean), {saved:.0%} fewer generated tokens")
+        if comp_lines:
+            lines.append("")
+            lines.extend(comp_lines)
     lines += [
         "",
         "gen tok = generated tokens per case; calls = forward passes + generate calls per case.",
