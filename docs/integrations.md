@@ -45,7 +45,8 @@ Use your already-loaded local model as a sub-100ms System-1 evaluation judge:
 
 ```python
 from deepeval.metrics import JevEval
-from deepeval.test_case import LLMTestCase
+from deepeval.metrics.jev_eval.schema import Noul
+from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from logitgate.integrations.deepeval import LogitGateSystemOneModel
 
 system_one = LogitGateSystemOneModel(
@@ -55,8 +56,9 @@ system_one = LogitGateSystemOneModel(
 
 metric = JevEval(
     name="Security Baseline Check",
-    questions=[{"statement": "Artifact does not invoke raw shell commands"}],
-    system_one_model=system_one,
+    nouls=[Noul(criteria="Artifact does not invoke raw shell commands")],
+    evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
+    model=system_one,
 )
 
 test_case = LLMTestCase(
@@ -142,4 +144,73 @@ route_intent = as_conditional_edge(
 )
 
 workflow.add_conditional_edges("triage_agent", route_intent)
+```
+
+---
+
+## 4. Bring-Your-Own (BYO) Syntactic & Schema Validators (`ASTGate`)
+
+`ASTGate` (and its alias `ContractGate`) acts as a universal Layer 0 (`<0.1 ms`, `can_fast_path = False`) integration surface between your `Cascade` pipeline and any syntactic parser or schema validator in the Python ecosystem.
+
+Any positional validator passed to `ASTGate(*validators)` follows a universal contract:
+- **Pass**: Returning `True`, `None` (standard for `ast.parse`, `jsonschema.validate`), or any non-`False` parsed object (such as a Pydantic model instance, a `sqlglot` AST, or a `dict`).
+- **Fail**: Returning `False`, `(False, "reason")`, or raising any `Exception` (the exception type and message are captured in `verdict.reason`).
+
+### Handling Realistic LLM Output Wrappers (`normalize=True`)
+
+In production, LLMs frequently wrap valid code or JSON inside `<think>...</think>` blocks, markdown code fences (` ```json ... ``` `), or conversational preamble (`"Sure! Here is the payload: {...}"`). Enable `normalize=True` (or pass a custom `normalize=my_extractor_fn`) to strip wrapper noise before running Layer 0 validators:
+
+```python
+import ast
+from pydantic import BaseModel
+from logitgate import ASTGate, LogitGate, JudgeGate
+
+class SQLQueryPayload(BaseModel):
+    query: str
+    read_only: bool
+
+# Accepts a Pydantic model class directly and normalizes <think> / markdown wrappers
+cascade = (
+    ASTGate(SQLQueryPayload, normalize=True)
+    >> LogitGate("Is the SQL query strictly read-only and free of injection risks?")
+    >> JudgeGate(trigger="on_ambiguous_only")
+)
+
+raw_llm_output = (
+    "<think>\nLet me format the response as requested.\n</think>\n"
+    "Here is the JSON payload you requested:\n"
+    '{"query": "SELECT id, email FROM users WHERE active = 1", "read_only": true}\n'
+    "Hope this helps!"
+)
+
+verdict = cascade.evaluate(raw_llm_output)
+assert verdict.passed
+```
+
+### Drop-In Ecosystem Recipes
+
+```python
+import ast
+import json
+from logitgate import ASTGate
+
+# 1. Python standard library `ast.parse` (returns ast.Module on success, raises SyntaxError on failure)
+python_gate = ASTGate(ast.parse, normalize=True)
+
+# 2. jsonschema Draft202012Validator (or jsonschema.validate)
+# import jsonschema
+# schema_validator = jsonschema.Draft202012Validator({"type": "object", "required": ["id"]})
+# json_gate = ASTGate(schema_validator, normalize=True)
+
+# 3. SQLGlot dialect syntax checking (raises ParseError on invalid SQL)
+# import sqlglot
+# sql_gate = ASTGate(lambda s: sqlglot.transpile(s, read="postgres"), normalize=True)
+
+# 4. Tree-sitter syntax error node detection
+# def check_treesitter(code: str) -> tuple[bool, str]:
+#     tree = parser.parse(code.encode("utf-8"))
+#     if tree.root_node.has_error:
+#         return False, "Tree-sitter detected syntax error node"
+#     return True, "ok"
+# ts_gate = ASTGate(check_treesitter, normalize=True)
 ```

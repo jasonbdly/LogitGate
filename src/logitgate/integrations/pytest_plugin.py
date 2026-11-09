@@ -19,14 +19,17 @@ from logitgate.backends.base import LogitBackend
 from logitgate.gates.base import BaseGate
 from logitgate.models import Verdict
 
+_CHECK_SNAPSHOT_PATHS: list[str] = []
+
 
 def check(
     rubric: str,
     threshold: float | None = None,
     backend: str | LogitBackend | None = None,
-    ast_check: bool = False,
+    ast_check: bool | Any = False,
     save_snapshot: bool | None = None,
     model: str | None = None,
+    normalize: bool | Callable[[Any], Any] = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Asserts that a test function's *return value* satisfies ``rubric``.
 
@@ -49,7 +52,35 @@ def check(
         from logitgate.gates.logit_gate import LogitGate
 
         gate: BaseGate = LogitGate(rubric=rubric, pass_threshold=threshold, backend=backend, model=model)
-        return ASTGate(syntax=True) >> gate if ast_check else gate
+        if ast_check is True:
+            return ASTGate(syntax=True, normalize=normalize) >> gate
+        if isinstance(ast_check, ASTGate):
+            if normalize and not ast_check.normalize:
+                cloned = ASTGate(
+                    syntax=ast_check.syntax,
+                    forbidden_imports=ast_check.forbidden_imports,
+                    forbidden_patterns=ast_check.forbidden_patterns,
+                    required_sections=ast_check.required_sections,
+                    acyclic_dag=ast_check.acyclic_dag,
+                    json_schema=ast_check.json_schema,
+                    min_length=ast_check.min_length,
+                    max_length=ast_check.max_length,
+                    validators=ast_check.validators,
+                    normalize=normalize,
+                    save_on_fail=ast_check.save_on_fail,
+                    name=ast_check.name,
+                )
+                return cloned >> gate
+            return ast_check >> gate
+        if isinstance(ast_check, BaseGate):
+            if normalize and not getattr(ast_check, "normalize", False):
+                return ASTGate(normalize=normalize) >> ast_check >> gate
+            return ast_check >> gate
+        if ast_check:
+            return ASTGate(ast_check, normalize=normalize) >> gate
+        if normalize:
+            return ASTGate(normalize=normalize) >> gate
+        return gate
 
     def _save() -> bool:
         from logitgate.config import get_default_save_failures
@@ -63,6 +94,8 @@ def check(
         message = f"LogitGate check failed [{verdict.status.value}, P={prob}]: {rubric}\n  {verdict.reason}"
         snapshot_path = verdict.traces[-1].metadata.get("snapshot_path") if verdict.traces else None
         if snapshot_path:
+            if str(snapshot_path) not in _CHECK_SNAPSHOT_PATHS:
+                _CHECK_SNAPSHOT_PATHS.append(str(snapshot_path))
             message += (
                 f"\nSnapshot saved to: {snapshot_path}\n"
                 "Reproduce & generate full Layer-2 explanation locally without re-running your app:\n"
@@ -76,12 +109,23 @@ def check(
         raise AssertionError(message)
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        state: dict[str, BaseGate] = {}
+        state: dict[Any, BaseGate] = {}
 
         def gate() -> BaseGate:
-            if "gate" not in state:
-                state["gate"] = _gate()
-            return state["gate"]
+            from logitgate.config import LogitGateDefaults
+
+            cfg_key = (
+                LogitGateDefaults.backend if backend is None else None,
+                LogitGateDefaults.model if model is None else None,
+                LogitGateDefaults.pass_threshold if threshold is None else None,
+                LogitGateDefaults.fail_threshold,
+                LogitGateDefaults.logit_temperature,
+                LogitGateDefaults.num_ctx,
+            )
+            if cfg_key not in state:
+                state.clear()
+                state[cfg_key] = _gate()
+            return state[cfg_key]
 
         if inspect.iscoroutinefunction(fn):
 
@@ -137,8 +181,8 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
     from logitgate.config import get_default_save_failures
     from logitgate.snapshot import session_snapshot_paths
 
-    paths = session_snapshot_paths()
-    if not paths or not get_default_save_failures():
+    paths = session_snapshot_paths() if get_default_save_failures() else list(_CHECK_SNAPSHOT_PATHS)
+    if not paths:
         return
     terminalreporter.section("LogitGate failure snapshots")
     for path in paths:
