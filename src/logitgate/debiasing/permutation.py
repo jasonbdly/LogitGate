@@ -309,7 +309,7 @@ class SurfaceTokenMap:
             negative_token_ids=_collect_ids(neg_label),
         )
 
-    def to_logit_bias(self, bias: int | float = 100) -> dict[str, int | float]:
+    def to_logit_bias(self, bias: float = 100) -> dict[str, int | float]:
         """Builds an OpenAI/vLLM/llama.cpp `logit_bias` dictionary for all surface token IDs."""
         all_ids = sorted(set(self.positive_token_ids) | set(self.negative_token_ids))
         return {str(tid): bias for tid in all_ids}
