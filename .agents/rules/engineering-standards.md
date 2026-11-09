@@ -35,7 +35,7 @@ These standards apply to all code, documentation, tests, and commits in the Logi
 
 - Technical documentation in `README.md` and `docs/` must remain direct, precise, and grounded in reproducible benchmarks.
 - Avoid marketing superlatives, unquantified claims, and time-based quickstart claims (use "Quickstart", not "30-Second Quickstart"). Use standard hyphens (`-`) or colons/parentheses rather than em-dashes (`—`) in prose.
-- Every Python code block in `README.md` is executed by `tests/test_readme.py` and must run offline using default/stub configurations.
+- Every Python code block in `README.md` is executed by `tests/test_dx_and_tooling.py` and must run offline using default/stub configurations.
 
 ## 5. Git Hygiene & Command Execution
 
