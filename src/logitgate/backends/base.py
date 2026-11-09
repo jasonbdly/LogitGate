@@ -4,12 +4,13 @@ import abc
 import asyncio
 import functools
 import inspect
+import json
 import math
 import re
 import threading
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from typing_extensions import Self
@@ -23,7 +24,7 @@ from logitgate.exceptions import (
 _F = TypeVar("_F", bound=Callable[..., Any])
 _OFFLINE_HINT = "Or set backend='stub://' for offline testing."
 EXCLUDED_INTERNAL_KWARGS: frozenset[str] = frozenset(
-    {"save_on_fail", "snapshot_dir", "test_name", "rubric_override"}
+    {"save_on_fail", "snapshot_dir", "test_name", "rubric_override", "_normalized_out"}
 )
 
 
@@ -31,7 +32,7 @@ def _response_detail(response: httpx.Response) -> str:
     """Extracts the server's own error message (Ollama: {"error": str}, OpenAI: {"error": {...}})."""
     try:
         payload = response.json()
-    except ValueError:
+    except (ValueError, httpx.ResponseNotRead):
         payload = None
     if isinstance(payload, dict):
         error = payload.get("error")
@@ -92,6 +93,18 @@ def translate_transport_errors(method: _F) -> _F:
                 return await method(self, *args, **kwargs)
             except httpx.HTTPError as exc:
                 raise describe_transport_error(self, exc) from exc
+            except httpx.InvalidURL as exc:
+                service = getattr(self, "service_name", type(self).__name__)
+                base_url = getattr(self, "base_url", None) or "<unknown url>"
+                raise BackendError(
+                    f"Invalid URL '{base_url}' for {service}: {exc}"
+                ) from exc
+            except json.JSONDecodeError as exc:
+                service = getattr(self, "service_name", type(self).__name__)
+                base_url = getattr(self, "base_url", None) or "<unknown url>"
+                raise BackendError(
+                    f"{service} at {base_url} returned malformed JSON: {exc}"
+                ) from exc
 
         return cast(_F, async_wrapper)
 
@@ -101,16 +114,63 @@ def translate_transport_errors(method: _F) -> _F:
             return method(self, *args, **kwargs)
         except httpx.HTTPError as exc:
             raise describe_transport_error(self, exc) from exc
+        except httpx.InvalidURL as exc:
+            service = getattr(self, "service_name", type(self).__name__)
+            base_url = getattr(self, "base_url", None) or "<unknown url>"
+            raise BackendError(
+                f"Invalid URL '{base_url}' for {service}: {exc}"
+            ) from exc
+        except json.JSONDecodeError as exc:
+            service = getattr(self, "service_name", type(self).__name__)
+            base_url = getattr(self, "base_url", None) or "<unknown url>"
+            raise BackendError(
+                f"{service} at {base_url} returned malformed JSON: {exc}"
+            ) from exc
 
     return cast(_F, wrapper)
 
 
 def strip_reasoning_blocks(text: str) -> str:
-    """Strips <think>...</think> reasoning traces from model responses."""
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    if "<think>" in cleaned:
-        cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
-    return cleaned.strip()
+    """Strips <think>...</think> reasoning traces from model responses in O(N) linear time."""
+    if not text:
+        return ""
+    if "<think>" not in text:
+        return text.strip()
+    parts: list[str] = []
+    pos = 0
+    n = len(text)
+    comment_prefixes = ("#", "//", "--", "/*", "*", '"', "'")
+    while pos < n:
+        start = text.find("<think>", pos)
+        if start == -1:
+            parts.append(text[pos:])
+            break
+        line_start = text.rfind("\n", 0, start) + 1
+        line_prefix = text[line_start:start].strip()
+        if line_prefix.startswith(comment_prefixes):
+            # Inside a source-code comment or quoted literal on the same line: do not strip
+            parts.append(text[pos : start + 7])
+            pos = start + 7
+            continue
+        parts.append(text[pos:start])
+        search_from = start + 7
+        closed = False
+        while True:
+            end = text.find("</think>", search_from)
+            if end == -1:
+                break
+            end_line_start = text.rfind("\n", 0, end) + 1
+            end_line_prefix = text[end_line_start:end].strip()
+            if end_line_prefix.startswith(comment_prefixes):
+                search_from = end + 8
+                continue
+            pos = end + 8
+            closed = True
+            break
+        if not closed:
+            # Unclosed top-level <think> tag: truncate mid-thought reasoning tail
+            break
+    return "".join(parts).strip()
 
 
 class LogitBackend(abc.ABC):
@@ -122,6 +182,7 @@ class LogitBackend(abc.ABC):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Returns top_k token logprobs: [{'token': str, 'logprob': float}, ...]"""
 
@@ -130,11 +191,12 @@ class LogitBackend(abc.ABC):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Async variant of query_top_logprobs."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, self.query_top_logprobs, prompt, top_k, allowed_tokens
+            None, lambda: self.query_top_logprobs(prompt, top_k, allowed_tokens, **kwargs)
         )
 
     def close(self) -> None:
@@ -195,6 +257,7 @@ class _HTTPClientMixin:
     _async_client: httpx.AsyncClient | None
     _async_client_loop: asyncio.AbstractEventLoop | None
     _owns_async_client: bool
+    _http_lock: threading.RLock
 
     def _init_http_clients(
         self,
@@ -205,12 +268,18 @@ class _HTTPClientMixin:
         self._async_client = async_client
         self._async_client_loop = None
         self._owns_async_client = async_client is None
+        self._http_lock = threading.RLock()
 
     @property
     def client(self) -> httpx.Client:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=self.timeout)
-        return self._client
+        lock = getattr(self, "_http_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._http_lock = lock
+        with lock:
+            if self._client is None or self._client.is_closed:
+                self._client = httpx.Client(timeout=self.timeout)
+            return self._client
 
     @property
     def async_client(self) -> httpx.AsyncClient:
@@ -219,35 +288,50 @@ class _HTTPClientMixin:
         except RuntimeError:
             current_loop = None
 
-        owns_client = getattr(self, "_owns_async_client", True)
-        bound_loop = getattr(self, "_async_client_loop", None)
-        loop_changed = (
-            owns_client
-            and current_loop is not None
-            and bound_loop is not None
-            and (bound_loop is not current_loop or bound_loop.is_closed())
-        )
-        if self._async_client is None or self._async_client.is_closed or loop_changed:
-            self._async_client = httpx.AsyncClient(timeout=self.timeout)
-            self._async_client_loop = current_loop
-            self._owns_async_client = True
-        elif bound_loop is None and current_loop is not None:
-            self._async_client_loop = current_loop
-        return self._async_client
+        lock = getattr(self, "_http_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._http_lock = lock
+        with lock:
+            owns_client = getattr(self, "_owns_async_client", True)
+            bound_loop = getattr(self, "_async_client_loop", None)
+            loop_changed = (
+                owns_client
+                and current_loop is not None
+                and bound_loop is not None
+                and (bound_loop is not current_loop or bound_loop.is_closed())
+            )
+            if self._async_client is None or self._async_client.is_closed or loop_changed:
+                self._async_client = httpx.AsyncClient(timeout=self.timeout)
+                self._async_client_loop = current_loop
+                self._owns_async_client = True
+            elif bound_loop is None and current_loop is not None:
+                self._async_client_loop = current_loop
+            return self._async_client
 
     def close(self) -> None:
         """Closes the synchronous HTTP client session if initialized."""
-        if self._client is not None and not self._client.is_closed:
-            self._client.close()
+        lock = getattr(self, "_http_lock", None) or threading.RLock()
+        with lock:
+            if self._client is not None and not self._client.is_closed:
+                self._client.close()
 
     async def aclose(self) -> None:
         """Closes the asynchronous HTTP client session if initialized."""
-        if self._async_client is not None and not self._async_client.is_closed:
+        lock = getattr(self, "_http_lock", None) or threading.RLock()
+        with lock:
+            client = self._async_client
+            owns = getattr(self, "_owns_async_client", True)
+        if client is not None and not client.is_closed:
             try:
-                await self._async_client.aclose()
+                await client.aclose()
             except RuntimeError:
                 pass
-            self._async_client_loop = None
+            finally:
+                with lock:
+                    self._async_client_loop = None
+                    if owns:
+                        self._async_client = None
 
 
 class StubBackend(LogitBackend, GenerativeBackend):
@@ -283,6 +367,7 @@ class StubBackend(LogitBackend, GenerativeBackend):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         with self._lock:
             self.prompt_log.append(prompt)
@@ -290,12 +375,16 @@ class StubBackend(LogitBackend, GenerativeBackend):
             if self.logprob_responses:
                 self._response_idx += 1
 
+        decision_tail_idx = max(prompt.rfind("[DECISION MAPPING]"), prompt.rfind("[SCORING SCALE]"))
+        decision_section = prompt[decision_tail_idx:] if decision_tail_idx != -1 else prompt[-300:]
+        is_inverted_scale = "on an inverted scale where" in decision_section
+
         # 1. Explicit queue response
         if self.logprob_responses:
             resp = self.logprob_responses[resp_idx % len(self.logprob_responses)]
             if (
                 len(self.logprob_responses) == 1
-                and "on an inverted scale where" in prompt
+                and is_inverted_scale
                 and allowed_tokens
             ):
                 int_toks = [int(t) for t in allowed_tokens if str(t).isdigit()]
@@ -312,24 +401,22 @@ class StubBackend(LogitBackend, GenerativeBackend):
                     ]
             return resp
 
-        if (
-            "on an inverted scale where" in prompt
-            and self.reverse_top_logprobs is None
-            and self.forward_top_logprobs is not None
-            and allowed_tokens
-        ):
-            int_toks = [int(t) for t in allowed_tokens if str(t).isdigit()]
-            if int_toks:
-                mirror = min(int_toks) + max(int_toks)
-                return [
-                    {
-                        **item,
-                        "token": str(mirror - int(item["token"]))
-                        if str(item.get("token", "")).strip().isdigit()
-                        else item["token"],
-                    }
-                    for item in self.forward_top_logprobs
-                ]
+        if is_inverted_scale:
+            if self.reverse_top_logprobs is not None:
+                return self.reverse_top_logprobs
+            if self.forward_top_logprobs is not None and allowed_tokens:
+                int_toks = [int(t) for t in allowed_tokens if str(t).isdigit()]
+                if int_toks:
+                    mirror = min(int_toks) + max(int_toks)
+                    return [
+                        {
+                            **item,
+                            "token": str(mirror - int(item["token"]))
+                            if str(item.get("token", "")).strip().isdigit()
+                            else item["token"],
+                        }
+                        for item in self.forward_top_logprobs
+                    ]
 
         # Numeric score scale (e.g. ScoreGate 1..5) when no custom logprobs were supplied
         if (
@@ -341,7 +428,7 @@ class StubBackend(LogitBackend, GenerativeBackend):
             int_toks = sorted(int(str(t).strip()) for t in allowed_tokens)
             low_tok, high_tok = str(int_toks[0]), str(int_toks[-1])
             p = max(min(self.default_prob, 0.9999), 0.0001)
-            if "on an inverted scale where" in prompt:
+            if is_inverted_scale:
                 return [
                     {"token": low_tok, "logprob": math.log(p)},
                     {"token": high_tok, "logprob": math.log(1.0 - p)},
@@ -353,9 +440,9 @@ class StubBackend(LogitBackend, GenerativeBackend):
 
         # 2. Check if this is Pass 2 (reversed mapping where A is Fail / violates)
         is_reverse_pass = (
-            "A: The candidate artifact violates" in prompt
-            or "A: The content violates" in prompt
-            or "A: The candidate does not" in prompt
+            "A: The candidate artifact violates" in decision_section
+            or "A: The content violates" in decision_section
+            or "A: The candidate does not" in decision_section
         )
 
         if is_reverse_pass:
@@ -380,8 +467,9 @@ class StubBackend(LogitBackend, GenerativeBackend):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return self.query_top_logprobs(prompt, top_k, allowed_tokens)
+        return self.query_top_logprobs(prompt, top_k, allowed_tokens, **kwargs)
 
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         with self._lock:
@@ -390,6 +478,25 @@ class StubBackend(LogitBackend, GenerativeBackend):
 
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         return self.generate(prompt, max_tokens=max_tokens, **kwargs)
+
+
+def _is_openai_host(netloc: str, path: str) -> bool:
+    """Distinguishes a host (`api.openai.com`, `localhost:8000`, `10.0.0.1`) from a model ID (`gpt-4.1-mini`)."""
+    if not netloc:
+        return False
+    if netloc == "localhost" or netloc.startswith("localhost:"):
+        return True
+    if path == "/v1" or path.startswith("/v1/"):
+        return True
+    if re.match(r"^[^:]+:\d+$", netloc):
+        return True
+    return bool(
+        ":" not in netloc
+        and (
+            re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", netloc)
+            or re.search(r"\.[a-zA-Z]{2,}$", netloc)
+        )
+    )
 
 
 def infer_backend_spec(backend: Any) -> str:
@@ -418,7 +525,26 @@ def infer_backend_spec(backend: Any) -> str:
             return f"llamacpp://{host}/{model}" if model else f"llamacpp://{host}"
         return f"llamacpp:///{model}" if model else "llamacpp"
     if cls_name == "RecurrentPyTorchBackend":
-        return f"recurrent://{model}" if model else "recurrent"
+        base_spec = f"recurrent://{model}" if model else "recurrent"
+        q_parts: list[str] = []
+        num_loops = getattr(backend, "num_loops", 2)
+        min_loops = getattr(backend, "min_loops", None)
+        max_loops = getattr(backend, "max_loops", None)
+        kl_threshold = getattr(backend, "kl_threshold", None)
+        device = getattr(backend, "device", "cuda")
+        if num_loops != 2:
+            q_parts.append(f"num_loops={num_loops}")
+        if min_loops is not None:
+            q_parts.append(f"min_loops={min_loops}")
+        if max_loops is not None:
+            q_parts.append(f"max_loops={max_loops}")
+        if kl_threshold is not None:
+            q_parts.append(f"kl_threshold={kl_threshold}")
+        if device != "cuda":
+            q_parts.append(f"device={device}")
+        if q_parts and base_spec != "recurrent":
+            return f"{base_spec}?{'&'.join(q_parts)}"
+        return base_spec
     return "stub://default"
 
 
@@ -433,6 +559,7 @@ def resolve_logit_backend(
     from logitgate.config import (
         LogitGateDefaults,
         get_default_model,
+        is_backend_implicit,
         warn_if_implicit_stub,
     )
 
@@ -443,7 +570,7 @@ def resolve_logit_backend(
     if backend_spec is None or backend_spec == "default":
         default_spec = LogitGateDefaults.backend
         if (
-            default_spec == "stub://default"
+            is_backend_implicit()
             and model is not None
             and model not in ("default", "stub")
             and not model.startswith("stub")
@@ -467,13 +594,30 @@ def resolve_logit_backend(
         return StubBackend(default_prob=prob, **kwargs)
 
     def _uri_model(parsed_path: str) -> str | None:
-        return parsed_path.lstrip("/") or None
+        if not parsed_path:
+            return None
+        stripped = parsed_path.removeprefix("/")
+        return stripped or None
 
     if spec.startswith("ollama://"):
         from logitgate.backends.ollama import OllamaBackend
         parsed = urlparse(spec)
-        netloc = parsed.netloc or "localhost:11434"
-        effective_model = model or _uri_model(parsed.path) or env_model or "qwen2.5:7b"
+        netloc = parsed.netloc
+        path = parsed.path or ""
+        uri_ollama_model: str | None = None
+        is_ollama_model_shorthand = bool(
+            netloc
+            and not path
+            and not _is_openai_host(netloc, path)
+        )
+        if is_ollama_model_shorthand:
+            # Model-only shorthand `ollama://gemma4:e4b`, `ollama://qwen2.5:7b`, `ollama://llama3.2`, or `ollama://llama3`
+            uri_ollama_model = netloc
+            netloc = "localhost:11434"
+        else:
+            netloc = netloc or "localhost:11434"
+            uri_ollama_model = _uri_model(path)
+        effective_model = model or uri_ollama_model or env_model or "qwen2.5:7b"
         return OllamaBackend(base_url=f"http://{netloc}", model=effective_model, **kwargs)
 
     if spec.startswith(("openai://", "vllm://")):
@@ -485,11 +629,11 @@ def resolve_logit_backend(
         path = parsed.path or ""
         uri_model_opt: str | None = None
 
-        # Handle shorthand `openai://gpt-4o-mini` or `openai://` (where netloc is a model ID, not a host)
-        is_host = bool(netloc) and ("." in netloc or ":" in netloc or netloc == "localhost")
-        if is_openai and not is_host:
+        # Handle shorthand `openai://gpt-4o-mini` or `vllm://Qwen/Qwen2.5-7B-Instruct`
+        is_host = _is_openai_host(netloc, path)
+        if not is_host:
             uri_model_opt = f"{netloc}{path}".strip("/") or None
-            base_url = "https://api.openai.com/v1"
+            base_url = "https://api.openai.com/v1" if is_openai else "http://localhost:8000/v1"
         else:
             if not netloc:
                 netloc = "api.openai.com" if is_openai else "localhost:8000"
@@ -510,19 +654,34 @@ def resolve_logit_backend(
         if spec == "llamacpp":
             return LlamaCppBackend(model=model or env_model, **kwargs)
         parsed = urlparse(spec)
-        effective_model_opt = model or _uri_model(parsed.path) or env_model
-        if parsed.netloc:
+        if parsed.netloc and not (parsed.netloc.endswith(".gguf") and ":" not in parsed.netloc):
+            effective_model_opt = model or _uri_model(parsed.path) or env_model
             return LlamaCppBackend(base_url=f"http://{parsed.netloc}", model=effective_model_opt, **kwargs)
-        return LlamaCppBackend(model=effective_model_opt, **kwargs)
+        raw_local = f"{parsed.netloc}{parsed.path}" if parsed.netloc else (parsed.path.removeprefix("/"))
+        effective_model_opt = model or (raw_local or None) or env_model
+        return LlamaCppBackend(base_url="", model=effective_model_opt, **kwargs)
 
     if spec.startswith("recurrent://") or spec == "recurrent":
         from logitgate.backends.recurrent import RecurrentPyTorchBackend
         uri_model = None
+        rec_kwargs = dict(kwargs)
         if spec.startswith("recurrent://"):
             parsed_rec = urlparse(spec)
-            uri_model = f"{parsed_rec.netloc}{parsed_rec.path}" if parsed_rec.netloc else None
+            if parsed_rec.netloc:
+                uri_model = f"{parsed_rec.netloc}{parsed_rec.path}"
+            elif parsed_rec.path:
+                uri_model = parsed_rec.path
+            if parsed_rec.query:
+                qparams = parse_qs(parsed_rec.query)
+                for int_key in ("num_loops", "min_loops", "max_loops"):
+                    if int_key in qparams and int_key not in rec_kwargs:
+                        rec_kwargs[int_key] = int(qparams[int_key][-1])
+                if "kl_threshold" in qparams and "kl_threshold" not in rec_kwargs:
+                    rec_kwargs["kl_threshold"] = float(qparams["kl_threshold"][-1])
+                if "device" in qparams and "device" not in rec_kwargs:
+                    rec_kwargs["device"] = qparams["device"][-1]
         target_model = model or uri_model or env_model or "nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
-        return RecurrentPyTorchBackend(model_name=target_model, **kwargs)
+        return RecurrentPyTorchBackend(model_name=target_model, **rec_kwargs)
 
     # Fallback to Ollama or Stub
     if "stub" in spec:
@@ -544,4 +703,6 @@ def resolve_generative_backend(
     backend = resolve_logit_backend(backend_spec, model=model, **kwargs)
     if isinstance(backend, GenerativeBackend):
         return backend
+    if not isinstance(backend_spec, LogitBackend):
+        backend.close()
     raise TypeError(f"Backend {backend} does not implement GenerativeBackend")

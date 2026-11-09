@@ -28,6 +28,7 @@ class RubricMockBackend(LogitBackend):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         self.prompts.append(prompt)
         p = self.default_prob

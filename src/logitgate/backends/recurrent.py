@@ -12,8 +12,21 @@ import math
 import threading
 from typing import Any
 
-from logitgate.backends.base import GenerativeBackend, LogitBackend
+from logitgate.backends.base import (
+    GenerativeBackend,
+    LogitBackend,
+    strip_reasoning_blocks,
+)
 from logitgate.hardware.memory_guard import PCIeSpilloverGuard
+
+
+def _parse_cuda_device_index(device: Any) -> int:
+    dev_str = str(device)
+    if ":" in dev_str:
+        _, _, idx_str = dev_str.partition(":")
+        if idx_str.isdigit():
+            return int(idx_str)
+    return 0
 
 
 class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
@@ -49,6 +62,10 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         model: Any = None,
         tokenizer: Any = None,
         torch_dtype: Any = None,
+        min_loops: int | None = None,
+        max_loops: int | None = None,
+        kl_threshold: float | None = None,
+        **kwargs: Any,
     ) -> None:
         if num_loops < 1:
             raise ValueError(f"num_loops must be >= 1, got {num_loops}")
@@ -56,10 +73,13 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         self.model_name = model_name
         self.num_loops = num_loops
         self.device = device
+        self.min_loops = min_loops
+        self.max_loops = max_loops
+        self.kl_threshold = kl_threshold
         self._model = model
         self._tokenizer = tokenizer
         self.torch_dtype = torch_dtype
-        self.spillover_guard = PCIeSpilloverGuard()
+        self.spillover_guard = PCIeSpilloverGuard(device_index=_parse_cuda_device_index(device))
         self._lock = threading.RLock()
 
     @property
@@ -115,30 +135,26 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         prompt: str,
         top_k: int = 10,
         allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """
         Executes a forward pass with ``num_loops`` latent recurrence and extracts first-token logprobs.
         """
         model, tokenizer = self._ensure_loaded()
 
-        # Tokenize prompt
-        inputs = tokenizer(prompt, return_tensors="pt")
-        if hasattr(inputs, "to") and self.device not in ("auto",):
-            inputs = inputs.to(model.device if hasattr(model, "device") else self.device)
-
         # Forward pass passing num_loops if supported by model signature
         import inspect
 
-        kwargs: dict[str, Any] = {}
+        call_kwargs: dict[str, Any] = {}
         try:
             fn = model.forward if hasattr(model, "forward") else model
             sig = inspect.signature(fn)
             if "num_loops" in sig.parameters or any(
                 p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
             ):
-                kwargs["num_loops"] = self.num_loops
+                call_kwargs["num_loops"] = self.num_loops
         except (ValueError, TypeError):
-            kwargs["num_loops"] = self.num_loops
+            call_kwargs["num_loops"] = self.num_loops
 
         no_grad_ctx: Any
         try:
@@ -148,8 +164,13 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             from contextlib import nullcontext
             no_grad_ctx = nullcontext()
 
-        with self._lock, no_grad_ctx, self.spillover_guard.guard_forward_pass():
-            outputs = model(**inputs, **kwargs)
+        with self._lock:
+            inputs = tokenizer(prompt, return_tensors="pt")
+            target_dev = getattr(model, "device", None) or (self.device if self.device not in ("auto",) else None)
+            if hasattr(inputs, "to") and target_dev is not None:
+                inputs = inputs.to(target_dev)
+            with no_grad_ctx, self.spillover_guard.guard_forward_pass():
+                outputs = model(**inputs, **call_kwargs)
         if hasattr(outputs, "logits"):
             if hasattr(outputs.logits, "ndim"):
                 logits = outputs.logits[0, -1, :]
@@ -175,59 +196,62 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
 
         results: list[dict[str, Any]] = []
 
-        if allowed_tokens:
-            for tok_str in allowed_tokens:
-                # Tokenize variant (both raw and leading-space)
-                token_ids = tokenizer.encode(tok_str, add_special_tokens=False)
-                if token_ids:
-                    tid = token_ids[-1]
-                    lp = float(log_probs[tid])
-                    results.append({"token": tok_str, "logprob": lp})
-            if results:
-                return results
+        with self._lock:
+            if allowed_tokens:
+                from logitgate.debiasing.softmax import logsumexp
 
-        # General top_k
-        top_k_count = max(top_k, 50)
-        try:
-            import torch
+                for tok_str in allowed_tokens:
+                    clean_tok = tok_str.strip()
+                    cand_ids: list[int] = []
+                    for variant in (clean_tok, f" {clean_tok}"):
+                        token_ids = tokenizer.encode(variant, add_special_tokens=False)
+                        if token_ids:
+                            tid = token_ids[-1]
+                            if tid not in cand_ids:
+                                cand_ids.append(tid)
+                    if cand_ids:
+                        lp = logsumexp([float(log_probs[tid]) for tid in cand_ids])
+                        results.append({"token": tok_str, "logprob": lp})
+                if results:
+                    return results
 
-            if isinstance(log_probs, torch.Tensor):
-                top_vals, top_indices = torch.topk(log_probs, min(top_k_count, log_probs.size(-1)))
-                seen_indices = set(top_indices.tolist())
-                for lp, idx in zip(top_vals.tolist(), top_indices.tolist()):
-                    token_str = tokenizer.decode([idx])
-                    results.append({"token": token_str, "logprob": float(lp)})
+            # General top_k
+            top_k_count = max(top_k, 50)
+            try:
+                import torch
 
-                # Always guarantee standard candidate tokens are present so extract_token_logprob never misses them
-                guaranteed = ["A", "B", " A", " B", "1", "2", "3", "4", "5", " 1", " 2", " 3", " 4", " 5"]
-                if allowed_tokens:
-                    guaranteed.extend(allowed_tokens)
-                for g_tok in guaranteed:
-                    ids = tokenizer.encode(g_tok, add_special_tokens=False)
-                    if ids:
-                        tid = ids[-1]
-                        if tid not in seen_indices:
-                            seen_indices.add(tid)
-                            lp = float(log_probs[tid])
-                            results.append({"token": g_tok, "logprob": lp})
-                return results
-        except (ImportError, AttributeError, TypeError, ValueError):
-            pass
+                if isinstance(log_probs, torch.Tensor):
+                    top_vals, top_indices = torch.topk(log_probs, min(top_k_count, log_probs.size(-1)))
+                    seen_indices = set(top_indices.tolist())
+                    for lp, idx in zip(top_vals.tolist(), top_indices.tolist()):
+                        token_str = tokenizer.decode([idx])
+                        results.append({"token": token_str, "logprob": float(lp)})
 
-        # Fallback list sorting
-        indexed = sorted(enumerate(log_probs), key=lambda x: float(x[1]), reverse=True)
-        for idx, lp in indexed[:top_k]:
-            token_str = tokenizer.decode([idx]) if hasattr(tokenizer, "decode") else str(idx)
-            results.append({"token": token_str, "logprob": float(lp)})
+                    # Always guarantee standard candidate tokens are present so extract_token_logprob never misses them
+                    guaranteed = ["A", "B", " A", " B", "1", "2", "3", "4", "5", " 1", " 2", " 3", " 4", " 5"]
+                    for g_tok in guaranteed:
+                        ids = tokenizer.encode(g_tok, add_special_tokens=False)
+                        if ids:
+                            tid = ids[-1]
+                            if tid not in seen_indices:
+                                seen_indices.add(tid)
+                                lp = float(log_probs[tid])
+                                results.append({"token": g_tok, "logprob": lp})
+                    return results
+            except (ImportError, AttributeError, TypeError, ValueError):
+                pass
+
+            # Fallback list sorting
+            indexed = sorted(enumerate(log_probs), key=lambda x: float(x[1]), reverse=True)
+            for idx, lp in indexed[:top_k]:
+                token_str = tokenizer.decode([idx]) if hasattr(tokenizer, "decode") else str(idx)
+                results.append({"token": token_str, "logprob": float(lp)})
 
         return results
 
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         """Autoregressive generation with num_loops recurrent reasoning."""
         model, tokenizer = self._ensure_loaded()
-        inputs = tokenizer(prompt, return_tensors="pt")
-        if hasattr(inputs, "to") and self.device not in ("auto",):
-            inputs = inputs.to(model.device if hasattr(model, "device") else self.device)
 
         gen_kwargs: dict[str, Any] = {
             "max_new_tokens": max_tokens or 256,
@@ -244,14 +268,28 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         except (ValueError, TypeError):
             gen_kwargs["num_loops"] = self.num_loops
 
-        if hasattr(inputs, "__getitem__") and "input_ids" in inputs:
-            input_tensor = inputs["input_ids"]
-        else:
-            input_tensor = inputs
+        no_grad_ctx: Any
+        try:
+            import torch
 
-        with self._lock, self.spillover_guard.guard_forward_pass():
-            outputs = model.generate(input_tensor, **gen_kwargs)
-        input_len = input_tensor.shape[-1]
-        generated_ids = outputs[0][input_len:]
-        text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        return text, len(generated_ids)
+            no_grad_ctx = torch.no_grad()
+        except ImportError:
+            from contextlib import nullcontext
+
+            no_grad_ctx = nullcontext()
+
+        with self._lock:
+            inputs = tokenizer(prompt, return_tensors="pt")
+            target_dev = getattr(model, "device", None) or (self.device if self.device not in ("auto",) else None)
+            if hasattr(inputs, "to") and target_dev is not None:
+                inputs = inputs.to(target_dev)
+            if hasattr(inputs, "__getitem__") and "input_ids" in inputs:
+                input_tensor = inputs["input_ids"]
+            else:
+                input_tensor = inputs
+            with no_grad_ctx, self.spillover_guard.guard_forward_pass():
+                outputs = model.generate(input_tensor, **gen_kwargs)
+            input_len = input_tensor.shape[-1]
+            generated_ids = outputs[0][input_len:]
+            text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        return strip_reasoning_blocks(text), len(generated_ids)

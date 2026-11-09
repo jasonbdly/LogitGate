@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
+from logitgate.backends.recurrent import _parse_cuda_device_index
+from logitgate.debiasing.inversion import render_candidate
 from logitgate.debiasing.permutation import (
     DebiasedLogitResult,
     SurfaceTokenMap,
@@ -35,6 +38,7 @@ class PrefixBroadcastLogitEvaluator:
                 self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             except (ImportError, AttributeError):
                 self.device = "cpu"
+        self._lock = threading.RLock()
 
     @staticmethod
     def build_inverted_prefix_and_suffixes(
@@ -54,7 +58,7 @@ class PrefixBroadcastLogitEvaluator:
                 f"<|candidate|>\n{candidate_output.strip()}\n</|candidate|>\n"
             )
         else:
-            cand_str = str(candidate).strip() if candidate is not None else ""
+            cand_str = render_candidate(candidate).strip() if candidate is not None else ""
             payload = f"<|candidate|>\n{cand_str}\n</|candidate|>\n"
 
         shared_prefix = (
@@ -102,17 +106,17 @@ class PrefixBroadcastLogitEvaluator:
             candidate_output=candidate_output,
         )
 
-        # Step 1: Single prefill over shared prefix
-        encoded_prefix = self.tokenizer.encode(
-            prefix_str, add_special_tokens=True, return_tensors="pt"
-        )
-        if isinstance(encoded_prefix, torch.Tensor):
-            prefix_ids = encoded_prefix.to(self.device)
-        else:
-            prefix_ids = torch.tensor(encoded_prefix, dtype=torch.long, device=self.device).unsqueeze(0)
+        guard = PCIeSpilloverGuard(device_index=_parse_cuda_device_index(self.device))
+        with self._lock, torch.inference_mode(), guard.guard_forward_pass():
+            # Step 1: Single prefill over shared prefix
+            encoded_prefix = self.tokenizer.encode(
+                prefix_str, add_special_tokens=True, return_tensors="pt"
+            )
+            if isinstance(encoded_prefix, torch.Tensor):
+                prefix_ids = encoded_prefix.to(self.device)
+            else:
+                prefix_ids = torch.tensor(encoded_prefix, dtype=torch.long, device=self.device).unsqueeze(0)
 
-        guard = PCIeSpilloverGuard()
-        with torch.inference_mode(), guard.guard_forward_pass():
             prefix_out = self.model(
                 input_ids=prefix_ids,
                 use_cache=True,
@@ -126,9 +130,11 @@ class PrefixBroadcastLogitEvaluator:
 
             if len(suf_fwd_ids) != len(suf_perm_ids):
                 max_len = max(len(suf_fwd_ids), len(suf_perm_ids))
-                pad_id = getattr(self.tokenizer, "pad_token_id", None) or getattr(
-                    self.tokenizer, "eos_token_id", 0
-                )
+                pad_id = getattr(self.tokenizer, "pad_token_id", None)
+                if pad_id is None:
+                    pad_id = getattr(self.tokenizer, "eos_token_id", None)
+                if pad_id is None:
+                    pad_id = 0
                 suf_fwd_ids = [pad_id] * (max_len - len(suf_fwd_ids)) + suf_fwd_ids
                 suf_perm_ids = [pad_id] * (max_len - len(suf_perm_ids)) + suf_perm_ids
 

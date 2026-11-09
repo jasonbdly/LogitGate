@@ -38,6 +38,9 @@ def execute_adaptive_recurrent_loops(
       1. Binary verdict entropy drops below `entropy_halt_threshold`, AND
       2. Consecutive loop log-prob shift is below `kl_stability_threshold`.
     """
+    if min_loops < 1 or max_loops < min_loops:
+        raise ValueError(f"Expected 1 <= min_loops <= max_loops, got min_loops={min_loops}, max_loops={max_loops}")
+
     h = initial_hidden_state
     entropies: list[float] = []
     prev_p_pos: float | None = None
@@ -92,7 +95,7 @@ def execute_adaptive_recurrent_loops(
         entropy = compute_shannon_entropy(p_pos)
         entropies.append(entropy)
 
-        if loop_idx >= min_loops and prev_p_pos is not None:
+        if loop_idx >= min_loops and loop_idx < max_loops and prev_p_pos is not None:
             prob_delta = abs(p_pos - prev_p_pos)
             if entropy <= entropy_halt_threshold and prob_delta <= kl_stability_threshold:
                 return RecurrentLoopTrace(

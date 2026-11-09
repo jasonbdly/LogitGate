@@ -13,6 +13,7 @@ from logitgate.backends.base import (
     translate_transport_errors,
 )
 from logitgate.config import LogitGateDefaults
+from logitgate.exceptions import BackendError
 
 
 class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
@@ -94,12 +95,15 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         return payload
 
     def _extract_top_logprobs_from_response(self, data: dict[str, Any]) -> list[dict[str, Any]]:
-        lp = data.get("logprobs") or data.get("message", {}).get("logprobs")
+        if not isinstance(data, dict):
+            raise BackendError(f"Ollama at {self.base_url} returned non-object JSON payload: {type(data).__name__}")
+        msg = data.get("message")
+        lp = data.get("logprobs") or (msg.get("logprobs") if isinstance(msg, dict) else None)
         if not lp or not isinstance(lp, list):
             return []
         first = lp[0]
         if isinstance(first, dict):
-            if "top_logprobs" in first:
+            if "top_logprobs" in first and isinstance(first["top_logprobs"], list):
                 return first["top_logprobs"]
             if "token" in first:
                 return lp
@@ -197,7 +201,14 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
 
     @staticmethod
     def _parse_chat(data: dict[str, Any]) -> tuple[str, int]:
-        return data.get("message", {}).get("content", ""), data.get("eval_count", 0)
+        if not isinstance(data, dict):
+            raise BackendError(f"Ollama returned non-object JSON payload: {type(data).__name__}")
+        msg = data.get("message")
+        content = (msg.get("content") if isinstance(msg, dict) else None) or ""
+        if not content and isinstance(msg, dict) and msg.get("thinking"):
+            content = f"<think>{msg['thinking']}"
+        tokens = data.get("eval_count") or 0
+        return str(content), int(tokens)
 
     @translate_transport_errors
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:

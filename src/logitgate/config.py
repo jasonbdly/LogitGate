@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 
 
 class _ConfigState:
@@ -25,35 +26,41 @@ class _ConfigState:
         self.snapshot_dir = None
 
 
+_config_lock = threading.RLock()
 _state = _ConfigState()
 
 
 class _DefaultsMeta(type):
     @property
     def backend(cls) -> str:
-        if _state.backend is not None:
-            return _state.backend
-        return os.environ.get("LOGITGATE_BACKEND", "stub://default")
+        with _config_lock:
+            if _state.backend is not None:
+                return _state.backend
+            return os.environ.get("LOGITGATE_BACKEND", "stub://default")
 
     @backend.setter
     def backend(cls, val: str | None) -> None:
-        _state.backend = val
+        with _config_lock:
+            _state.backend = val
 
     @property
     def model(cls) -> str | None:
-        if _state.model is not None:
-            return _state.model
-        return os.environ.get("LOGITGATE_MODEL", None)
+        with _config_lock:
+            if _state.model is not None:
+                return _state.model
+            return os.environ.get("LOGITGATE_MODEL", None)
 
     @model.setter
     def model(cls, val: str | None) -> None:
-        _state.model = val
+        with _config_lock:
+            _state.model = val
 
     @property
     def pass_threshold(cls) -> float:
-        if _state.pass_threshold is not None:
-            return _state.pass_threshold
-        val = os.environ.get("LOGITGATE_PASS_THRESHOLD")
+        with _config_lock:
+            if _state.pass_threshold is not None:
+                return _state.pass_threshold
+            val = os.environ.get("LOGITGATE_PASS_THRESHOLD")
         if val is None:
             return 0.85
         try:
@@ -65,13 +72,15 @@ class _DefaultsMeta(type):
 
     @pass_threshold.setter
     def pass_threshold(cls, val: float | None) -> None:
-        _state.pass_threshold = val
+        with _config_lock:
+            _state.pass_threshold = val
 
     @property
     def fail_threshold(cls) -> float:
-        if _state.fail_threshold is not None:
-            return _state.fail_threshold
-        val = os.environ.get("LOGITGATE_FAIL_THRESHOLD")
+        with _config_lock:
+            if _state.fail_threshold is not None:
+                return _state.fail_threshold
+            val = os.environ.get("LOGITGATE_FAIL_THRESHOLD")
         if val is None:
             return 0.20
         try:
@@ -83,13 +92,15 @@ class _DefaultsMeta(type):
 
     @fail_threshold.setter
     def fail_threshold(cls, val: float | None) -> None:
-        _state.fail_threshold = val
+        with _config_lock:
+            _state.fail_threshold = val
 
     @property
     def logit_temperature(cls) -> float:
-        if _state.logit_temperature is not None:
-            return _state.logit_temperature
-        val = os.environ.get("LOGITGATE_TEMPERATURE")
+        with _config_lock:
+            if _state.logit_temperature is not None:
+                return _state.logit_temperature
+            val = os.environ.get("LOGITGATE_TEMPERATURE")
         if val is None:
             return 1.0
         try:
@@ -101,13 +112,15 @@ class _DefaultsMeta(type):
 
     @logit_temperature.setter
     def logit_temperature(cls, val: float | None) -> None:
-        _state.logit_temperature = val
+        with _config_lock:
+            _state.logit_temperature = val
 
     @property
     def num_ctx(cls) -> int | None:
-        if _state.num_ctx is not None:
-            return _state.num_ctx
-        val = os.environ.get("LOGITGATE_NUM_CTX")
+        with _config_lock:
+            if _state.num_ctx is not None:
+                return _state.num_ctx
+            val = os.environ.get("LOGITGATE_NUM_CTX")
         if val is None:
             return None
         try:
@@ -119,27 +132,32 @@ class _DefaultsMeta(type):
 
     @num_ctx.setter
     def num_ctx(cls, val: int | None) -> None:
-        _state.num_ctx = val
+        with _config_lock:
+            _state.num_ctx = val
 
     @property
     def save_failures(cls) -> bool:
-        if _state.save_failures is not None:
-            return _state.save_failures
-        return os.environ.get("LOGITGATE_SAVE_FAILURES", "0").lower() in ("1", "true", "yes")
+        with _config_lock:
+            if _state.save_failures is not None:
+                return _state.save_failures
+            return os.environ.get("LOGITGATE_SAVE_FAILURES", "0").lower() in ("1", "true", "yes")
 
     @save_failures.setter
     def save_failures(cls, val: bool | None) -> None:
-        _state.save_failures = val
+        with _config_lock:
+            _state.save_failures = val
 
     @property
     def snapshot_dir(cls) -> str:
-        if _state.snapshot_dir is not None:
-            return _state.snapshot_dir
-        return os.environ.get("LOGITGATE_SNAPSHOT_DIR", ".logitgate/failures")
+        with _config_lock:
+            if _state.snapshot_dir is not None:
+                return _state.snapshot_dir
+            return os.environ.get("LOGITGATE_SNAPSHOT_DIR", ".logitgate/failures")
 
     @snapshot_dir.setter
     def snapshot_dir(cls, val: str | None) -> None:
-        _state.snapshot_dir = val
+        with _config_lock:
+            _state.snapshot_dir = val
 
 
 class LogitGateDefaults(metaclass=_DefaultsMeta):
@@ -157,29 +175,31 @@ def configure(
     snapshot_dir: str | None = None,
 ) -> None:
     """Configures global defaults for LogitGate."""
-    if backend is not None:
-        _state.backend = backend
-    if model is not None:
-        _state.model = model
-    if pass_threshold is not None:
-        _state.pass_threshold = pass_threshold
-    if fail_threshold is not None:
-        _state.fail_threshold = fail_threshold
-    if logit_temperature is not None:
-        _state.logit_temperature = logit_temperature
-    if num_ctx is not None:
-        _state.num_ctx = num_ctx
-    if save_failures is not None:
-        _state.save_failures = save_failures
-    if snapshot_dir is not None:
-        _state.snapshot_dir = snapshot_dir
+    with _config_lock:
+        if backend is not None:
+            _state.backend = backend
+        if model is not None:
+            _state.model = model
+        if pass_threshold is not None:
+            _state.pass_threshold = pass_threshold
+        if fail_threshold is not None:
+            _state.fail_threshold = fail_threshold
+        if logit_temperature is not None:
+            _state.logit_temperature = logit_temperature
+        if num_ctx is not None:
+            _state.num_ctx = num_ctx
+        if save_failures is not None:
+            _state.save_failures = save_failures
+        if snapshot_dir is not None:
+            _state.snapshot_dir = snapshot_dir
 
 
 def reset_config() -> None:
     """Resets global configuration to environment variables and defaults."""
     global _warned_implicit_stub
-    _state.reset()
-    _warned_implicit_stub = False
+    with _config_lock:
+        _state.reset()
+        _warned_implicit_stub = False
     from logitgate.snapshot import reset_snapshot_notices
 
     reset_snapshot_notices()
@@ -191,7 +211,8 @@ _warned_implicit_stub = False
 
 def is_backend_implicit() -> bool:
     """True when neither `configure(backend=...)` nor ``LOGITGATE_BACKEND`` chose a backend."""
-    return _state.backend is None and "LOGITGATE_BACKEND" not in os.environ
+    with _config_lock:
+        return _state.backend is None and "LOGITGATE_BACKEND" not in os.environ
 
 
 def warn_if_implicit_stub(spec: str) -> None:
@@ -201,9 +222,10 @@ def warn_if_implicit_stub(spec: str) -> None:
     it works. That is the worst first impression a first-time user can get.
     """
     global _warned_implicit_stub
-    if _warned_implicit_stub or spec != _IMPLICIT_STUB or not is_backend_implicit():
-        return
-    _warned_implicit_stub = True
+    with _config_lock:
+        if _warned_implicit_stub or spec != _IMPLICIT_STUB or not is_backend_implicit():
+            return
+        _warned_implicit_stub = True
     import warnings
 
     from logitgate.exceptions import StubBackendWarning

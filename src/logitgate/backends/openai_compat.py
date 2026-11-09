@@ -13,6 +13,7 @@ from logitgate.backends.base import (
     strip_reasoning_blocks,
     translate_transport_errors,
 )
+from logitgate.exceptions import BackendError
 
 
 class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
@@ -90,20 +91,44 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         return payload
 
     def _extract_top_logprobs_from_response(self, data: dict[str, Any]) -> list[dict[str, Any]]:
-        choices = data.get("choices", [])
-        if not choices:
+        if not isinstance(data, dict):
+            raise BackendError(
+                f"{self.service_name} at {self.base_url} returned non-object JSON payload: {type(data).__name__}"
+            )
+        choices = data.get("choices")
+        if not choices or not isinstance(choices, list) or not isinstance(choices[0], dict):
             return []
         logprobs = choices[0].get("logprobs")
-        if not logprobs:
+        if not logprobs or not isinstance(logprobs, dict):
             return []
-        content_logprobs = logprobs.get("content", [])
-        if not content_logprobs:
+        content_logprobs = logprobs.get("content")
+        if not content_logprobs or not isinstance(content_logprobs, list) or not isinstance(content_logprobs[0], dict):
             return []
-        top_logprobs = content_logprobs[0].get("top_logprobs", [])
+        top_logprobs = content_logprobs[0].get("top_logprobs")
+        if not top_logprobs or not isinstance(top_logprobs, list):
+            return []
         return [
-            {"token": item.get("token", ""), "logprob": item.get("logprob", -10.0)}
+            {
+                "token": str(item.get("token") or ""),
+                "logprob": float(item["logprob"]),
+            }
             for item in top_logprobs
+            if isinstance(item, dict) and item.get("logprob") is not None
         ]
+
+    @staticmethod
+    def _extract_chat_completion(data: Any) -> tuple[str, int]:
+        if not isinstance(data, dict):
+            raise BackendError(f"OpenAI-compatible server returned non-object JSON payload: {type(data).__name__}")
+        choices = data.get("choices")
+        content = ""
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            msg = choices[0].get("message")
+            if isinstance(msg, dict) and msg.get("content") is not None:
+                content = str(msg["content"])
+        usage = data.get("usage")
+        tokens = int(usage.get("completion_tokens") or 0) if isinstance(usage, dict) else 0
+        return strip_reasoning_blocks(content), tokens
 
     @translate_transport_errors
     def query_top_logprobs(
@@ -153,11 +178,7 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         payload.update(filtered_kwargs)
         resp = self.client.post(url, json=payload, headers=self._headers())
         resp.raise_for_status()
-        data = resp.json()
-        choices = data.get("choices", [])
-        content = choices[0].get("message", {}).get("content", "") if choices else ""
-        tokens = data.get("usage", {}).get("completion_tokens", 0)
-        return strip_reasoning_blocks(content), tokens
+        return self._extract_chat_completion(resp.json())
 
     @translate_transport_errors
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
@@ -173,8 +194,4 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         payload.update(filtered_kwargs)
         resp = await self.async_client.post(url, json=payload, headers=self._headers())
         resp.raise_for_status()
-        data = resp.json()
-        choices = data.get("choices", [])
-        content = choices[0].get("message", {}).get("content", "") if choices else ""
-        tokens = data.get("usage", {}).get("completion_tokens", 0)
-        return strip_reasoning_blocks(content), tokens
+        return self._extract_chat_completion(resp.json())
