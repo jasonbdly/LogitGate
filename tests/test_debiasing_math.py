@@ -312,3 +312,78 @@ def test_compute_symmetric_debiased_verdict_cancels_bias():
     assert pytest.approx(res.calibrated_prob_pass, rel=1e-4) == expected_prob
     assert 0.0 <= res.shannon_entropy <= 1.0
 
+
+def test_missing_token_floor_deduplicates_observed_tokens():
+    # Duplicate raw tokens must not inflate sum_observed_prob to >= 1.0
+    dup_top_logprobs = [
+        {"token": "X", "logprob": math.log(0.60)},
+        {"token": "X", "logprob": math.log(0.60)},
+    ]
+    floor_lp = extract_token_logprob(dup_top_logprobs, "B")
+    # Residual is 1.0 - 0.60 = 0.40 -> log(0.40) ~= -0.9163 (not log(1e-6) = -13.8155)
+    assert pytest.approx(floor_lp, rel=1e-4) == math.log(0.40)
+
+
+def test_fit_calibration_zero_signal_and_warnings():
+    from logitgate.exceptions import CalibrationWarning
+
+    # All-zero logits have identical Brier score across all temperatures -> keep T = 1.0
+    zero_samples = [(0.0, 0.0, 1), (0.0, 0.0, 0)] * 5
+    res = fit_calibration(zero_samples)
+    assert res.optimal_temperature == 1.0
+
+    # Single-class dataset emits CalibrationWarning
+    with pytest.warns(CalibrationWarning, match="single class"):
+        fit_calibration([(1.0, 1.0, 1)] * 5)
+
+    # Fractional labels (e.g. 0.5) or booleans raise CalibrationError
+    from logitgate.exceptions import CalibrationError
+
+    with pytest.raises(CalibrationError, match="label must be 0 or 1"):
+        fit_calibration([(1.0, 1.0, 0.5)])
+    with pytest.raises(CalibrationError, match="label must be 0 or 1"):
+        fit_calibration([(1.0, 1.0, True)])
+
+
+
+def test_conformal_calibration_crossing_near_one_no_false_saturation():
+    import warnings
+
+    from logitgate.calibration.conformal import calibrate_cascade_thresholds
+    from logitgate.exceptions import CalibrationWarning
+
+    # High probabilities around 0.96 where midpoint + 0.05 clamps to 1.0 without true saturation
+    probs = [0.96] * 40 + [0.96] * 40
+    labels = [1] * 40 + [0] * 40
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", CalibrationWarning)
+        res = calibrate_cascade_thresholds(probs, labels, target_risk_alpha=0.05)
+    assert res.guarantee_holds is True
+    assert 0.0 <= res.tau_reject < res.tau_accept <= 1.0
+
+
+def test_saturated_infinite_pole_logprobs_do_not_produce_nan():
+    token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
+    # Both passes saturate with -inf on the failing pole
+    res_agree = compute_symmetric_debiased_verdict(
+        logits_pass_first=[0.0, -float("inf")],
+        logits_fail_first=[-float("inf"), 0.0],
+        token_map=token_map,
+    )
+    assert not math.isnan(res_agree.calibrated_prob_pass)
+    assert not math.isnan(res_agree.positional_bias_magnitude)
+    assert res_agree.calibrated_prob_pass == 1.0
+    assert res_agree.positional_bias_magnitude == 0.0
+
+    # Opposite saturation (pure positional bias: A always wins)
+    res_bias = compute_symmetric_debiased_verdict(
+        logits_pass_first=[0.0, -float("inf")],
+        logits_fail_first=[0.0, -float("inf")],
+        token_map=token_map,
+    )
+    assert not math.isnan(res_bias.calibrated_prob_pass)
+    assert not math.isnan(res_bias.positional_bias_magnitude)
+    assert res_bias.calibrated_prob_pass == pytest.approx(0.5)
+
+
+

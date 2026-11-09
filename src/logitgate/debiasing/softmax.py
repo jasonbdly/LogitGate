@@ -7,6 +7,8 @@ from typing import Any
 
 def clamped_sigmoid(x: float) -> float:
     """Logistic function saturated at |x| > 50 to avoid `math.exp` overflow on degenerate logits."""
+    if math.isnan(x):
+        return 0.5
     if x > 50.0:
         return 1.0
     if x < -50.0:
@@ -18,12 +20,22 @@ def softmax_probabilities(logprobs: Mapping[Any, float], temperature: float = 1.
     """Temperature-scaled softmax renormalized over the given label set only."""
     if not logprobs:
         return {}
-    temp = max(temperature, 1e-6)
-    scaled = {k: lp / temp for k, lp in logprobs.items()}
-    max_lp = max(scaled.values())
-    exp_vals = {k: math.exp(lp - max_lp) for k, lp in scaled.items()}
+    temp = max(temperature, 1e-6) if math.isfinite(temperature) else 1.0
+    scaled = {k: float(lp) / temp for k, lp in logprobs.items()}
+    if any(not math.isfinite(v) for v in scaled.values()):
+        finite_vals = [v for v in scaled.values() if math.isfinite(v)]
+        if not finite_vals:
+            return {k: 1.0 / len(scaled) for k in scaled}
+        max_lp = max(finite_vals)
+        exp_vals = {
+            k: (math.exp(lp - max_lp) if math.isfinite(lp) else 0.0)
+            for k, lp in scaled.items()
+        }
+    else:
+        max_lp = max(scaled.values())
+        exp_vals = {k: math.exp(lp - max_lp) for k, lp in scaled.items()}
     total = sum(exp_vals.values())
-    if total <= 0:
+    if not (total > 0.0) or not math.isfinite(total):
         return {k: 1.0 / len(scaled) for k in scaled}
     return {k: v / total for k, v in exp_vals.items()}
 
@@ -33,8 +45,10 @@ def has_finite_logprobs(top_logprobs: list[dict[str, Any]]) -> bool:
     for item in top_logprobs:
         if not isinstance(item, dict):
             continue
+        if item.get("token") is None:
+            continue
         lp = item.get("logprob")
-        if lp is None:
+        if lp is None or isinstance(lp, bool):
             continue
         try:
             if math.isfinite(float(lp)):
@@ -54,6 +68,17 @@ def logsumexp(logprobs: list[float]) -> float:
     return max_lp + math.log(sum(math.exp(lp - max_lp) for lp in logprobs))
 
 
+def _compute_missing_token_floor(observed_logprobs: list[float]) -> float:
+    """Computes bounded missing-token floor from deduplicated observed logprobs."""
+    if not observed_logprobs:
+        return -10.0
+    min_observed_logprob = min(observed_logprobs)
+    sum_observed_probs = sum(math.exp(lp) for lp in observed_logprobs)
+    residual_prob = max(1.0 - sum_observed_probs, 1e-6)
+    residual_logprob = math.log(residual_prob)
+    return min(min_observed_logprob, residual_logprob)
+
+
 def extract_token_logprob(top_logprobs: list[dict[str, Any]], target_token: str) -> float:
     """
     Extracts the log probability for target_token from top_logprobs.
@@ -68,13 +93,18 @@ def extract_token_logprob(top_logprobs: list[dict[str, Any]], target_token: str)
 
     target_norm = target_token.strip().upper()
     matching_by_raw_token: dict[str, float] = {}
-    observed_logprobs: list[float] = []
+    observed_by_raw_token: dict[str, float] = {}
 
     for item in top_logprobs:
-        raw_tok = str(item.get("token", ""))
+        if not isinstance(item, dict):
+            continue
+        raw_tok_val = item.get("token")
+        if raw_tok_val is None:
+            continue
+        raw_tok = str(raw_tok_val)
         tok = raw_tok.strip().upper()
         lp = item.get("logprob")
-        if lp is None:
+        if lp is None or isinstance(lp, bool):
             continue
         try:
             lp_float = float(lp)
@@ -83,7 +113,8 @@ def extract_token_logprob(top_logprobs: list[dict[str, Any]], target_token: str)
         if not math.isfinite(lp_float):
             continue
         lp_clamped = min(lp_float, 0.0)
-        observed_logprobs.append(lp_clamped)
+        if raw_tok not in observed_by_raw_token or lp_clamped > observed_by_raw_token[raw_tok]:
+            observed_by_raw_token[raw_tok] = lp_clamped
         if tok == target_norm and (
             raw_tok not in matching_by_raw_token or lp_clamped > matching_by_raw_token[raw_tok]
         ):
@@ -92,15 +123,7 @@ def extract_token_logprob(top_logprobs: list[dict[str, Any]], target_token: str)
     if matching_by_raw_token:
         return min(logsumexp(list(matching_by_raw_token.values())), 0.0)
 
-    # Bounded missing-token floor based on residual probability mass
-    if not observed_logprobs:
-        return -10.0
-
-    min_observed_logprob = min(observed_logprobs)
-    sum_observed_probs = sum(math.exp(lp) for lp in observed_logprobs)
-    residual_prob = max(1.0 - sum_observed_probs, 1e-6)
-    residual_logprob = math.log(residual_prob)
-    return min(min_observed_logprob, residual_logprob)
+    return _compute_missing_token_floor(list(observed_by_raw_token.values()))
 
 
 def compute_binary_log_odds(

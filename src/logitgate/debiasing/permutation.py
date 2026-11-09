@@ -92,12 +92,26 @@ def get_calibration_cache_path() -> Path:
 def _lookup_temperature_in_mapping(m_lower: str, mapping: dict[str, Any]) -> float | None:
     """Finds a temperature by exact case-insensitive match first, then longest-prefix substring match."""
     for k, v in mapping.items():
+        if not isinstance(k, str) or isinstance(v, bool):
+            continue
         if k.lower() == m_lower:
-            return float(v)
-    for k, v in sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True):
-        k_low = k.lower()
-        if k_low != "default" and k_low in m_lower:
-            return float(v)
+            try:
+                vf = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(vf) and vf > 0.0:
+                return vf
+    for k, v in sorted(mapping.items(), key=lambda kv: len(str(kv[0])), reverse=True):
+        if not isinstance(k, str) or isinstance(v, bool):
+            continue
+        k_low = k.strip().lower()
+        if k_low and k_low != "default" and k_low in m_lower:
+            try:
+                vf = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(vf) and vf > 0.0:
+                return vf
     return None
 
 
@@ -141,7 +155,8 @@ def auto_calibrate_backend(
 ) -> CalibrationResult:
     """Runs built-in 8-item micro-calibration dataset, fits optimal temperature, and caches it."""
     from logitgate.debiasing.inversion import compile_binary_prompt
-    from logitgate.debiasing.softmax import compute_binary_log_odds
+    from logitgate.debiasing.softmax import compute_binary_log_odds, has_finite_logprobs
+    from logitgate.exceptions import BackendError
 
     effective_model = model_key or getattr(backend, "model", None) or "default"
     samples: list[tuple[float, float, int]] = []
@@ -155,6 +170,10 @@ def auto_calibrate_backend(
             query_first=True,
         )
         top1 = backend.query_top_logprobs(p1, top_k=10, allowed_tokens=["A", "B"])
+        if not has_finite_logprobs(top1):
+            raise BackendError(
+                f"Backend {type(backend).__name__} returned no token log-probabilities during calibration."
+            )
         f_lo, _ = compute_binary_log_odds(top1, pass_token="A", fail_token="B")
 
         p2 = compile_binary_prompt(
@@ -165,6 +184,10 @@ def auto_calibrate_backend(
             query_first=True,
         )
         top2 = backend.query_top_logprobs(p2, top_k=10, allowed_tokens=["A", "B"])
+        if not has_finite_logprobs(top2):
+            raise BackendError(
+                f"Backend {type(backend).__name__} returned no token log-probabilities during calibration."
+            )
         r_lo, _ = compute_binary_log_odds(top2, pass_token="B", fail_token="A")
 
         samples.append((f_lo, r_lo, y))
@@ -172,6 +195,8 @@ def auto_calibrate_backend(
     result = fit_calibration(samples)
 
     if save_cache:
+        import tempfile
+
         target_path = cache_path or get_calibration_cache_path()
         target_path.parent.mkdir(parents=True, exist_ok=True)
         cache_data: dict[str, float] = {}
@@ -184,8 +209,17 @@ def auto_calibrate_backend(
             except (OSError, ValueError, TypeError):
                 cache_data = {}
         cache_data[effective_model] = result.optimal_temperature
-        with open(target_path, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f, indent=2)
+        fd, tmp_path = tempfile.mkstemp(dir=target_path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, indent=2)
+            os.replace(tmp_path, target_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     return result
 
@@ -221,11 +255,20 @@ class SurfaceTokenMap:
     negative_token_ids: tuple[int, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.positive_token_ids, tuple):
-            object.__setattr__(self, "positive_token_ids", tuple(sorted(self.positive_token_ids)))
-        if not isinstance(self.negative_token_ids, tuple):
-            object.__setattr__(self, "negative_token_ids", tuple(sorted(self.negative_token_ids)))
-        overlap = set(self.positive_token_ids) & set(self.negative_token_ids)
+        for seq_name, seq_vals in (
+            ("positive_token_ids", self.positive_token_ids),
+            ("negative_token_ids", self.negative_token_ids),
+        ):
+            for x in seq_vals:
+                if isinstance(x, bool) or not isinstance(x, int) or x < 0:
+                    raise ValueError(f"{seq_name} must contain non-negative integers, got {x!r}")
+        pos_norm = tuple(sorted({int(x) for x in self.positive_token_ids}))
+        neg_norm = tuple(sorted({int(x) for x in self.negative_token_ids}))
+        object.__setattr__(self, "positive_token_ids", pos_norm)
+        object.__setattr__(self, "negative_token_ids", neg_norm)
+        if not pos_norm or not neg_norm:
+            raise ValueError("positive_token_ids and negative_token_ids must not be empty.")
+        overlap = set(pos_norm) & set(neg_norm)
         if overlap:
             raise ValueError(
                 f"Positive and negative token IDs must be disjoint, got overlapping IDs: {sorted(overlap)}"
@@ -286,37 +329,60 @@ def marginalize_pole_logprob(
     Returns:
         Tuple of (log_prob_pos, log_prob_neg)
     """
-    if temperature <= 0.0:
-        raise ValueError("Temperature must be strictly positive.")
+    if isinstance(temperature, bool) or not math.isfinite(temperature) or temperature <= 0.0:
+        raise ValueError("Temperature must be a finite strictly positive float.")
     if not pos_ids or not neg_ids:
         raise ValueError("pos_ids and neg_ids must not be empty.")
+    for seq_name, seq_vals in (("pos_ids", pos_ids), ("neg_ids", neg_ids)):
+        for idx_val in seq_vals:
+            if isinstance(idx_val, bool) or not isinstance(idx_val, int) or idx_val < 0:
+                raise ValueError(f"{seq_name} must contain non-negative integer token IDs, got {idx_val!r}")
 
+    lse_pos_raw: float
+    lse_neg_raw: float
+    used_torch = False
     try:
         import torch
 
         if isinstance(logits, torch.Tensor):
-            scaled_logits = logits.float() / temperature
-            pos_tensor = scaled_logits[list(pos_ids)]
-            neg_tensor = scaled_logits[list(neg_ids)]
-
-            lse_pos = torch.logsumexp(pos_tensor, dim=0)
-            lse_neg = torch.logsumexp(neg_tensor, dim=0)
-            lse_total = torch.logaddexp(lse_pos, lse_neg)
-            return float((lse_pos - lse_total).item()), float((lse_neg - lse_total).item())
+            pos_tensor = logits[list(pos_ids)].float()
+            neg_tensor = logits[list(neg_ids)].float()
+            lse_pos_raw = float(torch.logsumexp(pos_tensor, dim=0).item())
+            lse_neg_raw = float(torch.logsumexp(neg_tensor, dim=0).item())
+            used_torch = True
     except ImportError:
         pass
 
-    # Sequence fallback
-    scaled = [float(logits[i]) / temperature for i in range(len(logits))]
-    pos_vals = [scaled[i] for i in pos_ids]
-    neg_vals = [scaled[i] for i in neg_ids]
+    if not used_torch:
+        # Sequence fallback (marginalize surface-form tokens first, then apply temperature scaling)
+        pos_vals = [float(logits[i]) for i in pos_ids]
+        neg_vals = [float(logits[i]) for i in neg_ids]
 
-    def _lse(vals: Sequence[float]) -> float:
-        m = max(vals)
-        return m + math.log(sum(math.exp(v - m) for v in vals))
+        def _lse(vals: Sequence[float]) -> float:
+            if any(math.isnan(v) for v in vals):
+                return float("nan")
+            m = max(vals)
+            if math.isinf(m):
+                return m
+            return m + math.log(sum(math.exp(v - m) for v in vals))
 
-    lse_pos_f = _lse(pos_vals)
-    lse_neg_f = _lse(neg_vals)
+        lse_pos_raw = _lse(pos_vals)
+        lse_neg_raw = _lse(neg_vals)
+
+    lse_pos_f = lse_pos_raw / temperature
+    lse_neg_f = lse_neg_raw / temperature
+
+    if math.isnan(lse_pos_f) or math.isnan(lse_neg_f):
+        return -math.log(2.0), -math.log(2.0)
+    if math.isinf(lse_pos_f) and math.isinf(lse_neg_f):
+        if (lse_pos_f > 0) == (lse_neg_f > 0):
+            return -math.log(2.0), -math.log(2.0)
+        return (0.0, -float("inf")) if lse_pos_f > 0 else (-float("inf"), 0.0)
+    if math.isinf(lse_pos_f):
+        return (0.0, -float("inf")) if lse_pos_f > 0 else (-float("inf"), 0.0)
+    if math.isinf(lse_neg_f):
+        return (-float("inf"), 0.0) if lse_neg_f > 0 else (0.0, -float("inf"))
+
     m_tot = max(lse_pos_f, lse_neg_f)
     lse_total_f = m_tot + math.log(math.exp(lse_pos_f - m_tot) + math.exp(lse_neg_f - m_tot))
     return lse_pos_f - lse_total_f, lse_neg_f - lse_total_f
@@ -356,7 +422,8 @@ def compute_symmetric_debiased_verdict(
         token_map.negative_token_ids,
         temperature=temperature,
     )
-    delta_1 = lp_A1 - lp_B1
+    raw_delta_1 = lp_A1 - lp_B1
+    delta_1 = max(-100.0, min(100.0, raw_delta_1)) if math.isinf(raw_delta_1) else raw_delta_1
 
     # Pass 2: A -> Fail, B -> Pass
     lp_A2, lp_B2 = marginalize_pole_logprob(
@@ -365,12 +432,13 @@ def compute_symmetric_debiased_verdict(
         token_map.negative_token_ids,
         temperature=temperature,
     )
-    delta_2 = lp_B2 - lp_A2
+    raw_delta_2 = lp_B2 - lp_A2
+    delta_2 = max(-100.0, min(100.0, raw_delta_2)) if math.isinf(raw_delta_2) else raw_delta_2
 
     from logitgate.debiasing.softmax import clamped_sigmoid
 
-    unbiased_log_odds = 0.5 * (delta_1 + delta_2)
-    positional_bias = 0.5 * abs(delta_1 - delta_2)
+    unbiased_log_odds = max(-100.0, min(100.0, 0.5 * (delta_1 + delta_2)))
+    positional_bias = min(100.0, 0.5 * abs(delta_1 - delta_2))
     p_pass = clamped_sigmoid(unbiased_log_odds)
 
     entropy = compute_shannon_entropy(p_pass)
@@ -395,7 +463,30 @@ def fit_calibration(
     Fits optimal logit temperature scaling on (forward_log_odds, reverse_log_odds, y)
     to minimize Brier score and computes Expected Calibration Error (ECE).
     """
+    import warnings
+
+    from logitgate.exceptions import CalibrationError, CalibrationWarning
+
+    if (
+        isinstance(min_temp, bool)
+        or isinstance(max_temp, bool)
+        or not math.isfinite(min_temp)
+        or not math.isfinite(max_temp)
+        or min_temp <= 0.0
+        or max_temp <= min_temp
+    ):
+        raise CalibrationError(
+            f"Expected finite 0 < min_temp < max_temp, got min_temp={min_temp}, max_temp={max_temp}"
+        )
+    if isinstance(num_bins, bool) or not isinstance(num_bins, int) or num_bins < 1:
+        raise CalibrationError(f"num_bins must be an integer >= 1, got {num_bins}")
+
     if not samples:
+        warnings.warn(
+            "fit_calibration received an empty sample sequence; returning default optimal_temperature=1.0.",
+            CalibrationWarning,
+            stacklevel=2,
+        )
         return CalibrationResult(
             optimal_temperature=1.0,
             brier_score_before=0.0,
@@ -404,12 +495,47 @@ def fit_calibration(
             ece_after=0.0,
         )
 
+    labels_seen: set[int] = set()
+    for f_lo, r_lo, y in samples:
+        if isinstance(f_lo, bool) or isinstance(r_lo, bool):
+            raise CalibrationError(
+                f"Calibration samples must contain finite float log-odds, got ({f_lo!r}, {r_lo!r})"
+            )
+        try:
+            f_val = float(f_lo)
+            r_val = float(r_lo)
+        except (TypeError, ValueError) as exc:
+            raise CalibrationError(
+                f"Calibration samples must contain finite log-odds, got ({f_lo!r}, {r_lo!r})"
+            ) from exc
+        if not math.isfinite(f_val) or not math.isfinite(r_val):
+            raise CalibrationError(
+                f"Calibration samples must contain finite log-odds, got ({f_lo}, {r_lo})"
+            )
+        if isinstance(y, bool) or y not in (0, 1):
+            raise CalibrationError(f"Calibration sample label must be 0 or 1, got {y!r}")
+        labels_seen.add(int(y))
+
+    if len(labels_seen) < 2:
+        warnings.warn(
+            "fit_calibration received samples from only a single class; temperature scaling is degenerate.",
+            CalibrationWarning,
+            stacklevel=2,
+        )
+
     def calc_prob(f_lo: float, r_lo: float, temp: float) -> float:
         return combine_symmetric_log_odds(f_lo, r_lo, logit_temperature=temp)
 
     def brier_score(temp: float) -> float:
         total = sum((calc_prob(f, r, temp) - float(y)) ** 2 for f, r, y in samples)
         return total / len(samples)
+
+    # Mild log-temperature regularization prevents T -> min_temp collapse on small,
+    # 100%-separable micro-calibration datasets (where raw Brier decreases monotonically as T -> 0).
+    reg_weight = 1e-2 / max(1.0, math.sqrt(len(samples) / 8.0))
+
+    def objective(temp: float) -> float:
+        return brier_score(temp) + reg_weight * (math.log(max(temp, 1e-6)) ** 2)
 
     def compute_ece(temp: float) -> float:
         n = len(samples)
@@ -430,14 +556,15 @@ def fit_calibration(
         return ece
 
     # 1. Grid search for coarse minimum
+    brier_before = brier_score(1.0)
     best_temp = 1.0
-    best_brier = float("inf")
+    best_obj = objective(1.0) if min_temp <= 1.0 <= max_temp else float("inf")
     steps = 200
     for step in range(steps + 1):
         temp = min_temp + step * (max_temp - min_temp) / steps
-        bs = brier_score(temp)
-        if bs < best_brier:
-            best_brier = bs
+        obj_val = objective(temp)
+        if obj_val < best_obj - 1e-12:
+            best_obj = obj_val
             best_temp = temp
 
     # 2. Golden-section refinement around coarse minimum
@@ -446,8 +573,8 @@ def fit_calibration(
     phi = (math.sqrt(5) - 1) / 2
     c = b - phi * (b - a)
     d = a + phi * (b - a)
-    fc = brier_score(c)
-    fd = brier_score(d)
+    fc = objective(c)
+    fd = objective(d)
 
     for _ in range(30):
         if fc < fd:
@@ -455,17 +582,19 @@ def fit_calibration(
             d = c
             fd = fc
             c = b - phi * (b - a)
-            fc = brier_score(c)
+            fc = objective(c)
         else:
             a = c
             c = d
             fc = fd
             d = a + phi * (b - a)
-            fd = brier_score(d)
+            fd = objective(d)
 
     optimal_temp = (a + b) / 2.0
-    brier_before = brier_score(1.0)
     brier_after = brier_score(optimal_temp)
+    if brier_after >= brier_before - 1e-12 and min_temp <= 1.0 <= max_temp:
+        optimal_temp = 1.0
+        brier_after = brier_before
     ece_before = compute_ece(1.0)
     ece_after = compute_ece(optimal_temp)
 

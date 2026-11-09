@@ -194,7 +194,10 @@ def compile_score_prompt(
             f"and {max_score} is lowest quality based on the rubric.\n"
         )
     else:
-        scale_desc = f"Rate the candidate artifact from {min_score} to {max_score} based on the rubric.\n"
+        scale_desc = (
+            f"Rate the candidate artifact from {min_score} to {max_score} where {min_score} is lowest quality "
+            f"and {max_score} is highest quality based on the rubric.\n"
+        )
 
     suffix = (
         f"[SCORING SCALE]\n"

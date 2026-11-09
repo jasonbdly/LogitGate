@@ -3,31 +3,33 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from logitgate.exceptions import CalibrationError
 
 _GRID = 1e4  # thresholds are reported at 4 decimals, like LogitGate probabilities
 _EPS = 1e-7  # absorbs float noise such as 0.45 * 1e4 == 4500.000000000001
 
 
 def _ceil4(x: float) -> float:
-    return math.ceil(x * _GRID - _EPS) / _GRID
+    return round(math.ceil(x * _GRID - _EPS) / _GRID, 4)
 
 
 def _floor4(x: float) -> float:
-    return math.floor(x * _GRID + _EPS) / _GRID
+    return round(math.floor(x * _GRID + _EPS) / _GRID, 4)
 
 
 def _strictly_above4(x: float) -> float:
     """Smallest 4-decimal value strictly greater than ``x``."""
-    return math.floor(x * _GRID + _EPS) / _GRID + 1.0 / _GRID
+    return round((math.floor(x * _GRID + _EPS) + 1) / _GRID, 4)
 
 
 def _strictly_below4(x: float) -> float:
     """Largest 4-decimal value strictly less than ``x``."""
-    return math.ceil(x * _GRID - _EPS) / _GRID - 1.0 / _GRID
+    return round((math.ceil(x * _GRID - _EPS) - 1) / _GRID, 4)
 
 
 def min_samples_per_class(target_risk_alpha: float) -> int:
@@ -38,6 +40,10 @@ def min_samples_per_class(target_risk_alpha: float) -> int:
     ("never decide at Layer 1"), so we need m >= ⌈(1-a)/a⌉. That's 39 per class at
     alpha=0.05 and 19 at alpha=0.10.
     """
+    if isinstance(target_risk_alpha, bool) or not math.isfinite(target_risk_alpha) or not (0.0 < target_risk_alpha < 1.0):
+        raise CalibrationError(
+            f"target_risk_alpha must be strictly between 0.0 and 1.0, got {target_risk_alpha}"
+        )
     a = target_risk_alpha / 2.0
     return math.ceil((1.0 - a) / a - 1e-9)
 
@@ -102,18 +108,33 @@ def calibrate_cascade_thresholds(
     """
     n = len(calibrated_probs)
     if n != len(ground_truth_labels) or n < 10:
-        raise ValueError("Calibration requires matching sequences of at least 10 samples.")
+        raise CalibrationError("Calibration requires matching sequences of at least 10 samples.")
 
-    if not (0.0 < target_risk_alpha < 1.0):
-        raise ValueError(
+    if isinstance(target_risk_alpha, bool) or not math.isfinite(target_risk_alpha) or not (0.0 < target_risk_alpha < 1.0):
+        raise CalibrationError(
             f"target_risk_alpha must be strictly between 0.0 and 1.0, got {target_risk_alpha}"
         )
 
     for p in calibrated_probs:
-        pf = float(p)
+        if isinstance(p, bool):
+            raise CalibrationError(
+                f"calibrated_probs must contain finite probabilities in [0.0, 1.0], got {p!r}"
+            )
+        try:
+            pf = float(p)
+        except (TypeError, ValueError) as err:
+            raise CalibrationError(
+                f"calibrated_probs must contain finite probabilities in [0.0, 1.0], got {p!r}"
+            ) from err
         if not math.isfinite(pf) or not (0.0 <= pf <= 1.0):
-            raise ValueError(
+            raise CalibrationError(
                 f"calibrated_probs must contain finite probabilities in [0.0, 1.0], got {p}"
+            )
+
+    for y in ground_truth_labels:
+        if not isinstance(y, bool) and not (isinstance(y, int) and y in (0, 1)):
+            raise CalibrationError(
+                f"ground_truth_labels must contain booleans or 0/1 integers, got {y!r}"
             )
 
     # For ground truth False (0), high P(Pass) is a false-acceptance risk
@@ -122,7 +143,7 @@ def calibrate_cascade_thresholds(
     pos_scores = sorted(1.0 - float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if y)
 
     if not neg_scores or not pos_scores:
-        raise ValueError(
+        raise CalibrationError(
             "Calibration set must contain both positive and negative ground truth labels."
         )
 
@@ -141,17 +162,21 @@ def calibrate_cascade_thresholds(
 
     tau_accept = _strictly_above4(raw_accept)
     tau_reject = _strictly_below4(raw_reject)
-    if raw_reject >= raw_accept:
-        midpoint = 0.5 * (raw_reject + raw_accept)
-        tau_reject = min(tau_reject, _floor4(midpoint - 0.05))
-        tau_accept = max(tau_accept, _ceil4(midpoint + 0.05))
 
     # Thresholds outside [0, 1] mean "never decide on this side". LogitGate's range is [0, 1];
     # pinning there admits only exact saturation (P == 1.0 / P == 0.0, |log-odds| > 50), and
     # if a calibration point itself sits at saturation, the guarantee can't be expressed.
     saturated = raw_accept >= 1.0 or raw_reject <= 0.0 or tau_accept > 1.0 or tau_reject < 0.0
+
+    if raw_reject >= raw_accept:
+        midpoint = 0.5 * (raw_reject + raw_accept)
+        tau_reject = min(tau_reject, _floor4(midpoint - 0.05))
+        tau_accept = max(tau_accept, _ceil4(midpoint + 0.05))
+
     tau_accept = min(tau_accept, 1.0)
     tau_reject = max(tau_reject, 0.0)
+    if tau_reject >= tau_accept:
+        tau_reject = max(0.0, _strictly_below4(tau_accept))
 
     guarantee_holds = accept_ok and reject_ok and not saturated
     if not guarantee_holds:
@@ -159,10 +184,17 @@ def calibrate_cascade_thresholds(
 
         from logitgate.exceptions import CalibrationWarning
 
+        reasons: list[str] = []
+        if not (accept_ok and reject_ok):
+            reasons.append(
+                f"need >= {required} positives and >= {required} negatives "
+                f"(have {len(pos_scores)} / {len(neg_scores)})"
+            )
+        if saturated:
+            reasons.append("a calibration score sits at P=0 or P=1")
         warnings.warn(
-            f"Conformal guarantee does not hold at alpha={target_risk_alpha}: need >= {required} "
-            f"positives and >= {required} negatives (have {len(pos_scores)} / {len(neg_scores)})"
-            + ("; a calibration score sits at P=0 or P=1" if saturated else "")
+            f"Conformal guarantee does not hold at alpha={target_risk_alpha}: "
+            + "; ".join(reasons)
             + ". Thresholds are best-effort only.",
             CalibrationWarning,
             stacklevel=2,
@@ -208,7 +240,7 @@ def load_calibration_dataset(
                 or []
             )
         else:
-            raise ValueError(f"Unrecognized JSON structure in {path}")
+            raise CalibrationError(f"Unrecognized JSON structure in {path}")
         return _extract_samples_from_dicts(raw_items)
 
     # 2. JSONL
@@ -228,7 +260,17 @@ def load_calibration_dataset(
     try:
         data = json.loads(content)
         if isinstance(data, (list, dict)):
-            raw_items = data if isinstance(data, list) else data.get("test_cases", [])
+            raw_items = (
+                data
+                if isinstance(data, list)
+                else (
+                    data.get("test_cases")
+                    or data.get("samples")
+                    or data.get("cases")
+                    or data.get("data")
+                    or []
+                )
+            )
             return _extract_samples_from_dicts(raw_items)
     except (json.JSONDecodeError, TypeError, KeyError):
         pass
@@ -239,18 +281,22 @@ def load_calibration_dataset(
 def _extract_samples_from_dicts(
     items: Sequence[dict[str, Any]],
 ) -> list[tuple[str, str, bool]]:
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+        raise CalibrationError(f"Expected sequence of sample objects, got {type(items).__name__}")
     samples = []
     for item in items:
+        if not isinstance(item, Mapping):
+            raise CalibrationError(f"Expected JSON object for calibration sample, got {type(item).__name__}")
         rubric = str(
             item.get("rubric") or item.get("question") or item.get("instruction") or ""
         ).strip()
-        candidate = str(
-            item.get("candidate")
-            or item.get("actual_output")
-            or item.get("output")
-            or item.get("response")
-            or item.get("text")
-            or ""
+        raw_cand: Any = ""
+        for cand_key in ("candidate", "actual_output", "output", "response", "text"):
+            if item.get(cand_key) is not None:
+                raw_cand = item[cand_key]
+                break
+        candidate = (
+            json.dumps(raw_cand) if isinstance(raw_cand, (dict, list)) else str(raw_cand)
         ).strip()
         raw_label = item.get("label", item.get("ground_truth", item.get("expected", None)))
         if raw_label is None:
