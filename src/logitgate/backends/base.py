@@ -372,8 +372,7 @@ class StubBackend(LogitBackend, GenerativeBackend):
         with self._lock:
             self.prompt_log.append(prompt)
             resp_idx = self._response_idx
-            if self.logprob_responses:
-                self._response_idx += 1
+            self._response_idx += 1
 
         decision_tail_idx = max(prompt.rfind("[DECISION MAPPING]"), prompt.rfind("[SCORING SCALE]"))
         decision_section = prompt[decision_tail_idx:] if decision_tail_idx != -1 else prompt[-300:]
@@ -438,11 +437,16 @@ class StubBackend(LogitBackend, GenerativeBackend):
                 {"token": low_tok, "logprob": math.log(1.0 - p)},
             ]
 
-        # 2. Check if this is Pass 2 (reversed mapping where A is Fail / violates)
+        # 2. Check if this is Pass 2 (reversed mapping where A is Fail / violates, or ChoiceGate Pass 2)
         is_reverse_pass = (
             "A: The candidate artifact violates" in decision_section
             or "A: The content violates" in decision_section
             or "A: The candidate does not" in decision_section
+            or (
+                self.reverse_top_logprobs is not None
+                and "Choice:" in decision_section
+                and resp_idx % 2 == 1
+            )
         )
 
         if is_reverse_pass:

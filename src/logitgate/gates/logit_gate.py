@@ -24,6 +24,7 @@ from logitgate.debiasing.softmax import (
 from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
     extract_token_logprob,
+    has_any_target_token,
     has_finite_logprobs,
 )
 from logitgate.debiasing.softmax import (
@@ -119,6 +120,7 @@ class LogitGate(BaseGate):
         logit_temperature: float | Literal["auto"] | None = None,
         preset: Literal["strict", "balanced", "fast_triage"] | None = None,
         save_on_fail: bool | None = None,
+        max_positional_bias: float | None = None,
         name: str = "LogitGate",
     ) -> None:
         if preset is not None:
@@ -164,6 +166,15 @@ class LogitGate(BaseGate):
                 f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
             )
 
+        if max_positional_bias is not None and (
+            isinstance(max_positional_bias, bool)
+            or not math.isfinite(float(max_positional_bias))
+            or float(max_positional_bias) <= 0.0
+        ):
+            raise ConfigurationError(
+                f"max_positional_bias must be a positive float, got {max_positional_bias!r}"
+            )
+
         self.backend = resolve_logit_backend(backend, model=model)
         effective_model = (
             model
@@ -182,6 +193,7 @@ class LogitGate(BaseGate):
         self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self.max_positional_bias = float(max_positional_bias) if max_positional_bias is not None else None
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -295,6 +307,8 @@ class LogitGate(BaseGate):
         cancels exactly (Zhao et al., 2021). Averaging probabilities would only dampen it.
         """
         _ensure_logprobs_present(top_fwd, top_rev)
+        fwd_has_target = has_any_target_token(top_fwd, ("A", "B"))
+        rev_has_target = True if top_rev is None else has_any_target_token(top_rev, ("A", "B"))
         l1, p1 = compute_binary_log_odds(top_fwd, pass_token="A", fail_token="B")
         temp = max(self.logit_temperature, 1e-6)
         l2: float | None = None
@@ -317,7 +331,20 @@ class LogitGate(BaseGate):
         latency = (time.perf_counter() - t0) * 1000.0
         prob_rounded = round(calibrated_prob, 4)
 
-        if prob_rounded >= self.pass_threshold:
+        abstained_reason: str | None = None
+        if not fwd_has_target or not rev_has_target:
+            status = DecisionStatus.AMBIGUOUS
+            abstained_reason = "unobserved_target_tokens"
+        elif (
+            self.max_positional_bias is not None
+            and pos_bias is not None
+            and l2 is not None
+            and (l1 * l2 < 0.0)
+            and pos_bias > self.max_positional_bias
+        ):
+            status = DecisionStatus.AMBIGUOUS
+            abstained_reason = f"positional_bias_exceeded ({pos_bias:.4f} > {self.max_positional_bias:.4f})"
+        elif prob_rounded >= self.pass_threshold:
             status = DecisionStatus.PASSED
         elif prob_rounded <= self.fail_threshold:
             status = DecisionStatus.FAILED
@@ -325,6 +352,13 @@ class LogitGate(BaseGate):
             status = DecisionStatus.AMBIGUOUS
 
         bias_rounded = round(pos_bias, 4) if pos_bias is not None else None
+        meta: dict[str, Any] = {
+            "positional_bias_magnitude": bias_rounded,
+            "log_odds_pass": round(log_odds_pass, 4),
+            "shannon_entropy": round(shannon_entropy, 4),
+        }
+        if abstained_reason is not None:
+            meta["abstained_reason"] = abstained_reason
         trace = LayerTrace(
             layer_name=self.name,
             status=status,
@@ -338,11 +372,7 @@ class LogitGate(BaseGate):
             log_odds_pass=round(log_odds_pass, 4),
             shannon_entropy=round(shannon_entropy, 4),
             tokens_generated=0,
-            metadata={
-                "positional_bias_magnitude": bias_rounded,
-                "log_odds_pass": round(log_odds_pass, 4),
-                "shannon_entropy": round(shannon_entropy, 4),
-            },
+            metadata=meta,
         )
         return Verdict(
             passed=status == DecisionStatus.PASSED,
@@ -563,12 +593,17 @@ class ChoiceGate(BaseGate):
         backend: str | LogitBackend | None = None,
         model: str | None = None,
         symmetric_debiasing: bool | None = True,
+        permutation_mode: Literal["derangement", "cyclic", "reverse"] = "derangement",
         query_first: bool = True,
         logit_temperature: float | Literal["auto"] | None = None,
         name: str = "ChoiceGate",
     ) -> None:
         if not question or not question.strip():
             raise ConfigurationError("question cannot be empty or whitespace")
+        if permutation_mode not in ("derangement", "cyclic", "reverse"):
+            raise ConfigurationError(
+                f"Invalid permutation_mode '{permutation_mode}'. Must be one of ['derangement', 'cyclic', 'reverse']"
+            )
         if not isinstance(options, Mapping) or len(options) < 2:
             raise ConfigurationError(
                 f"ChoiceGate requires at least 2 options, got {len(options) if isinstance(options, Mapping) else type(options).__name__}"
@@ -606,6 +641,7 @@ class ChoiceGate(BaseGate):
         self.backend = resolved_backend
         self.model = effective_model
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
+        self.permutation_mode = permutation_mode
         self.query_first = query_first
         self.logit_temperature = effective_temp
         self.name = name
@@ -614,48 +650,70 @@ class ChoiceGate(BaseGate):
         q_repr = repr(self.question[:40] + "..." if len(self.question) > 40 else self.question)
         return f"ChoiceGate(question={q_repr}, options={list(self.options.keys())!r}, backend={self.backend!r})"
 
-    def _choice_prompts(self, candidate: Any) -> tuple[str, str | None]:
-        """Returns (original order, reversed option order) prompts; reversed is optional.
+    def _permuted_key_indices(self) -> list[list[int]]:
+        """Returns the list of pass permutations where ``perm[i]`` is the key index assigned to option ``i``.
 
-        Keys stay fixed while the descriptions are reversed, so each description is seen
-        under two different letters. That cancels both letter priors and position bias.
+        - ``derangement`` (2 passes): Pass 1 is identity ``i -> i``; Pass 2 shifts by ``max(1, n // 2)``
+          so ``i -> (i + shift) % n``. Unlike list reversal on odd ``n``, this guarantees zero fixed
+          points (no middle option stays pinned to the same letter and line in both passes).
+        - ``cyclic`` (n passes): Runs all ``n`` cyclic shifts ``(i + s) % n`` for ``s in 0..n-1`` so
+          every option visits every letter and slot position exactly once (Zheng et al., 2023).
+        - ``reverse`` (2 passes): Legacy list reversal ``i -> n - 1 - i``.
         """
-        forward = compile_choice_prompt(
-            question=self.question,
-            candidate=candidate,
-            options=self.options,
-            query_first=self.query_first,
-        )
+        n = len(self.options)
+        identity = list(range(n))
         if not self.symmetric_debiasing:
-            return forward, None
-        keys = list(self.options)
-        reversed_mapping = dict(zip(keys, reversed(list(self.options.values()))))
-        reverse = compile_choice_prompt(
-            question=self.question,
-            candidate=candidate,
-            options=reversed_mapping,
-            query_first=self.query_first,
-        )
-        return forward, reverse
+            return [identity]
+        if self.permutation_mode == "cyclic":
+            return [[(i + s) % n for i in range(n)] for s in range(n)]
+        if self.permutation_mode == "reverse":
+            return [identity, [n - 1 - i for i in range(n)]]
+        shift = max(1, n // 2)
+        return [identity, [(i + shift) % n for i in range(n)]]
 
-    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
-        _ensure_logprobs_present(top_fwd, top_rev)
+    def _choice_prompts_list(self, candidate: Any) -> list[str]:
+        keys = list(self.options.keys())
+        values = list(self.options.values())
+        n = len(keys)
+        prompts: list[str] = []
+        for perm in self._permuted_key_indices():
+            # perm[i] is the key index where option i's description is placed
+            slot_to_desc: dict[str, str] = {}
+            for key_idx in range(n):
+                opt_idx = perm.index(key_idx)
+                slot_to_desc[keys[key_idx]] = values[opt_idx]
+            prompts.append(
+                compile_choice_prompt(
+                    question=self.question,
+                    candidate=candidate,
+                    options=slot_to_desc,
+                    query_first=self.query_first,
+                )
+            )
+        return prompts
+
+    def _choice_prompts(self, candidate: Any) -> tuple[str, str | None]:
+        prompts = self._choice_prompts_list(candidate)
+        return prompts[0], (prompts[1] if len(prompts) > 1 else None)
+
+    def _verdict_from_logprobs_list(self, top_list: list[TopLogprobs], t0: float) -> Verdict:
+        if not top_list or any(not has_finite_logprobs(top) for top in top_list):
+            raise BackendError(
+                "Backend returned no token log-probabilities (top_logprobs is empty). "
+                "Ensure the model and inference server support logprobs."
+            )
         keys = list(self.options)
-        fwd_raw = {k: extract_token_logprob(top_fwd, k) for k in keys}
-        m_fwd = max(fwd_raw.values())
-        lse_fwd = m_fwd + math.log(sum(math.exp(v - m_fwd) for v in fwd_raw.values()))
-        combined = {k: v - lse_fwd for k, v in fwd_raw.items()}
-        if top_rev is not None:
-            # In the reversed prompt, option i's description sits under key[-1 - i].
-            n = len(keys)
-            rev_raw = {k: extract_token_logprob(top_rev, keys[n - 1 - i]) for i, k in enumerate(keys)}
-            m_rev = max(rev_raw.values())
-            lse_rev = m_rev + math.log(sum(math.exp(v - m_rev) for v in rev_raw.values()))
-            combined = {
-                k: (combined[k] + (rev_raw[k] - lse_rev)) / 2.0
-                for k in keys
-            }
-        choice_probs = _softmax(combined, self.logit_temperature)
+        perms = self._permuted_key_indices()[: len(top_list)]
+        accum = {k: 0.0 for k in keys}
+        for top, perm in zip(top_list, perms):
+            # In this pass, option i sits under keys[perm[i]]
+            pass_raw = {keys[i]: extract_token_logprob(top, keys[perm[i]]) for i in range(len(keys))}
+            m_pass = max(pass_raw.values())
+            lse_pass = m_pass + math.log(sum(math.exp(v - m_pass) for v in pass_raw.values()))
+            for k in keys:
+                accum[k] += (pass_raw[k] - lse_pass) / float(len(perms))
+
+        choice_probs = _softmax(accum, self.logit_temperature)
         best_choice, max_prob = max(choice_probs.items(), key=lambda kv: kv[1])
         rounded = {k: round(v, 4) for k, v in choice_probs.items()}
         latency = (time.perf_counter() - t0) * 1000.0
@@ -665,7 +723,7 @@ class ChoiceGate(BaseGate):
             status=DecisionStatus.PASSED,
             latency_ms=latency,
             calibrated_prob=round(max_prob, 4),
-            metadata={"choice_probabilities": rounded},
+            metadata={"choice_probabilities": rounded, "permutation_mode": self.permutation_mode},
         )
         return Verdict(
             passed=True,
@@ -680,33 +738,35 @@ class ChoiceGate(BaseGate):
             traces=[trace],
         )
 
+    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
+        top_list = [top_fwd] if top_rev is None else [top_fwd, top_rev]
+        return self._verdict_from_logprobs_list(top_list, t0)
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
-        forward, reverse = self._choice_prompts(candidate)
-        top_fwd = self.backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=keys)
-        top_rev = (
-            self.backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=keys)
-            if reverse is not None
-            else None
-        )
-        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
+        prompts = self._choice_prompts_list(candidate)
+        top_list = [
+            self.backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
+            for p in prompts
+        ]
+        return self._verdict_from_logprobs_list(top_list, t0)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
-        forward, reverse = self._choice_prompts(candidate)
-        top_rev: TopLogprobs | None = None
-        if reverse is None:
-            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=keys)
+        prompts = self._choice_prompts_list(candidate)
+        if len(prompts) == 1:
+            top_list = [await self.backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)]
         else:
-            top_fwd, top_rev = await asyncio.gather(
-                self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=keys),
-                self.backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=keys),
+            top_list = list(
+                await asyncio.gather(
+                    *[self.backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts]
+                )
             )
-        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
+        return self._verdict_from_logprobs_list(top_list, t0)
 
 
 class ScoreGate(BaseGate):

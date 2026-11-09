@@ -55,17 +55,18 @@ def test_logit_gate_threshold_bands():
 
 
 def test_choice_gate():
-    # StubBackend returning high prob for token 'B'
+    # StubBackend returning high prob for Option B:
+    # Pass 1 (identity): A=Opt0, B=Opt1, C=Opt2 -> Option B is under 'B' (-0.1)
     forward_lps = [
         {"token": "A", "logprob": -2.5},
         {"token": "B", "logprob": -0.1},
         {"token": "C", "logprob": -3.0},
     ]
-    # In reverse mapping: keys are A, B, C; option B is still in middle (or reversed)
+    # Pass 2 (derangement shift +1): B=Opt0, C=Opt1, A=Opt2 -> Option B is under 'C' (-0.1)
     reverse_lps = [
         {"token": "A", "logprob": -3.0},
-        {"token": "B", "logprob": -0.1},
-        {"token": "C", "logprob": -2.5},
+        {"token": "B", "logprob": -2.5},
+        {"token": "C", "logprob": -0.1},
     ]
     backend = StubBackend(
         forward_top_logprobs=forward_lps,
@@ -188,15 +189,17 @@ async def test_logit_gate_batch_aevaluate_prefix_cache_sharing():
 
 @pytest.mark.asyncio
 async def test_choice_gate_aevaluate_and_temperature():
+    # Pass 1 (identity): Option B is under 'B' (-0.2)
     forward_lps = [
         {"token": "A", "logprob": -2.0},
         {"token": "B", "logprob": -0.2},
         {"token": "C", "logprob": -3.0},
     ]
+    # Pass 2 (derangement shift +1): Option B moves to 'C' (-0.2)
     reverse_lps = [
         {"token": "A", "logprob": -3.0},
-        {"token": "B", "logprob": -0.2},
-        {"token": "C", "logprob": -2.0},
+        {"token": "B", "logprob": -2.0},
+        {"token": "C", "logprob": -0.2},
     ]
     backend = StubBackend(
         forward_top_logprobs=forward_lps,
@@ -414,4 +417,84 @@ def test_logit_gate_telemetry_populated():
     assert trace_asym.positional_bias_magnitude is None
     assert trace_asym.log_odds_pass is not None
     assert trace_asym.shannon_entropy is not None
+
+
+def test_choice_gate_derangement_and_cyclic_cancel_middle_slot_bias():
+    """Verifies that odd-K ChoiceGate moves the middle option ('B') so a pure slot-'B' bias does not win."""
+    # Suppose true signal favors Option C (+1.5), while A and B have 0.0 signal,
+    # AND the model has a +2.0 bias toward picking whichever option sits in the middle slot 'B'.
+    # Pass 1 (A=OptA, B=OptB, C=OptC):
+    #   slot A (OptA): 0.0, slot B (OptB): 0.0 + 2.0 = +2.0, slot C (OptC): +1.5
+    p1 = [
+        {"token": "A", "logprob": -3.0},
+        {"token": "B", "logprob": -1.0},   # +2.0 slot-'B' bias boosts OptB on Pass 1
+        {"token": "C", "logprob": -1.5},   # True signal +1.5 on OptC
+    ]
+    # Pass 2 under derangement (shift=1: B=OptA, C=OptB, A=OptC):
+    #   slot A (OptC): +1.5, slot B (OptA): 0.0 + 2.0 = +2.0, slot C (OptB): 0.0
+    p2 = [
+        {"token": "A", "logprob": -1.5},   # OptC now sits at 'A' with its true +1.5 signal
+        {"token": "B", "logprob": -1.0},   # +2.0 slot-'B' bias now boosts OptA instead of OptB!
+        {"token": "C", "logprob": -3.0},   # OptB now sits at 'C' without the 'B' slot bias
+    ]
+    # Pass 3 under cyclic (shift=2: C=OptA, A=OptB, B=OptC):
+    #   slot A (OptB): 0.0, slot B (OptC): +1.5 + 2.0 = +3.5, slot C (OptA): 0.0
+    p3 = [
+        {"token": "A", "logprob": -3.0},
+        {"token": "B", "logprob": +0.5},
+        {"token": "C", "logprob": -3.0},
+    ]
+
+    # 1. Under legacy 'reverse', Pass 2 keeps OptB at 'B', so OptB wrongly wins if 'B' is biased
+    gate_cyclic = ChoiceGate(
+        question="Pick route:",
+        options={"A": "OptA", "B": "OptB", "C": "OptC"},
+        backend=StubBackend(logprob_responses=[p1, p2, p3]),
+        permutation_mode="cyclic",
+    )
+    v_cyclic = gate_cyclic.evaluate("input")
+    assert v_cyclic.choice == "C"
+    assert v_cyclic.choice_probabilities["C"] > v_cyclic.choice_probabilities["B"]
+    assert v_cyclic.choice_probabilities["B"] == pytest.approx(v_cyclic.choice_probabilities["A"], abs=1e-4)
+
+    # 2. Under 2-pass 'derangement', zero options stay at the same key/slot across Pass 1 and Pass 2
+    gate_derange = ChoiceGate(
+        question="Pick route:",
+        options={"A": "OptA", "B": "OptB", "C": "OptC"},
+        backend=StubBackend(logprob_responses=[p1, p2]),
+        permutation_mode="derangement",
+    )
+    perms = gate_derange._permuted_key_indices()
+    assert len(perms) == 2
+    assert all(perms[0][i] != perms[1][i] for i in range(3))
+    v_derange = gate_derange.evaluate("input")
+    assert v_derange.choice == "C"
+
+
+def test_logit_gate_abstains_when_target_tokens_unobserved_or_max_bias_exceeded():
+    """LogitGate returns AMBIGUOUS when a pass misses both A and B in top_logprobs or exceeds max_positional_bias."""
+    # 1. Pass 1 has 'A', Pass 2 only returns chatty non-target tokens ('The', 'Yes')
+    fwd = [{"token": "A", "logprob": -0.01}, {"token": "B", "logprob": -6.0}]
+    rev_chatty = [{"token": "The", "logprob": -0.1}, {"token": "Yes", "logprob": -1.2}]
+    gate = LogitGate("Check rubric", backend=StubBackend(logprob_responses=[fwd, rev_chatty]))
+    verdict = gate.evaluate("candidate")
+    assert verdict.status == DecisionStatus.AMBIGUOUS
+    assert verdict.passed is False
+    assert verdict.traces[0].metadata.get("abstained_reason") == "unobserved_target_tokens"
+
+    # 2. Extreme sign-flip positional bias exceeding max_positional_bias abstains to AMBIGUOUS
+    # Pass 1: A=-0.001, B=-10.0 (l1 = +9.999)
+    # Pass 2: A=-0.1, B=-4.0 (l2 = -3.9, model still picked 'A' on Pass 2!)
+    # Mean log-odds is (+9.999 - 3.9)/2 = +3.05 (P=0.9548), but pos_bias = 6.95 > 4.0 with opposite signs
+    fwd_flip = [{"token": "A", "logprob": -0.001}, {"token": "B", "logprob": -10.0}]
+    rev_flip = [{"token": "A", "logprob": -0.1}, {"token": "B", "logprob": -4.0}]
+    gate_guarded = LogitGate(
+        "Check rubric",
+        backend=StubBackend(logprob_responses=[fwd_flip, rev_flip]),
+        max_positional_bias=4.0,
+    )
+    v_guarded = gate_guarded.evaluate("candidate with injection")
+    assert v_guarded.status == DecisionStatus.AMBIGUOUS
+    assert v_guarded.passed is False
+    assert "positional_bias_exceeded" in v_guarded.traces[0].metadata.get("abstained_reason", "")
 

@@ -58,6 +58,33 @@ def has_finite_logprobs(top_logprobs: list[dict[str, Any]]) -> bool:
     return False
 
 
+def has_any_target_token(top_logprobs: list[dict[str, Any]], target_tokens: list[str] | tuple[str, ...]) -> bool:
+    """Returns True if at least one surface variant of any target token appears with a finite logprob."""
+    if not top_logprobs or not target_tokens:
+        return False
+    targets_norm = {t.strip().upper() for t in target_tokens if isinstance(t, str) and t.strip()}
+    if not targets_norm:
+        return False
+    for item in top_logprobs:
+        if not isinstance(item, dict):
+            continue
+        raw_tok_val = item.get("token")
+        if raw_tok_val is None:
+            continue
+        tok = str(raw_tok_val).strip().upper()
+        if tok not in targets_norm:
+            continue
+        lp = item.get("logprob")
+        if lp is None or isinstance(lp, bool):
+            continue
+        try:
+            if math.isfinite(float(lp)):
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
 def logsumexp(logprobs: list[float]) -> float:
     """Numerically stable logsumexp."""
     if not logprobs:
