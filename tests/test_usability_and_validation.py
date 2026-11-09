@@ -669,10 +669,11 @@ def test_cascade_save_on_fail(tmp_path):
 
 
 def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
-    from logitgate.integrations.pytest_plugin import check
-    from logitgate.snapshot import VerdictSnapshot
+    from logitgate.integrations.pytest_plugin import check, pytest_terminal_summary
+    from logitgate.snapshot import VerdictSnapshot, reset_snapshot_notices
 
     monkeypatch.setenv("LOGITGATE_SNAPSHOT_DIR", str(tmp_path / "check_fails"))
+    reset_snapshot_notices()
 
     @check("Must pass criteria", backend=StubBackend(default_prob=0.05), save_snapshot=True)
     def my_flaky_test():
@@ -689,6 +690,20 @@ def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
     snap = VerdictSnapshot.load(tmp_path / "check_fails")
     assert snap.test_name == "my_flaky_test"
     assert snap.candidate == "failing candidate"
+
+    lines: list[str] = []
+
+    class _FakeReporter:
+        def section(self, title: str) -> None:
+            lines.append(f"[{title}]")
+
+        def write_line(self, line: str) -> None:
+            lines.append(line)
+
+    pytest_terminal_summary(_FakeReporter())
+    assert any("LogitGate failure snapshots" in line for line in lines)
+    assert any("my_flaky_test" in line for line in lines)
+    reset_snapshot_notices()
 
 
 def test_base_gate_callable_and_from_verdict(tmp_path, monkeypatch):

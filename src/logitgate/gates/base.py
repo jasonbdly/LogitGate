@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from logitgate.models import Verdict
@@ -83,13 +84,53 @@ class BaseGate(abc.ABC):
         return await loop.run_in_executor(None, lambda: self.evaluate(candidate, **kwargs))
 
     def replay_config(self) -> dict[str, Any] | None:
-        """Returns the `LogitGate` constructor config needed to replay this gate from a snapshot.
+        """Returns the gate constructor config needed to replay this gate from a snapshot.
 
-        `VerdictSnapshot.replay()` reconstructs a `LogitGate`, so only gates that can be
-        faithfully rebuilt that way return a dict. Everything else returns ``None`` and is
-        recorded in the snapshot by name only.
+        `VerdictSnapshot.replay()` reconstructs a `LogitGate` or `MultiRubricGate`, so only gates
+        that can be faithfully rebuilt that way return a dict. Everything else returns ``None``
+        and is recorded in the snapshot by name only.
         """
         return None
+
+    def as_conditional_edge(
+        self,
+        pass_node: str | None = None,
+        fail_node: str | None = None,
+        state_key: str = "content",
+        ambiguous_node: str | None = None,
+        node_mapping: Mapping[str, str] | None = None,
+    ) -> Callable[[Mapping[str, Any] | Any], str]:
+        """Wraps this gate as a synchronous LangGraph conditional edge routing callable."""
+        from logitgate.integrations.langgraph import as_conditional_edge
+
+        return as_conditional_edge(
+            self,
+            pass_node=pass_node,
+            fail_node=fail_node,
+            state_key=state_key,
+            ambiguous_node=ambiguous_node,
+            node_mapping=node_mapping,
+        )
+
+    def as_async_conditional_edge(
+        self,
+        pass_node: str | None = None,
+        fail_node: str | None = None,
+        state_key: str = "content",
+        ambiguous_node: str | None = None,
+        node_mapping: Mapping[str, str] | None = None,
+    ) -> Callable[[Mapping[str, Any] | Any], Awaitable[str]]:
+        """Wraps this gate as an asynchronous LangGraph conditional edge routing callable."""
+        from logitgate.integrations.langgraph import as_async_conditional_edge
+
+        return as_async_conditional_edge(
+            self,
+            pass_node=pass_node,
+            fail_node=fail_node,
+            state_key=state_key,
+            ambiguous_node=ambiguous_node,
+            node_mapping=node_mapping,
+        )
 
     def __call__(self, candidate: Any, **kwargs: Any) -> Verdict:
         """Evaluates the candidate artifact synchronously (callable shorthand for `evaluate`)."""

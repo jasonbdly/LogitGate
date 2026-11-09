@@ -23,6 +23,7 @@ from logitgate.calibration.conformal import (
     ConformalCascadeThresholds,
     calibrate_cascade_thresholds,
     load_calibration_dataset,
+    min_samples_per_class,
 )
 from logitgate.cascade import Cascade
 from logitgate.config import (
@@ -69,7 +70,12 @@ from logitgate.exceptions import (
     LogitGateError,
     StubBackendWarning,
 )
-from logitgate.gates.ast_gate import ASTFailureCode, ASTGate, ContractGate
+from logitgate.gates.ast_gate import (
+    ASTFailureCode,
+    ASTGate,
+    ContractGate,
+    normalize_candidate,
+)
 from logitgate.gates.base import BaseGate, EscalationPolicy
 from logitgate.gates.judge_gate import JudgeGate
 from logitgate.gates.logit_gate import ChoiceGate, LogitGate, MultiRubricGate, ScoreGate
@@ -187,6 +193,8 @@ __all__ = [
     "infer_backend_spec",
     "load_calibration_dataset",
     "marginalize_pole_logprob",
+    "min_samples_per_class",
+    "normalize_candidate",
     "reset_config",
     "resolve_generative_backend",
     "resolve_logit_backend",

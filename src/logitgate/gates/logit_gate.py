@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
@@ -62,6 +63,8 @@ def _resolve_logit_temperature(
             temp = cal_res.optimal_temperature
         effective_temp = temp
     elif logit_temperature is not None:
+        if isinstance(logit_temperature, bool):
+            raise ConfigurationError(f"logit_temperature must be a positive float, got {logit_temperature!r}")
         effective_temp = float(logit_temperature)
     else:
         from logitgate.debiasing.permutation import get_model_temperature
@@ -72,7 +75,7 @@ def _resolve_logit_temperature(
             model_temp = get_model_temperature(effective_model)
             effective_temp = model_temp if model_temp != 1.0 else LogitGateDefaults.logit_temperature
 
-    if effective_temp <= 0.0:
+    if not math.isfinite(effective_temp) or effective_temp <= 0.0:
         raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
     return effective_temp
 
@@ -100,8 +103,8 @@ class LogitGate(BaseGate):
         name: Identifier for this gate instance.
 
     Raises:
-        ValueError: If rubric is empty, thresholds are outside [0, 1], pass_threshold <= fail_threshold,
-            or logit_temperature <= 0.
+        ConfigurationError: If rubric is empty, thresholds are outside [0, 1],
+            pass_threshold <= fail_threshold, or logit_temperature <= 0.
     """
 
     def __init__(
@@ -152,10 +155,10 @@ class LogitGate(BaseGate):
 
         if not rubric or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
-        if not (0.0 <= effective_pass_thresh <= 1.0):
-            raise ConfigurationError(f"pass_threshold must be between 0.0 and 1.0, got {effective_pass_thresh}")
-        if not (0.0 <= effective_fail_thresh <= 1.0):
-            raise ConfigurationError(f"fail_threshold must be between 0.0 and 1.0, got {effective_fail_thresh}")
+        if isinstance(effective_pass_thresh, bool) or not (0.0 <= effective_pass_thresh <= 1.0):
+            raise ConfigurationError(f"pass_threshold must be between 0.0 and 1.0, got {effective_pass_thresh!r}")
+        if isinstance(effective_fail_thresh, bool) or not (0.0 <= effective_fail_thresh <= 1.0):
+            raise ConfigurationError(f"fail_threshold must be between 0.0 and 1.0, got {effective_fail_thresh!r}")
         if effective_pass_thresh <= effective_fail_thresh:
             raise ConfigurationError(
                 f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
@@ -312,10 +315,11 @@ class LogitGate(BaseGate):
 
         shannon_entropy = compute_shannon_entropy(calibrated_prob)
         latency = (time.perf_counter() - t0) * 1000.0
+        prob_rounded = round(calibrated_prob, 4)
 
-        if calibrated_prob >= self.pass_threshold:
+        if prob_rounded >= self.pass_threshold:
             status = DecisionStatus.PASSED
-        elif calibrated_prob <= self.fail_threshold:
+        elif prob_rounded <= self.fail_threshold:
             status = DecisionStatus.FAILED
         else:
             status = DecisionStatus.AMBIGUOUS
@@ -325,7 +329,7 @@ class LogitGate(BaseGate):
             layer_name=self.name,
             status=status,
             latency_ms=latency,
-            calibrated_prob=round(calibrated_prob, 4),
+            calibrated_prob=prob_rounded,
             forward_prob=round(p1, 4),
             reverse_prob=round(p2, 4) if p2 is not None else None,
             forward_log_odds=round(l1, 4),
@@ -343,11 +347,11 @@ class LogitGate(BaseGate):
         return Verdict(
             passed=status == DecisionStatus.PASSED,
             status=status,
-            probability=round(calibrated_prob, 4),
+            probability=prob_rounded,
             triggered_layer=self.name,
             total_latency_ms=latency,
             total_tokens_generated=0,
-            reason=f"LogitGate prob={calibrated_prob:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
+            reason=f"LogitGate prob={prob_rounded:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
             traces=[trace],
         )
 
@@ -371,6 +375,11 @@ class LogitGate(BaseGate):
         The candidate is placed first in every prompt, so all 2 x len(rubrics) queries share
         one cached prefix and only the short rubric suffix is re-prefilled per query.
         """
+        if isinstance(rubrics, (str, bytes)):
+            raise ConfigurationError("rubrics must be a sequence of rubric strings, not a single string")
+        for r in rubrics:
+            if not isinstance(r, str) or not r.strip():
+                raise ConfigurationError("Each rubric in rubrics must be a non-empty string")
         results = []
         for idx in range(len(rubrics)):
             t0 = time.perf_counter()
@@ -386,6 +395,11 @@ class LogitGate(BaseGate):
         Firing every query at a cold server makes each one prefill the full candidate in
         parallel (a cache stampede). One sequential warm-up turns the rest into cache hits.
         """
+        if isinstance(rubrics, (str, bytes)):
+            raise ConfigurationError("rubrics must be a sequence of rubric strings, not a single string")
+        for r in rubrics:
+            if not isinstance(r, str) or not r.strip():
+                raise ConfigurationError("Each rubric in rubrics must be a non-empty string")
         if not rubrics:
             return []
 
@@ -432,6 +446,8 @@ class MultiRubricGate(BaseGate):
     """
 
     def __init__(self, rubrics: Sequence[str], name: str = "MultiRubricGate", **options: Any) -> None:
+        if isinstance(rubrics, (str, bytes)):
+            raise ConfigurationError("MultiRubricGate rubrics must be a sequence of strings, not a single string")
         cleaned = [r.strip() for r in rubrics if isinstance(r, str) and r.strip()]
         if len(cleaned) != len(rubrics) or not cleaned:
             raise ConfigurationError("MultiRubricGate needs one or more non-empty rubric strings")
@@ -537,7 +553,7 @@ class ChoiceGate(BaseGate):
         name: Identifier for this gate instance.
 
     Raises:
-        ValueError: If question is empty, options has fewer than 2 items, or logit_temperature <= 0.
+        ConfigurationError: If question is empty, options has fewer than 2 items, or logit_temperature <= 0.
     """
 
     def __init__(
@@ -546,16 +562,18 @@ class ChoiceGate(BaseGate):
         options: Mapping[str, str],
         backend: str | LogitBackend | None = None,
         model: str | None = None,
-        symmetric_debiasing: bool = True,
+        symmetric_debiasing: bool | None = True,
         query_first: bool = True,
         logit_temperature: float | Literal["auto"] | None = None,
         name: str = "ChoiceGate",
     ) -> None:
         if not question or not question.strip():
             raise ConfigurationError("question cannot be empty or whitespace")
-        if not options or len(options) < 2:
-            raise ConfigurationError(f"ChoiceGate requires at least 2 options, got {len(options) if options else 0}")
-        invalid_keys = [k for k in options if len(str(k).strip()) != 1]
+        if not isinstance(options, Mapping) or len(options) < 2:
+            raise ConfigurationError(
+                f"ChoiceGate requires at least 2 options, got {len(options) if isinstance(options, Mapping) else type(options).__name__}"
+            )
+        invalid_keys = [k for k in options if not isinstance(k, str) or len(k.strip()) != 1]
         if invalid_keys:
             raise ConfigurationError(
                 f"ChoiceGate option keys must be single characters (e.g. 'A', 'B', 'C'), got: {invalid_keys}"
@@ -563,7 +581,9 @@ class ChoiceGate(BaseGate):
         normalized_options: dict[str, str] = {}
         seen_upper: set[str] = set()
         for k, v in options.items():
-            k_clean = str(k).strip()
+            if not isinstance(v, str) or not v.strip():
+                raise ConfigurationError(f"ChoiceGate option description for '{k}' must be a non-empty string")
+            k_clean = k.strip()
             k_upper = k_clean.upper()
             if k_upper in seen_upper:
                 raise ConfigurationError(
@@ -585,7 +605,7 @@ class ChoiceGate(BaseGate):
         self.options = normalized_options
         self.backend = resolved_backend
         self.model = effective_model
-        self.symmetric_debiasing = symmetric_debiasing
+        self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.query_first = query_first
         self.logit_temperature = effective_temp
         self.name = name
@@ -621,13 +641,19 @@ class ChoiceGate(BaseGate):
     def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
         _ensure_logprobs_present(top_fwd, top_rev)
         keys = list(self.options)
-        combined = {k: extract_token_logprob(top_fwd, k) for k in keys}
+        fwd_raw = {k: extract_token_logprob(top_fwd, k) for k in keys}
+        m_fwd = max(fwd_raw.values())
+        lse_fwd = m_fwd + math.log(sum(math.exp(v - m_fwd) for v in fwd_raw.values()))
+        combined = {k: v - lse_fwd for k, v in fwd_raw.items()}
         if top_rev is not None:
             # In the reversed prompt, option i's description sits under key[-1 - i].
             n = len(keys)
+            rev_raw = {k: extract_token_logprob(top_rev, keys[n - 1 - i]) for i, k in enumerate(keys)}
+            m_rev = max(rev_raw.values())
+            lse_rev = m_rev + math.log(sum(math.exp(v - m_rev) for v in rev_raw.values()))
             combined = {
-                k: (combined[k] + extract_token_logprob(top_rev, keys[n - 1 - i])) / 2.0
-                for i, k in enumerate(keys)
+                k: (combined[k] + (rev_raw[k] - lse_rev)) / 2.0
+                for k in keys
             }
         choice_probs = _softmax(combined, self.logit_temperature)
         best_choice, max_prob = max(choice_probs.items(), key=lambda kv: kv[1])
@@ -706,7 +732,7 @@ class ScoreGate(BaseGate):
         name: Identifier for this gate instance.
 
     Raises:
-        ValueError: If rubric is empty, min_score >= max_score, threshold is out of bounds,
+        ConfigurationError: If rubric is empty, min_score >= max_score, threshold is out of bounds,
             or logit_temperature <= 0.
     """
 
@@ -718,13 +744,23 @@ class ScoreGate(BaseGate):
         threshold: float = 3.5,
         backend: str | LogitBackend | None = None,
         model: str | None = None,
-        symmetric_debiasing: bool = True,
+        symmetric_debiasing: bool | None = True,
         query_first: bool = True,
         logit_temperature: float | Literal["auto"] | None = None,
+        save_on_fail: bool | None = None,
         name: str = "ScoreGate",
     ) -> None:
         if not rubric or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
+        if (
+            isinstance(min_score, bool)
+            or not isinstance(min_score, int)
+            or isinstance(max_score, bool)
+            or not isinstance(max_score, int)
+        ):
+            raise ConfigurationError(
+                f"min_score and max_score must be integers, got min_score={min_score!r}, max_score={max_score!r}"
+            )
         if min_score >= max_score:
             raise ConfigurationError(f"min_score ({min_score}) must be strictly less than max_score ({max_score})")
         if min_score < 0 or max_score > 9:
@@ -732,7 +768,11 @@ class ScoreGate(BaseGate):
                 f"ScoreGate requires single-digit integer bounds (0 <= min_score < max_score <= 9), "
                 f"got min_score={min_score}, max_score={max_score}"
             )
-        if threshold < min_score or threshold > max_score:
+        if (
+            isinstance(threshold, bool)
+            or not math.isfinite(float(threshold))
+            or not (min_score <= threshold <= max_score)
+        ):
             raise ConfigurationError(
                 f"threshold ({threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
             )
@@ -752,10 +792,48 @@ class ScoreGate(BaseGate):
         self.threshold = threshold
         self.backend = resolved_backend
         self.model = effective_model
-        self.symmetric_debiasing = symmetric_debiasing
+        self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self.save_on_fail = save_on_fail
         self.name = name
+
+    def replay_config(self) -> dict[str, Any]:
+        from logitgate.backends.base import infer_backend_spec
+
+        config: dict[str, Any] = {
+            "gate_type": "ScoreGate",
+            "rubric": self.rubric,
+            "backend": infer_backend_spec(self.backend),
+            "min_score": self.min_score,
+            "max_score": self.max_score,
+            "threshold": self.threshold,
+            "symmetric_debiasing": self.symmetric_debiasing,
+            "query_first": self.query_first,
+            "logit_temperature": self.logit_temperature,
+            "name": self.name,
+        }
+        model = (
+            self.model
+            or getattr(self.backend, "model", None)
+            or getattr(self.backend, "model_name", None)
+        )
+        if model:
+            config["model"] = model
+        return config
+
+    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        if verdict.passed:
+            return verdict
+        return persist_failure_snapshot(
+            verdict,
+            candidate=candidate,
+            rubric=self.rubric,
+            gate_config=self.replay_config(),
+            save_on_fail=kwargs.get("save_on_fail", self.save_on_fail),
+            test_name=kwargs.get("test_name"),
+            snapshot_dir=kwargs.get("snapshot_dir"),
+        )
 
     def __repr__(self) -> str:
         rubric_repr = repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
@@ -782,14 +860,20 @@ class ScoreGate(BaseGate):
     def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
         _ensure_logprobs_present(top_fwd, top_rev)
         scores = range(self.min_score, self.max_score + 1)
-        combined = {s: extract_token_logprob(top_fwd, str(s)) for s in scores}
+        fwd_raw = {s: extract_token_logprob(top_fwd, str(s)) for s in scores}
+        m_fwd = max(fwd_raw.values())
+        lse_fwd = m_fwd + math.log(sum(math.exp(v - m_fwd) for v in fwd_raw.values()))
+        combined = {s: v - lse_fwd for s, v in fwd_raw.items()}
         if top_rev is not None:
             # On the inverted scale, quality s is written as token (max + min - s).
             mirror = self.max_score + self.min_score
-            combined = {s: (combined[s] + extract_token_logprob(top_rev, str(mirror - s))) / 2.0 for s in scores}
+            rev_raw = {s: extract_token_logprob(top_rev, str(mirror - s)) for s in scores}
+            m_rev = max(rev_raw.values())
+            lse_rev = m_rev + math.log(sum(math.exp(v - m_rev) for v in rev_raw.values()))
+            combined = {s: (combined[s] + (rev_raw[s] - lse_rev)) / 2.0 for s in scores}
 
         score_probs = _softmax(combined, self.logit_temperature)
-        expected_score = sum(s * prob for s, prob in score_probs.items())
+        expected_score = round(sum(s * prob for s, prob in score_probs.items()), 4)
         passed = expected_score >= self.threshold
         status = DecisionStatus.PASSED if passed else DecisionStatus.FAILED
         latency = (time.perf_counter() - t0) * 1000.0
@@ -799,14 +883,14 @@ class ScoreGate(BaseGate):
             status=status,
             latency_ms=latency,
             metadata={
-                "expected_score": round(expected_score, 4),
+                "expected_score": expected_score,
                 "token_probabilities": {str(k): round(v, 4) for k, v in score_probs.items()},
             },
         )
         return Verdict(
             passed=passed,
             status=status,
-            score=round(expected_score, 4),
+            score=expected_score,
             triggered_layer=self.name,
             total_latency_ms=latency,
             total_tokens_generated=0,
@@ -825,7 +909,9 @@ class ScoreGate(BaseGate):
             if reverse is not None
             else None
         )
-        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
+        return self._handle_failure_snapshot(
+            candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs
+        )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
@@ -840,4 +926,6 @@ class ScoreGate(BaseGate):
                 self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens),
                 self.backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens),
             )
-        return self._verdict_from_logprobs(top_fwd, top_rev, t0)
+        return self._handle_failure_snapshot(
+            candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs
+        )

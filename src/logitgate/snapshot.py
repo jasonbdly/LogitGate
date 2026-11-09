@@ -5,15 +5,30 @@ import json
 import os
 import re
 import sys
+import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from logitgate.backends.base import GenerativeBackend, LogitBackend, StubBackend
+from logitgate.backends.base import (
+    GenerativeBackend,
+    LogitBackend,
+    StubBackend,
+    infer_backend_spec,
+)
 from logitgate.config import get_default_snapshot_dir
-from logitgate.models import DecisionStatus, Verdict
+from logitgate.models import DecisionStatus, LayerTrace, Verdict
+
+__all__ = [
+    "VerdictSnapshot",
+    "infer_backend_spec",
+    "persist_failure_snapshot",
+    "reset_snapshot_notices",
+    "session_snapshot_paths",
+]
 
 
 def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
@@ -21,6 +36,24 @@ def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
     return hashlib.sha256(raw).hexdigest()[:8]
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Writes text to a temporary file in the same directory and atomically replaces `path`."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+_snapshot_lock = threading.RLock()
 _SESSION_SNAPSHOTS: list[Path] = []
 _NOTIFIED_SNAPSHOT_SAVED: bool = False
 _NOTIFIED_SNAPSHOT_HINT: bool = False
@@ -29,9 +62,16 @@ _NOTIFIED_SNAPSHOT_HINT: bool = False
 def reset_snapshot_notices() -> None:
     """Resets one-time console notices and session snapshot list (used by config reset and tests)."""
     global _NOTIFIED_SNAPSHOT_SAVED, _NOTIFIED_SNAPSHOT_HINT
-    _NOTIFIED_SNAPSHOT_SAVED = False
-    _NOTIFIED_SNAPSHOT_HINT = False
-    _SESSION_SNAPSHOTS.clear()
+    with _snapshot_lock:
+        _NOTIFIED_SNAPSHOT_SAVED = False
+        _NOTIFIED_SNAPSHOT_HINT = False
+        _SESSION_SNAPSHOTS.clear()
+    try:
+        from logitgate.integrations.pytest_plugin import _CHECK_SNAPSHOT_PATHS
+
+        _CHECK_SNAPSHOT_PATHS.clear()
+    except ImportError:
+        pass
 
 
 def _should_log_console_notice() -> bool:
@@ -42,16 +82,18 @@ def _should_log_console_notice() -> bool:
 
 def session_snapshot_paths() -> list[Path]:
     """Snapshots written by gates in this process, oldest first (feeds the pytest summary)."""
-    return list(_SESSION_SNAPSHOTS)
+    with _snapshot_lock:
+        return list(_SESSION_SNAPSHOTS)
 
 
 def persist_failure_snapshot(
     verdict: Verdict,
     *,
     candidate: Any,
-    rubric: str,
-    gate_config: dict[str, Any],
-    save_on_fail: bool | None,
+    rubric: str | None = None,
+    gate_type: str | None = None,
+    gate_config: dict[str, Any] | None = None,
+    save_on_fail: bool | None = None,
     test_name: str | None = None,
     snapshot_dir: str | Path | None = None,
 ) -> Verdict:
@@ -70,13 +112,17 @@ def persist_failure_snapshot(
 
     should_save = save_on_fail if save_on_fail is not None else get_default_save_failures()
     if not should_save:
-        if (
-            save_on_fail is None
-            and not _NOTIFIED_SNAPSHOT_HINT
-            and verdict.triggered_layer != "JudgeGate"
-            and _should_log_console_notice()
-        ):
-            _NOTIFIED_SNAPSHOT_HINT = True
+        emit_hint = False
+        with _snapshot_lock:
+            if (
+                save_on_fail is None
+                and not _NOTIFIED_SNAPSHOT_HINT
+                and verdict.triggered_layer != "JudgeGate"
+                and _should_log_console_notice()
+            ):
+                _NOTIFIED_SNAPSHOT_HINT = True
+                emit_hint = True
+        if emit_hint:
             sys.stderr.write(
                 f"[logitgate] Fast failure at {verdict.triggered_layer} without Layer-2 critique. "
                 "Set LOGITGATE_SAVE_FAILURES=1 (or pass save_on_fail=True) to save a snapshot "
@@ -86,21 +132,30 @@ def persist_failure_snapshot(
     if verdict.traces and "snapshot_path" in verdict.traces[-1].metadata:
         return verdict
 
+    effective_cfg = dict(gate_config) if gate_config else {}
+    if gate_type and "gate_type" not in effective_cfg:
+        effective_cfg["gate_type"] = gate_type
+    effective_rubric = rubric if rubric else f"{gate_type or verdict.triggered_layer or 'Gate'} evaluation"
+
     snapshot = VerdictSnapshot.from_verdict(
         verdict=verdict,
-        rubric=rubric,
+        rubric=effective_rubric,
         candidate=candidate,
         test_name=test_name,
-        gate_config=gate_config,
+        gate_config=effective_cfg,
     )
     saved_path = snapshot.save(directory=snapshot_dir)
-    if len(_SESSION_SNAPSHOTS) >= 1000:
-        _SESSION_SNAPSHOTS.pop(0)
-    _SESSION_SNAPSHOTS.append(saved_path)
-    if verdict.traces:
-        verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
-    if not _NOTIFIED_SNAPSHOT_SAVED and _should_log_console_notice():
-        _NOTIFIED_SNAPSHOT_SAVED = True
+    emit_saved = False
+    with _snapshot_lock:
+        if len(_SESSION_SNAPSHOTS) >= 1000:
+            _SESSION_SNAPSHOTS.pop(0)
+        _SESSION_SNAPSHOTS.append(saved_path)
+        if verdict.traces:
+            verdict.traces[-1].metadata["snapshot_path"] = str(saved_path)
+        if not _NOTIFIED_SNAPSHOT_SAVED and _should_log_console_notice():
+            _NOTIFIED_SNAPSHOT_SAVED = True
+            emit_saved = True
+    if emit_saved:
         sys.stderr.write(
             f"[logitgate] Saved failure snapshot to {saved_path}. "
             f"Replay with Layer-2 critique: logitgate explain {saved_path}\n"
@@ -127,6 +182,7 @@ class VerdictSnapshot(BaseModel):
     @classmethod
     def _populate_defaults(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            data = dict(data)
             ts = data.get("timestamp")
             if not ts:
                 ts = datetime.now(timezone.utc).isoformat()
@@ -156,9 +212,21 @@ class VerdictSnapshot(BaseModel):
             gate_config=gate_config or {},
         )
 
+    def _diagnostic_traces(self) -> list[LayerTrace]:
+        """Orders traces so failing/ambiguous traces with lowest probability are inspected first."""
+        non_passing = [t for t in self.verdict.traces if t.status != DecisionStatus.PASSED]
+        non_passing.sort(
+            key=lambda t: (
+                0 if t.status == DecisionStatus.FAILED else 1,
+                t.calibrated_prob if t.calibrated_prob is not None else 1.0,
+            )
+        )
+        passing = [t for t in reversed(self.verdict.traces) if t.status == DecisionStatus.PASSED]
+        return non_passing + passing
+
     @property
     def positional_bias_magnitude(self) -> float | None:
-        for t in self.verdict.traces:
+        for t in self._diagnostic_traces():
             if t.positional_bias_magnitude is not None:
                 return t.positional_bias_magnitude
             if "positional_bias_magnitude" in t.metadata and t.metadata["positional_bias_magnitude"] is not None:
@@ -167,7 +235,7 @@ class VerdictSnapshot(BaseModel):
 
     @property
     def log_odds_pass(self) -> float | None:
-        for t in self.verdict.traces:
+        for t in self._diagnostic_traces():
             if t.log_odds_pass is not None:
                 return t.log_odds_pass
             if "log_odds_pass" in t.metadata and t.metadata["log_odds_pass"] is not None:
@@ -176,7 +244,7 @@ class VerdictSnapshot(BaseModel):
 
     @property
     def shannon_entropy(self) -> float | None:
-        for t in self.verdict.traces:
+        for t in self._diagnostic_traces():
             if t.shannon_entropy is not None:
                 return t.shannon_entropy
             if "shannon_entropy" in t.metadata and t.metadata["shannon_entropy"] is not None:
@@ -185,7 +253,7 @@ class VerdictSnapshot(BaseModel):
 
     @property
     def loops_executed(self) -> int | None:
-        for t in self.verdict.traces:
+        for t in self._diagnostic_traces():
             if t.loops_executed is not None:
                 return t.loops_executed
             if "loops_executed" in t.metadata and t.metadata["loops_executed"] is not None:
@@ -194,7 +262,7 @@ class VerdictSnapshot(BaseModel):
 
     @property
     def failure_code(self) -> str | None:
-        for t in self.verdict.traces:
+        for t in self._diagnostic_traces():
             if t.failure_code is not None:
                 return t.failure_code
             if "failure_code" in t.metadata and t.metadata["failure_code"] is not None:
@@ -203,12 +271,11 @@ class VerdictSnapshot(BaseModel):
 
     def save(self, directory: str | Path | None = None) -> Path:
         """
-        Saves this snapshot as JSON to directory (defaulting to LOGITGATE_SNAPSHOT_DIR or .logitgate/failures),
-        named fail_{timestamp_compact}_{test_slug}_{snapshot_id}.json, and updates latest.json in that directory.
+        Saves this snapshot as JSON to directory (defaulting to configure(snapshot_dir=...)
+        or LOGITGATE_SNAPSHOT_DIR or .logitgate/failures), named
+        fail_{timestamp_compact}_{test_slug}_{snapshot_id}.json, and updates latest.json in that directory.
         """
-        target_dir = Path(directory) if directory is not None else Path(
-            os.environ.get("LOGITGATE_SNAPSHOT_DIR", get_default_snapshot_dir())
-        )
+        target_dir = Path(directory) if directory is not None else Path(get_default_snapshot_dir())
         target_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -218,18 +285,19 @@ class VerdictSnapshot(BaseModel):
             ts_compact = re.sub(r"[^0-9]", "", self.timestamp)[:15] or "snapshot"
 
         if self.test_name:
-            slug = re.sub(r"[^a-zA-Z0-9_-]", "_", self.test_name).strip("_")
+            slug = re.sub(r"[^a-zA-Z0-9_-]", "_", self.test_name).strip("_")[:80].strip("_")
             test_slug = slug if slug else "test"
         else:
             test_slug = "test"
 
-        filename = f"fail_{ts_compact}_{test_slug}_{self.snapshot_id}.json"
+        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(self.snapshot_id)).strip("_")[:32] or "snap"
+        filename = f"fail_{ts_compact}_{test_slug}_{safe_id}.json"
         file_path = target_dir / filename
-        content = self.model_dump_json(indent=2)
-        file_path.write_text(content, encoding="utf-8")
+        content = self.model_dump_json(indent=2, fallback=str)
+        _atomic_write_text(file_path, content)
 
         latest_path = target_dir / "latest.json"
-        latest_path.write_text(content, encoding="utf-8")
+        _atomic_write_text(latest_path, content)
 
         return file_path
 
@@ -261,18 +329,70 @@ class VerdictSnapshot(BaseModel):
         data = json.loads(content)
         return cls.model_validate(data)
 
+    @staticmethod
+    def _resolve_replay_backend_and_model(
+        backend: str | LogitBackend | GenerativeBackend | None,
+        model: str | None,
+        gate_config: dict[str, Any],
+    ) -> tuple[Any, str | None]:
+        cfg_backend = gate_config.get("backend")
+        if backend is not None:
+            effective_backend: Any = backend
+        elif (
+            model is not None
+            and isinstance(cfg_backend, str)
+            and cfg_backend.startswith("stub://")
+        ):
+            effective_backend = None
+        else:
+            effective_backend = cfg_backend
+        effective_model = (
+            model
+            if model is not None
+            else (gate_config.get("model") if backend is None else None)
+        )
+        return effective_backend, effective_model
+
     def replay(
         self,
         backend: str | LogitBackend | None = None,
         model: str | None = None,
     ) -> Verdict:
         """
-        Re-runs Layer 1 LogitGate using self.rubric, self.candidate, and self.gate_config
-        against the specified (or default) backend.
+        Re-runs Layer 1 LogitGate, MultiRubricGate, or ScoreGate using self.rubric, self.candidate,
+        and self.gate_config against the specified (or default) backend.
         """
-        from logitgate.gates.logit_gate import LogitGate
+        from logitgate.gates.logit_gate import LogitGate, ScoreGate
 
         gate_kwargs = dict(self.gate_config)
+        effective_backend, effective_model = self._resolve_replay_backend_and_model(
+            backend, model, gate_kwargs
+        )
+        owns_backend = not isinstance(effective_backend, LogitBackend)
+
+        if gate_kwargs.get("gate_type") == "ScoreGate":
+            score_allowed = {
+                "min_score",
+                "max_score",
+                "threshold",
+                "symmetric_debiasing",
+                "query_first",
+                "logit_temperature",
+                "name",
+            }
+            score_init = {k: v for k, v in gate_kwargs.items() if k in score_allowed}
+            score_gate = ScoreGate(
+                rubric=self.rubric,
+                backend=effective_backend,
+                model=effective_model,
+                **score_init,
+            )
+            try:
+                return score_gate.evaluate(self.candidate, save_on_fail=False)
+            finally:
+                if owns_backend:
+                    score_gate.backend.close()
+
         allowed_keys = {
             "pass_threshold",
             "fail_threshold",
@@ -283,8 +403,6 @@ class VerdictSnapshot(BaseModel):
             "name",
         }
         init_kwargs = {k: v for k, v in gate_kwargs.items() if k in allowed_keys}
-        effective_backend = backend if backend is not None else gate_kwargs.get("backend")
-        effective_model = model if model is not None else gate_kwargs.get("model")
 
         rubrics = gate_kwargs.get("rubrics")
         if isinstance(rubrics, list) and rubrics:
@@ -296,7 +414,11 @@ class VerdictSnapshot(BaseModel):
                 model=effective_model,
                 **init_kwargs,
             )
-            return multi_gate.evaluate(self.candidate)
+            try:
+                return multi_gate.evaluate(self.candidate, save_on_fail=False)
+            finally:
+                if owns_backend:
+                    multi_gate.backend.close()
 
         gate = LogitGate(
             rubric=self.rubric,
@@ -304,7 +426,126 @@ class VerdictSnapshot(BaseModel):
             model=effective_model,
             **init_kwargs,
         )
-        return gate.evaluate(self.candidate)
+        try:
+            return gate.evaluate(self.candidate, save_on_fail=False)
+        finally:
+            if owns_backend:
+                gate.backend.close()
+
+    async def areplay(
+        self,
+        backend: str | LogitBackend | None = None,
+        model: str | None = None,
+    ) -> Verdict:
+        """Async version of `replay`."""
+        from logitgate.gates.logit_gate import LogitGate, ScoreGate
+
+        gate_kwargs = dict(self.gate_config)
+        effective_backend, effective_model = self._resolve_replay_backend_and_model(
+            backend, model, gate_kwargs
+        )
+        owns_backend = not isinstance(effective_backend, LogitBackend)
+
+        if gate_kwargs.get("gate_type") == "ScoreGate":
+            score_allowed = {
+                "min_score",
+                "max_score",
+                "threshold",
+                "symmetric_debiasing",
+                "query_first",
+                "logit_temperature",
+                "name",
+            }
+            score_init = {k: v for k, v in gate_kwargs.items() if k in score_allowed}
+            score_gate = ScoreGate(
+                rubric=self.rubric,
+                backend=effective_backend,
+                model=effective_model,
+                **score_init,
+            )
+            try:
+                return await score_gate.aevaluate(self.candidate, save_on_fail=False)
+            finally:
+                if owns_backend:
+                    await score_gate.backend.aclose()
+
+        allowed_keys = {
+            "pass_threshold",
+            "fail_threshold",
+            "symmetric_debiasing",
+            "query_first",
+            "logit_temperature",
+            "preset",
+            "name",
+        }
+        init_kwargs = {k: v for k, v in gate_kwargs.items() if k in allowed_keys}
+
+        rubrics = gate_kwargs.get("rubrics")
+        if isinstance(rubrics, list) and rubrics:
+            from logitgate.gates.logit_gate import MultiRubricGate
+
+            multi_gate = MultiRubricGate(
+                rubrics=rubrics,
+                backend=effective_backend,
+                model=effective_model,
+                **init_kwargs,
+            )
+            try:
+                return await multi_gate.aevaluate(self.candidate, save_on_fail=False)
+            finally:
+                if owns_backend:
+                    await multi_gate.backend.aclose()
+
+        gate = LogitGate(
+            rubric=self.rubric,
+            backend=effective_backend,
+            model=effective_model,
+            **init_kwargs,
+        )
+        try:
+            return await gate.aevaluate(self.candidate, save_on_fail=False)
+        finally:
+            if owns_backend:
+                await gate.backend.aclose()
+
+    def _merge_explained_verdict(self, judge: Any, judge_verdict: Verdict) -> Verdict:
+        combined_traces = list(self.verdict.traces) + list(judge_verdict.traces)
+        total_latency = self.verdict.total_latency_ms + judge_verdict.total_latency_ms
+        total_tokens = self.verdict.total_tokens_generated + judge_verdict.total_tokens_generated
+
+        final_passed = judge_verdict.passed
+        final_status = judge_verdict.status
+        final_reason = judge_verdict.reason
+        final_score = self.verdict.score if self.verdict.score is not None else judge_verdict.score
+
+        if (
+            self.verdict.status == DecisionStatus.FAILED
+            and isinstance(judge.backend, StubBackend)
+            and judge.backend.diagnostic_text == "[VERDICT: PASS] All criteria met."
+        ):
+            final_passed = False
+            final_status = DecisionStatus.FAILED
+            final_score = self.verdict.score if self.verdict.score is not None else 0.0
+            final_reason = (
+                f"[VERDICT: FAIL] Candidate failed rubric '{self.rubric}' "
+                f"(Layer 1 P={self.verdict.probability:.4f})."
+                if self.verdict.probability is not None
+                else (self.verdict.reason or f"[VERDICT: FAIL] Candidate failed rubric '{self.rubric}'.")
+            )
+
+        return Verdict(
+            passed=final_passed,
+            status=final_status,
+            probability=self.verdict.probability if self.verdict.probability is not None else judge_verdict.probability,
+            score=final_score,
+            choice=self.verdict.choice,
+            choice_probabilities=self.verdict.choice_probabilities,
+            triggered_layer=judge_verdict.triggered_layer,
+            total_latency_ms=total_latency,
+            total_tokens_generated=total_tokens,
+            reason=final_reason,
+            traces=combined_traces,
+        )
 
     def explain(
         self,
@@ -320,8 +561,10 @@ class VerdictSnapshot(BaseModel):
         """
         from logitgate.gates.judge_gate import JudgeGate
 
-        effective_backend = backend if backend is not None else self.gate_config.get("backend")
-        effective_model = model if model is not None else self.gate_config.get("model")
+        effective_backend, effective_model = self._resolve_replay_backend_and_model(
+            backend, model, self.gate_config
+        )
+        owns_backend = not isinstance(effective_backend, GenerativeBackend)
 
         judge = JudgeGate(
             rubric=self.rubric,
@@ -331,39 +574,39 @@ class VerdictSnapshot(BaseModel):
             max_tokens=max_tokens,
             think=think,
         )
-        judge_verdict = judge.evaluate(self.candidate)
-        combined_traces = list(self.verdict.traces) + list(judge_verdict.traces)
-        total_latency = self.verdict.total_latency_ms + judge_verdict.total_latency_ms
-        total_tokens = self.verdict.total_tokens_generated + judge_verdict.total_tokens_generated
+        try:
+            judge_verdict = judge.evaluate(self.candidate, save_on_fail=False)
+        finally:
+            if owns_backend:
+                judge.backend.close()
+        return self._merge_explained_verdict(judge, judge_verdict)
 
-        final_passed = judge_verdict.passed
-        final_status = judge_verdict.status
-        final_reason = judge_verdict.reason
+    async def aexplain(
+        self,
+        backend: str | GenerativeBackend | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        think: bool | None = True,
+    ) -> Verdict:
+        """Async version of `explain`."""
+        from logitgate.gates.judge_gate import JudgeGate
 
-        if (
-            self.verdict.status == DecisionStatus.FAILED
-            and isinstance(judge.backend, StubBackend)
-            and judge.backend.diagnostic_text == "[VERDICT: PASS] All criteria met."
-        ):
-            final_passed = False
-            final_status = DecisionStatus.FAILED
-            final_reason = (
-                f"[VERDICT: FAIL] Candidate failed rubric '{self.rubric}' "
-                f"(Layer 1 P={self.verdict.probability:.4f})."
-                if self.verdict.probability is not None
-                else (self.verdict.reason or f"[VERDICT: FAIL] Candidate failed rubric '{self.rubric}'.")
-            )
-
-        return Verdict(
-            passed=final_passed,
-            status=final_status,
-            probability=self.verdict.probability if self.verdict.probability is not None else judge_verdict.probability,
-            score=judge_verdict.score if judge_verdict.score is not None else self.verdict.score,
-            choice=self.verdict.choice,
-            choice_probabilities=self.verdict.choice_probabilities,
-            triggered_layer=judge_verdict.triggered_layer,
-            total_latency_ms=total_latency,
-            total_tokens_generated=total_tokens,
-            reason=final_reason,
-            traces=combined_traces,
+        effective_backend, effective_model = self._resolve_replay_backend_and_model(
+            backend, model, self.gate_config
         )
+        owns_backend = not isinstance(effective_backend, GenerativeBackend)
+
+        judge = JudgeGate(
+            rubric=self.rubric,
+            backend=effective_backend,
+            model=effective_model,
+            trigger="always",
+            max_tokens=max_tokens,
+            think=think,
+        )
+        try:
+            judge_verdict = await judge.aevaluate(self.candidate, save_on_fail=False)
+        finally:
+            if owns_backend:
+                await judge.backend.aclose()
+        return self._merge_explained_verdict(judge, judge_verdict)

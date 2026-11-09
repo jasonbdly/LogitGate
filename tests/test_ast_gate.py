@@ -166,3 +166,145 @@ def test_all_ast_failure_codes():
     v_val = g_val.evaluate("any text")
     assert v_val.traces[0].failure_code == ASTFailureCode.CUSTOM_VALIDATOR_FAILED
 
+
+def test_byo_positional_validators_and_normalization():
+    import ast
+
+    from pydantic import BaseModel, TypeAdapter
+
+    from logitgate import normalize_candidate
+
+    class PayloadModel(BaseModel):
+        query: str
+        limit: int
+
+    # 1. Positional ast.parse (returns ast.Module, raises SyntaxError on bad input)
+    py_gate = ASTGate(ast.parse, normalize=True)
+    fenced_py = "<think>Let me write python</think>\n```python\ndef greet() -> str:\n    return 'hi'\n```"
+    assert py_gate.evaluate(fenced_py).passed is True
+    assert py_gate.evaluate("```python\ndef broken(:\n```").passed is False
+
+    # 2. Positional Pydantic BaseModel subclass + prose-wrapped JSON extraction
+    pyd_gate = ASTGate(PayloadModel, normalize=True)
+    prose_json = (
+        "<think>Thinking about schema...</think>\n"
+        "Sure! Here is the payload you requested:\n"
+        '{"query": "SELECT 1", "limit": 10}\n'
+        "Let me know if you need anything else."
+    )
+    v_pyd = pyd_gate.evaluate(prose_json)
+    assert v_pyd.passed is True
+
+    v_pyd_fail = pyd_gate.evaluate('Here is the JSON: {"query": "SELECT 1", "limit": "not_an_int"}')
+    assert v_pyd_fail.passed is False
+    assert v_pyd_fail.traces[0].failure_code == ASTFailureCode.CUSTOM_VALIDATOR_FAILED
+
+    # 3. Positional Pydantic TypeAdapter
+    list_adapter = TypeAdapter(list[int])
+    ta_gate = ASTGate(list_adapter, normalize=True)
+    assert ta_gate.evaluate("Result: [1, 2, 3]").passed is True
+    assert ta_gate.evaluate("Result: ['a', 'b']").passed is False
+
+    # 4. Validator returning None (like jsonschema.validate) or empty dict/list passes
+    def returns_none(val: str) -> None:
+        if "bad" in val:
+            raise ValueError("Contains bad token")
+
+    none_gate = ASTGate(returns_none, lambda _: {})
+    assert none_gate.evaluate("good input").passed is True
+    v_exc = none_gate.evaluate("bad input")
+    assert v_exc.passed is False
+    assert "ValueError: Contains bad token" in v_exc.reason
+
+    # 5. Custom normalize callable
+    custom_norm_gate = ASTGate(ast.parse, normalize=lambda s: str(s).removeprefix("CODE:"))
+    assert custom_norm_gate.evaluate("CODE:x = 1").passed is True
+    assert normalize_candidate("<think>t</think>```json\n{\"a\": 1}\n```") == '{"a": 1}'
+
+
+def test_ast_edge_cases_relative_imports_empty_dag_and_shorthand_schema():
+    # 1. Relative import `from . import subprocess` caught
+    imp_gate = ASTGate(forbidden_imports=["subprocess"])
+    assert imp_gate.evaluate("from . import subprocess\n").passed is False
+
+    # 2. Empty tasks list in dict `{"tasks": []}` is a valid empty DAG
+    dag_gate = ASTGate(acyclic_dag=True)
+    assert dag_gate.evaluate({"tasks": []}).passed is True
+    assert dag_gate.evaluate('{"tasks": []}').passed is True
+
+    # 3. Shorthand string type names in json_schema
+    shorthand_gate = ASTGate(json_schema={"code": "integer", "flag": "boolean", "name": "string"})
+    assert shorthand_gate.evaluate({"code": 200, "flag": True, "name": "ok"}).passed is True
+    assert shorthand_gate.evaluate({"code": True, "flag": True, "name": "ok"}).passed is False
+
+    # 4. Positional dict json_schema + citation [1] in preamble before JSON object
+    pos_dict_gate = ASTGate({"required": ["status"], "properties": {"status": {"type": "string"}}}, normalize=True)
+    citation_prose = 'According to source [1], the payload is: {"status": "healthy"}'
+    assert pos_dict_gate.evaluate(citation_prose).passed is True
+
+    # 5. Fence info strings with special characters (e.g. ```c# or ```sql postgres)
+    from logitgate import normalize_candidate
+    assert normalize_candidate("```c#\nint x = 1;\n```") == "int x = 1;"
+    assert normalize_candidate("```sql postgres\nSELECT 1;\n```") == "SELECT 1;"
+
+    # 6. Prose-wrapped JSON array of objects preserves outer list (not inner dict)
+    dag_norm_gate = ASTGate(acyclic_dag=True, normalize=True)
+    prose_dag = 'Here is the task list:\n[{"id": "1", "deps": []}, {"id": "2", "deps": ["1"]}]\nDone!'
+    assert dag_norm_gate.evaluate(prose_dag).passed is True
+
+    # 7. Markdown with required_sections + embedded code fence + normalize=True
+    md_gate = ASTGate(required_sections=["## Architecture"], syntax=True, normalize=True)
+    md_doc = "## Architecture\nHere is the implementation:\n```python\ndef run():\n    return 1\n```"
+    assert md_gate.evaluate(md_doc).passed is True
+
+    # 8. Semicolon-separated and `from pkg import sub` fallback when syntax is broken
+    fallback_imp_gate = ASTGate(forbidden_imports=["subprocess", "os.path"])
+    assert fallback_imp_gate.evaluate("x = 1; import subprocess\ndef broken(:").passed is False
+    assert fallback_imp_gate.evaluate("from os import path\ndef broken(:").passed is False
+    assert fallback_imp_gate.evaluate("from . import subprocess\ndef broken(:").passed is False
+
+    # 9. Top-level JSON array must not be peeled into an inner dict when schema requires a JSON object
+    obj_gate = ASTGate(json_schema={"required": ["id"]}, normalize=True)
+    assert obj_gate.evaluate('[{"id": "1"}]').passed is False
+    assert obj_gate.evaluate('[{"id": "1"}]').traces[0].failure_code == ASTFailureCode.JSON_TYPE_ERROR
+
+    # 10. Citation [1] before JSON array of task dicts does not shadow the DAG task list
+    citation_dag = 'According to [1], the tasks are: [{"id": "1", "deps": []}, {"id": "2", "deps": ["1"]}]'
+    assert dag_norm_gate.evaluate(citation_dag).passed is True
+
+    # 11. Union types ["string", "null"] and minimal {"type": "object"} in dict json_schema
+    union_gate = ASTGate(
+        json_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": ["string", "null"]}},
+        }
+    )
+    assert union_gate.evaluate({"name": "Alice"}).passed is True
+    assert union_gate.evaluate({"name": None}).passed is True
+    assert union_gate.evaluate({"name": 123}).passed is False
+    assert ASTGate(json_schema={"type": "object"}).evaluate({"any": "key"}).passed is True
+
+    # 12. Cascade forwards normalized candidate from ASTGate(normalize=True) to downstream gates
+    from logitgate import LogitGate, StubBackend
+
+    seen_prompts: list[str] = []
+
+    class _RecordingBackend(StubBackend):
+        def query_top_logprobs(self, prompt: str, top_k: int = 10, allowed_tokens=None, **kwargs):
+            seen_prompts.append(prompt)
+            return super().query_top_logprobs(prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs)
+
+    cascade = ASTGate(syntax=True, normalize=True) >> LogitGate("Clean code", backend=_RecordingBackend())
+    raw_input = "<think>Secret reasoning</think>\n```python\ndef add(a, b):\n    return a + b\n```"
+    verdict = cascade.evaluate(raw_input)
+    assert verdict.passed is True
+    assert seen_prompts
+    assert "<think>" not in seen_prompts[0]
+    assert "```python" not in seen_prompts[0]
+    assert "def add(a, b):" in seen_prompts[0]
+
+
+
+
+

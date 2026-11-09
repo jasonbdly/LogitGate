@@ -9,10 +9,10 @@ from logitgate.gates.base import TIER_GENERATIVE, TIER_LOGIT, BaseGate, Escalati
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
-# The pipeline is a generator that yields "please run this gate with these kwargs" and is sent
-# back the resulting Verdict. All routing lives in `Cascade._pipeline`; the sync and async
+# The pipeline is a generator that yields "please run this gate on this candidate with these kwargs"
+# and is sent back the resulting Verdict. All routing lives in `Cascade._pipeline`; the sync and async
 # drivers differ only in whether they call `gate.evaluate` or `await gate.aevaluate`.
-_GateCall = tuple[BaseGate, dict[str, Any]]
+_GateCall = tuple[BaseGate, Any, dict[str, Any]]
 _Pipeline = Generator[_GateCall, Verdict, Verdict]
 
 
@@ -92,10 +92,10 @@ class Cascade(BaseGate):
         except StopIteration as done:  # pragma: no cover - the first gate always runs
             return done.value
         while True:
-            gate, gate_kwargs = request
+            gate, current_candidate, gate_kwargs = request
             # Evaluate outside the try so a StopIteration leaking from a gate is never
             # mistaken for pipeline completion.
-            verdict = gate.evaluate(candidate, **gate_kwargs)
+            verdict = gate.evaluate(current_candidate, **gate_kwargs)
             try:
                 request = pipeline.send(verdict)
             except StopIteration as done:
@@ -108,8 +108,8 @@ class Cascade(BaseGate):
         except StopIteration as done:  # pragma: no cover - the first gate always runs
             return done.value
         while True:
-            gate, gate_kwargs = request
-            verdict = await gate.aevaluate(candidate, **gate_kwargs)
+            gate, current_candidate, gate_kwargs = request
+            verdict = await gate.aevaluate(current_candidate, **gate_kwargs)
             try:
                 request = pipeline.send(verdict)
             except StopIteration as done:
@@ -137,6 +137,9 @@ class Cascade(BaseGate):
 
         for i, gate in enumerate(self.gates):
             if gate.layer_tier >= TIER_GENERATIVE:
+                gate_rubric = getattr(gate, "rubric", None)
+                if rubric is None and isinstance(gate_rubric, str) and gate_rubric:
+                    rubric = gate_rubric
                 policy = gate.escalation_policy
                 if not _should_escalate(policy, upstream_gate, upstream):
                     assert upstream is not None and upstream_gate is not None
@@ -157,7 +160,7 @@ class Cascade(BaseGate):
                         f"escalation_policy='{policy}'): {upstream.reason}",
                     ))
 
-                verdict = yield gate, {
+                verdict = yield gate, candidate, {
                     **gate_kwargs,
                     "rubric_override": rubric if rubric is not None else gate_kwargs.get("rubric_override"),
                 }
@@ -165,17 +168,43 @@ class Cascade(BaseGate):
                 tokens += verdict.total_tokens_generated
 
                 passed, status = verdict.passed, verdict.status
+                overrode_judge_pass = False
                 if (
                     upstream is not None
                     and upstream.status == DecisionStatus.FAILED
                     and policy == "on_ambiguous_or_fail"
                 ):
+                    if verdict.passed:
+                        overrode_judge_pass = True
                     passed, status = False, DecisionStatus.FAILED
                 fields = _verdict_fields(
                     verdict,
                     passed=passed,
                     status=status,
-                    probability=upstream.probability if upstream is not None else verdict.probability,
+                    probability=(
+                        upstream.probability
+                        if (upstream is not None and upstream.probability is not None)
+                        else verdict.probability
+                    ),
+                    score=(
+                        (upstream.score if (upstream is not None and upstream.score is not None) else 0.0)
+                        if overrode_judge_pass
+                        else (
+                            upstream.score
+                            if (upstream is not None and upstream.score is not None)
+                            else verdict.score
+                        )
+                    ),
+                    choice=(
+                        verdict.choice
+                        if verdict.choice is not None
+                        else (upstream.choice if upstream is not None else None)
+                    ),
+                    choice_probabilities=(
+                        verdict.choice_probabilities
+                        if verdict.choice_probabilities is not None
+                        else (upstream.choice_probabilities if upstream is not None else None)
+                    ),
                     triggered_layer=gate.name,
                 )
                 if not passed:
@@ -183,13 +212,19 @@ class Cascade(BaseGate):
                 outcome = fields
                 continue
 
-            verdict = yield gate, gate_kwargs
+            norm_box: list[Any] = []
+            verdict = yield gate, candidate, {**gate_kwargs, "_normalized_out": norm_box}
+            if verdict.passed:
+                if norm_box:
+                    candidate = norm_box[-1]
+                elif hasattr(gate, "normalize_input"):
+                    candidate = gate.normalize_input(candidate)
             traces.extend(verdict.traces)
             tokens += verdict.total_tokens_generated
             upstream_gate, upstream = gate, verdict
             if (cfg := gate.replay_config()) is not None:
                 replay_cfg = cfg
-            gate_rubric = getattr(gate, "rubric", None)
+            gate_rubric = getattr(gate, "rubric", None) or getattr(gate, "question", None)
             if isinstance(gate_rubric, str) and gate_rubric:
                 rubric = gate_rubric
 
@@ -225,12 +260,42 @@ class Cascade(BaseGate):
         replay = replay_cfg or next((cfg for g in self.gates if (cfg := g.replay_config()) is not None), None)
         if replay is not None:
             gate_config.update(replay)
+        else:
+            from logitgate.backends.base import infer_backend_spec
+
+            for g in reversed(self.gates):
+                g_backend = getattr(g, "backend", None)
+                if g_backend is not None:
+                    gate_config["backend"] = infer_backend_spec(g_backend)
+                    g_model = (
+                        getattr(g, "model", None)
+                        or getattr(g_backend, "model", None)
+                        or getattr(g_backend, "model_name", None)
+                    )
+                    if g_model:
+                        gate_config["model"] = g_model
+                    break
+        effective_save = kwargs.get("save_on_fail")
+        if effective_save is None:
+            for g in self.gates:
+                g_save = getattr(g, "save_on_fail", None)
+                if g_save is not None:
+                    effective_save = g_save
+                    break
+        fallback_rubric = next(
+            (
+                r
+                for g in self.gates
+                if isinstance(r := (getattr(g, "rubric", None) or getattr(g, "question", None)), str) and r
+            ),
+            "Cascade evaluation",
+        )
         return persist_failure_snapshot(
             verdict,
             candidate=candidate,
-            rubric=rubric or getattr(self.gates[0], "rubric", None) or "Cascade evaluation",
+            rubric=rubric or fallback_rubric,
             gate_config=gate_config,
-            save_on_fail=kwargs.get("save_on_fail"),
+            save_on_fail=effective_save,
             test_name=kwargs.get("test_name"),
             snapshot_dir=kwargs.get("snapshot_dir"),
         )
