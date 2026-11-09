@@ -10,13 +10,16 @@ from logitgate.models import Verdict
 if TYPE_CHECKING:
     from logitgate.cascade import Cascade
 
-EscalationPolicy = Literal["on_ambiguous_or_fail", "on_ambiguous_only", "always"]
+EscalationPolicy = Literal["on_ambiguous_or_fail", "on_ambiguous_only", "adjudicate", "always"]
 """When a generative (tier 2) gate runs inside a `Cascade`, relative to the upstream verdict.
 
 - ``on_ambiguous_or_fail``: run on AMBIGUOUS or FAILED upstream. A decisive upstream FAILED
-  is preserved; the generative layer only contributes the diagnostic.
+  is preserved unless ``can_override_fail=True``; the generative layer contributes the diagnostic.
 - ``on_ambiguous_only``: run only on AMBIGUOUS upstream. A decisive FAILED terminates the
   cascade without paying for generation.
+- ``adjudicate``: run on AMBIGUOUS or FAILED upstream, and allow the generative judge to
+  overturn a Tier-1 false negative (while still fast-pathing Tier-1 passes and never
+  overturning Tier-0 deterministic failures).
 - ``always``: run on every input that reaches it; its verdict is authoritative.
 """
 
@@ -53,6 +56,7 @@ class BaseGate(abc.ABC):
     name: str = "BaseGate"
     layer_tier: int = TIER_LOGIT
     can_fast_path: bool = True
+    can_override_fail: bool = False
     escalation_policy: EscalationPolicy = "on_ambiguous_or_fail"
 
     @abc.abstractmethod

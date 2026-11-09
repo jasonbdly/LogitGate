@@ -64,7 +64,7 @@ _PASS_WORD_RE = re.compile(r"\b(PASS|PASSED|PASSES|APPROVE|APPROVED)\b", re.IGNO
 _FAIL_WORD_RE = re.compile(r"\b(FAIL|FAILED|FAILS|FAILURE|REJECT|REJECTED)\b", re.IGNORECASE)
 _TRUTHY_STRINGS = frozenset({"pass", "passed", "passes", "approve", "approved", "true", "yes", "1"})
 _FALSY_STRINGS = frozenset({"fail", "failed", "fails", "failure", "reject", "rejected", "false", "no", "0"})
-_VALID_TRIGGERS = frozenset({"on_ambiguous_or_fail", "on_ambiguous_only", "always"})
+_VALID_TRIGGERS = frozenset({"on_ambiguous_or_fail", "on_ambiguous_only", "adjudicate", "always"})
 _PROBE_RUBRIC = (
     "Based on this review critique, did the candidate artifact satisfy all requirements "
     "and PASS the evaluation without any defects or errors?"
@@ -207,9 +207,12 @@ class JudgeGate(BaseGate):
         backend: Backend instance or specifier URI implementing `GenerativeBackend`.
         model: Optional model identifier string for the backend.
         trigger: Activation policy for this judge layer:
-            - 'on_ambiguous_or_fail': Triggers if upstream gate returns AMBIGUOUS or FAILED.
+            - 'on_ambiguous_or_fail': Triggers if upstream gate returns AMBIGUOUS or FAILED (diagnostic only on FAILED unless allow_fail_override=True).
             - 'on_ambiguous_only': Triggers only on AMBIGUOUS; decisive FAILED short-circuits.
+            - 'adjudicate': Triggers on AMBIGUOUS or FAILED, allowing the judge to overturn Tier-1 false negatives.
             - 'always': Always executes generative critique regardless of upstream confidence.
+        allow_fail_override: When True (or when trigger='adjudicate'), allows JudgeGate to
+            overturn a Tier-1 FAILED verdict with PASSED.
         max_tokens: Generation cap. At <= 80 the prompt switches to verdict-first so a
             truncated response still carries its tag.
         think: Forwarded to backends that support reasoning traces (e.g. Ollama ``think``).
@@ -231,6 +234,7 @@ class JudgeGate(BaseGate):
         max_tokens: int | None = None,
         think: bool | None = None,
         save_on_fail: bool | None = None,
+        allow_fail_override: bool = False,
         name: str = "JudgeGate",
     ) -> None:
         if trigger not in _VALID_TRIGGERS:
@@ -250,6 +254,8 @@ class JudgeGate(BaseGate):
         )
         self.model = effective_model
         self.escalation_policy = trigger
+        self.allow_fail_override = bool(allow_fail_override)
+        self.can_override_fail = bool(allow_fail_override) or (trigger == "adjudicate")
         self.max_tokens = max_tokens
         self.think = think
         self.save_on_fail = save_on_fail
@@ -266,6 +272,7 @@ class JudgeGate(BaseGate):
         if value not in _VALID_TRIGGERS:
             raise ConfigurationError(f"Invalid trigger '{value}'. Must be one of {sorted(_VALID_TRIGGERS)}")
         self.escalation_policy = value
+        self.can_override_fail = self.allow_fail_override or (value == "adjudicate")
 
     def __repr__(self) -> str:
         rubric_repr = (

@@ -202,6 +202,32 @@ def test_decisive_failure_is_preserved_when_judge_is_lenient() -> None:
     assert verdict.total_tokens_generated == 40
 
 
+def test_adjudicate_policy_allows_judge_to_rescue_tier_1_false_negative_but_not_tier_0() -> None:
+    # 1. trigger='adjudicate' rescues a Tier-1 (LogitGate) false negative when JudgeGate says PASS
+    judge_adj, judge_backend = _judge("[VERDICT: PASS] math verified step-by-step", trigger="adjudicate")
+    verdict = (ScriptedGate(DecisionStatus.FAILED, prob=0.01) >> judge_adj).evaluate("x")
+    assert len(judge_backend.prompt_log) == 1
+    assert verdict.passed is True
+    assert verdict.status == DecisionStatus.PASSED
+    assert verdict.triggered_layer == "JudgeGate"
+
+    # 2. allow_fail_override=True with trigger='on_ambiguous_or_fail' also rescues Tier-1 false negative
+    b2 = StubBackend(diagnostic_text="[VERDICT: PASS] allowlisted column is safe", tokens_generated=25)
+    judge_override = JudgeGate(backend=b2, trigger="on_ambiguous_or_fail", allow_fail_override=True)
+    v2 = (ScriptedGate(DecisionStatus.FAILED, prob=0.02) >> judge_override).evaluate("x")
+    assert v2.passed is True
+    assert v2.status == DecisionStatus.PASSED
+
+    # 3. Tier-0 (ASTGate) deterministic failures are NEVER escalated or overturned even under 'adjudicate'
+    b3 = StubBackend(diagnostic_text="[VERDICT: PASS] looks fine", tokens_generated=25)
+    judge_adj_t0 = JudgeGate(backend=b3, trigger="adjudicate")
+    v3 = (ASTGate(syntax=True) >> judge_adj_t0).evaluate("def broken(")
+    assert v3.passed is False
+    assert v3.status == DecisionStatus.FAILED
+    assert v3.triggered_layer == "ASTGate"
+    assert b3.prompt_log == []
+
+
 def test_always_policy_runs_judge_even_after_confident_pass() -> None:
     judge, judge_backend = _judge("[VERDICT: FAIL] subtle defect", trigger="always")
     verdict = (LogitGate("r", backend=StubBackend(default_prob=0.99)) >> judge).evaluate("x")

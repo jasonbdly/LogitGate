@@ -29,7 +29,7 @@ def _should_escalate(
         # no semantic signal, so those gates opt out of fast-pathing via `can_fast_path=False`.
         return not upstream_gate.can_fast_path
     if upstream.status == DecisionStatus.FAILED:
-        return policy == "on_ambiguous_or_fail"
+        return policy in ("on_ambiguous_or_fail", "adjudicate")
     return True  # AMBIGUOUS: this is exactly what the generative layer exists for.
 
 
@@ -169,10 +169,12 @@ class Cascade(BaseGate):
 
                 passed, status = verdict.passed, verdict.status
                 overrode_judge_pass = False
+                can_override = getattr(gate, "can_override_fail", False) or policy == "adjudicate"
                 if (
                     upstream is not None
                     and upstream.status == DecisionStatus.FAILED
                     and policy == "on_ambiguous_or_fail"
+                    and not can_override
                 ):
                     if verdict.passed:
                         overrode_judge_pass = True
