@@ -160,10 +160,17 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        if allowed_tokens:
+            clean_tokens = [t.strip() for t in allowed_tokens if isinstance(t, str) and t.strip()]
+            tokens_hint = f" ({', '.join(clean_tokens)})" if clean_tokens else ""
+            effective_top_k = max(top_k, 2 * len(clean_tokens))
+        else:
+            tokens_hint = ""
+            effective_top_k = top_k
         messages = [
             {
                 "role": "system",
-                "content": "Respond with a single character only. Do not think or explain.",
+                "content": f"Respond with a single character only{tokens_hint}. Do not think or explain.",
             },
             {"role": "user", "content": prompt},
         ]
@@ -171,7 +178,7 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             "max_tokens": 1,
             "temperature": 0.0,
             "logprobs": True,
-            "top_logprobs": top_k,
+            "top_logprobs": effective_top_k,
         }
         for k, v in kwargs.items():
             if k not in EXCLUDED_INTERNAL_KWARGS:
@@ -205,19 +212,26 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        if allowed_tokens:
+            clean_tokens = [t.strip() for t in allowed_tokens if isinstance(t, str) and t.strip()]
+            tokens_hint = f" ({', '.join(clean_tokens)})" if clean_tokens else ""
+            effective_top_k = max(top_k, 2 * len(clean_tokens))
+        else:
+            tokens_hint = ""
+            effective_top_k = top_k
         payload: dict[str, Any] = {
             "model": self.model or "default",
             "messages": [
                 {
                     "role": "system",
-                    "content": "Respond with a single character only. Do not think or explain.",
+                    "content": f"Respond with a single character only{tokens_hint}. Do not think or explain.",
                 },
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": 1,
             "temperature": 0.0,
             "logprobs": True,
-            "top_logprobs": top_k,
+            "top_logprobs": effective_top_k,
         }
         if "logit_bias" in kwargs:
             payload["logit_bias"] = kwargs["logit_bias"]

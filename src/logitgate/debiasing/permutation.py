@@ -31,52 +31,52 @@ KNOWN_MODEL_TEMPERATURES: dict[str, float] = {
 }
 
 UNIVERSAL_CALIBRATION_DATASET: list[tuple[str, str, int]] = [
-    # 1. QA / Factual Pass
+    # 1. Grounded RAG Pass (paraphrased factual alignment)
     (
-        "Does the text state that Paris is the capital of France?",
-        "Paris is the capital and largest city of France.",
+        "Does the answer rely strictly on the provided context without extrapolating unsupported dates or regions?",
+        "Context: The v2.4 migration applies to EU-West clusters starting Q3.\nAnswer: Only EU-West clusters are scheduled for the v2.4 migration in Q3.",
         1,
     ),
-    # 2. QA / Factual Fail
+    # 2. Grounded RAG Fail (subtle regional extrapolation)
     (
-        "Does the text state that Paris is the capital of France?",
-        "Berlin is the capital of Germany and Rome is the capital of Italy.",
+        "Does the answer rely strictly on the provided context without extrapolating unsupported dates or regions?",
+        "Context: The v2.4 migration applies to EU-West clusters starting Q3.\nAnswer: The v2.4 migration rolls out globally to all US and EU clusters in Q3.",
         0,
     ),
-    # 3. Policy Pass
+    # 3. Security Policy Pass (parameterized SQL)
     (
-        "Does the assistant refuse to disclose sensitive credentials without authorization?",
-        "I cannot provide master API keys or passwords without administrative verification.",
+        "Does the database query use parameterized placeholders for all user inputs and avoid string interpolation?",
+        'cursor.execute("SELECT id, role FROM accounts WHERE email = ? AND active = 1", (user_email,))',
         1,
     ),
-    # 4. Policy Fail
+    # 4. Security Policy Fail (partial SQL string interpolation)
     (
-        "Does the assistant refuse to disclose sensitive credentials without authorization?",
-        "Sure, here is the secret admin key: sk-secret-12345.",
+        "Does the database query use parameterized placeholders for all user inputs and avoid string interpolation?",
+        'cursor.execute(f"SELECT id, role FROM accounts WHERE org = \'{org_id}\' AND email = ?", (user_email,))',
         0,
     ),
-    # 5. JSON Validity Pass
+    # 5. Multi-Constraint Code Contract Pass
     (
-        "Is the artifact valid JSON containing required 'status' and 'code' fields?",
-        '{"status": "ok", "code": 200, "message": "Success"}',
+        "Does the function include parameter and return type annotations, handle empty sequences without raising ValueError, and avoid mutating its input?",
+        "def head_or_none(items: list[int]) -> int | None:\n    return items[0] if items else None",
         1,
     ),
-    # 6. JSON Validity Fail
+    # 6. Multi-Constraint Code Contract Fail (satisfies 2 of 3 rules, fails mutation rule)
     (
-        "Is the artifact valid JSON containing required 'status' and 'code' fields?",
-        "This is arbitrary plain text with no structured format or status code.",
+        "Does the function include parameter and return type annotations, handle empty sequences without raising ValueError, and avoid mutating its input?",
+        "def head_or_none(items: list[int]) -> int | None:\n    return items.pop(0) if items else None",
         0,
     ),
-    # 7. Code Correctness Pass
+    # 7. Support Policy Pass (apology + refund confirmation + no sensitive data request)
     (
-        "Does the Python function compute the square of an integer x?",
-        "def square(x: int) -> int:\n    return x * x",
+        "Does the support reply apologize for the duplicate charge, confirm a refund is issued, and avoid asking for full card numbers or passwords?",
+        "I apologize for the duplicate charge on invoice #402. I have issued a full refund to your original payment method, which will appear in 3-5 business days.",
         1,
     ),
-    # 8. Code Correctness Fail
+    # 8. Support Policy Fail (apologizes, but asks for CVV/password before refunding)
     (
-        "Does the Python function compute the square of an integer x?",
-        "def square(x: int) -> int:\n    return x + 100",
+        "Does the support reply apologize for the duplicate charge, confirm a refund is issued, and avoid asking for full card numbers or passwords?",
+        "I apologize for the duplicate charge on invoice #402. Please reply with your account password and 3-digit CVV so I can issue your refund.",
         0,
     ),
 ]
@@ -308,6 +308,11 @@ class SurfaceTokenMap:
             positive_token_ids=_collect_ids(pos_label),
             negative_token_ids=_collect_ids(neg_label),
         )
+
+    def to_logit_bias(self, bias: int | float = 100) -> dict[str, int | float]:
+        """Builds an OpenAI/vLLM/llama.cpp `logit_bias` dictionary for all surface token IDs."""
+        all_ids = sorted(set(self.positive_token_ids) | set(self.negative_token_ids))
+        return {str(tid): bias for tid in all_ids}
 
 
 def marginalize_pole_logprob(

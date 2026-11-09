@@ -260,6 +260,8 @@ def test_surface_token_map_from_tokenizer():
 
     assert set(token_map.positive_token_ids) == {10, 11, 12, 13}
     assert set(token_map.negative_token_ids) == {20, 21, 22, 23}
+    bias_map = token_map.to_logit_bias(bias=85)
+    assert bias_map == {str(tid): 85 for tid in (10, 11, 12, 13, 20, 21, 22, 23)}
 
 
 def test_surface_token_map_empty_raises():

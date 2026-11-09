@@ -60,11 +60,18 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Constructs the chat completion payload ensuring think: False."""
+        """Constructs the chat completion payload ensuring think: False and allowed_tokens guidance."""
+        if allowed_tokens:
+            clean_tokens = [t.strip() for t in allowed_tokens if isinstance(t, str) and t.strip()]
+            tokens_hint = f" ({', '.join(clean_tokens)})" if clean_tokens else ""
+            effective_top_k = max(top_k, 2 * len(clean_tokens))
+        else:
+            tokens_hint = ""
+            effective_top_k = top_k
         messages = [
             {
                 "role": "system",
-                "content": "Respond with a single character only. Do not think or explain.",
+                "content": f"Respond with a single character only{tokens_hint}. Do not think or explain.",
             },
             {"role": "user", "content": prompt},
         ]
@@ -82,7 +89,7 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             "stream": False,
             "think": False,
             "logprobs": True,
-            "top_logprobs": top_k,
+            "top_logprobs": effective_top_k,
             "options": opts,
         }
         if self.keep_alive is not None:

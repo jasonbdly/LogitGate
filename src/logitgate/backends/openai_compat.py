@@ -68,19 +68,26 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        if allowed_tokens:
+            clean_tokens = [t.strip() for t in allowed_tokens if isinstance(t, str) and t.strip()]
+            tokens_hint = f" ({', '.join(clean_tokens)})" if clean_tokens else ""
+            effective_top_k = min(max(top_k, 2 * len(clean_tokens)), 20)
+        else:
+            tokens_hint = ""
+            effective_top_k = min(top_k, 20)
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "Respond with a single character only.",
+                    "content": f"Respond with a single character only{tokens_hint}.",
                 },
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": 1,
             "temperature": 0.0,
             "logprobs": True,
-            "top_logprobs": min(top_k, 20),
+            "top_logprobs": effective_top_k,
         }
         logit_bias = kwargs.get("logit_bias", self.logit_bias)
         if logit_bias is not None:
