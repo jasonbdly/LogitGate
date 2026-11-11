@@ -101,6 +101,7 @@ release:
       pattern = rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
       match = re.search(pattern, changelog, flags=re.DOTALL)
       notes = match.group(1).strip() if match else f"Release {tag}"
+      notes = re.sub(r"\n+---\s*\Z", "", notes).strip()
       Path("release_notes.md").write_text(notes + "\n", encoding="utf-8")
       EOF
   artifacts:
@@ -227,3 +228,89 @@ pypi_readme_sync:
         twine check dist/*
         twine upload --skip-existing dist/*
       fi
+
+github_backfill:
+  stage: .post
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache github-cli python3
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITHUB_TOKEN
+      changes:
+        - .gitlab-ci.yml
+      when: on_success
+  script:
+    - |
+      python3 - <<'EOF'
+      import json
+      import os
+      import re
+      import subprocess
+      import urllib.request
+      from pathlib import Path
+
+      gh_repo = os.environ["GITHUB_REPO"]
+      project_url = os.environ.get("CI_PROJECT_URL", "https://gitlab.com/jasonbdly/logitgate")
+      api_v4 = os.environ.get("CI_API_V4_URL", "https://gitlab.com/api/v4")
+      project_id = os.environ.get("CI_PROJECT_ID", "jasonbdly%2Flogitgate")
+
+      # 1. Fetch all finished GitLab pipelines
+      pipelines = []
+      for page in range(1, 6):
+          url = f"{api_v4}/projects/{project_id}/pipelines?per_page=100&page={page}"
+          with urllib.request.urlopen(url, timeout=15) as resp:
+              batch = json.loads(resp.read().decode("utf-8"))
+          if not batch:
+              break
+          pipelines.extend(batch)
+
+      tag_to_pipe = {}
+      sha_to_pipe = {}
+      for p in pipelines:
+          if p["status"] not in ("success", "failed"):
+              continue
+          ref, sha = p["ref"], p["sha"]
+          if ref.startswith("v") and p["status"] == "success" and ref not in tag_to_pipe:
+              tag_to_pipe[ref] = p
+          if sha not in sha_to_pipe or (p["status"] == "success" and sha_to_pipe[sha]["status"] != "success"):
+              sha_to_pipe[sha] = p
+
+      # 2. Backfill canonical GitLab footer onto any GitHub Release missing it
+      rels_raw = subprocess.check_output(["gh", "api", f"repos/{gh_repo}/releases?per_page=100"], text=True)
+      for rel in json.loads(rels_raw):
+          tag = rel["tag_name"]
+          body = rel.get("body") or ""
+          if f"{project_url}/-/releases/" in body:
+              continue
+          clean_body = re.sub(r"\n+---\s*\Z", "", body).strip()
+          pipe = tag_to_pipe.get(tag)
+          pipe_part = f" ([pipeline #{pipe['id']}]({pipe['web_url']}))" if pipe else ""
+          footer = f"\n\n---\n*Canonical release and CI pipeline on GitLab: [{tag}]({project_url}/-/releases/{tag}){pipe_part}*\n"
+          Path("backfill_notes.md").write_text(clean_body + footer, encoding="utf-8")
+          subprocess.run(["gh", "release", "edit", tag, "-R", gh_repo, "--notes-file", "backfill_notes.md"], check=True)
+          print(f"Backfilled GitLab footer onto GitHub Release {tag}")
+
+      # 3. Backfill gitlab-ci commit status onto historical GitHub commits missing it
+      commits_raw = subprocess.check_output(["gh", "api", f"repos/{gh_repo}/commits?per_page=100"], text=True)
+      for c in json.loads(commits_raw):
+          sha = c["sha"]
+          if sha == os.environ.get("CI_COMMIT_SHA"):
+              continue
+          pipe = sha_to_pipe.get(sha)
+          if not pipe:
+              continue
+          existing_raw = subprocess.check_output(["gh", "api", f"repos/{gh_repo}/commits/{sha}/statuses"], text=True)
+          if any(s.get("context") == "gitlab-ci" for s in json.loads(existing_raw)):
+              continue
+          gh_state = "success" if pipe["status"] == "success" else "failure"
+          word = "passed" if gh_state == "success" else "failed"
+          subprocess.run([
+              "gh", "api", f"repos/{gh_repo}/statuses/{sha}",
+              "-f", f"state={gh_state}",
+              "-f", f"target_url={pipe['web_url']}",
+              "-f", f"description=GitLab CI pipeline #{pipe['id']} {word}",
+              "-f", "context=gitlab-ci",
+          ], check=True, stdout=subprocess.DEVNULL)
+          print(f"Backfilled gitlab-ci ({gh_state}) onto {sha[:7]} -> #{pipe['id']}")
+      EOF
