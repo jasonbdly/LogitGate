@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-11-10
+
+### Added
+- **Adjudication escalation policy (`trigger="adjudicate"`):** Added `"adjudicate"` (and `allow_fail_override: bool = False`) to `JudgeGate` and `Cascade` so Tier-2 `JudgeGate` can override Tier-1 (`LogitGate`, `ScoreGate`, `MultiRubricGate`) false-negative failures while keeping deterministic Tier-0 (`ASTGate`) structural failures final.
+- **Unobserved target-token and positional-bias abstention:** `LogitGate` now abstains (`DecisionStatus.AMBIGUOUS` with `abstained_reason` recorded in `trace.metadata`) when neither `A` nor `B` surface variants appear in `top_logprobs` on either pass, or when `max_positional_bias: float | None` is set and exceeded under a forward/reverse sign flip.
+- **`ChoiceGate` derangement and cyclic permutations:** Added `permutation_mode: Literal["derangement", "cyclic", "reverse"] = "derangement"` to `ChoiceGate` so odd-$K$ option sets (e.g., 3 or 5 choices) shift every option to a distinct letter slot on Pass 2 instead of pinning the middle option to the same letter.
+- **Surface token `logit_bias` helper:** Added `SurfaceTokenMap.to_logit_bias(bias=100)` to build OpenAI/vLLM/`llama.cpp`-compatible `logit_bias` dictionaries from discovered surface token IDs.
+- **BYO `ASTGate` validators, artifact normalization, and `ScoreGate` snapshots:** Added `custom_validators` to `ASTGate`, `normalize_artifacts: bool = False` to `Cascade` (and `normalize: bool = False` to `@check`), and failure snapshot persistence (`save_on_fail` / `snapshot_dir`) to `ScoreGate`.
+- **Expanded framework integrations:** `LogitGateMetric` (DeepEval) now supports `ChoiceGate` and `ScoreGate` in addition to `LogitGate`, and `create_logitgate_node` (LangGraph) supports Pydantic `BaseModel` and dataclass graph states alongside `dict` states.
+
+### Changed
+- **Single-character token enforcement on HTTP backends:** `OllamaBackend`, `OpenAICompatBackend`, and HTTP `LlamaCppBackend` now wire `allowed_tokens` into the system prompt and scale `top_k` to at least `2 * len(allowed_tokens)` so conversational prefixes do not push target evaluation tokens out of the `top_logprobs` window.
+- **Calibration dataset realism:** Replaced synthetic one-line calibration stubs in `UNIVERSAL_CALIBRATION_DATASET` with multi-constraint code, JSON, SQL, and security policy artifacts.
+- **Documentation & benchmarks:** Added citations and architectural boundary comparisons against fine-tuned single-token `logprobs` classifiers (such as Airbnb's `GLOWC` benchmark on sub-2B models).
+
+### Fixed
+- **Debiasing & calibration numerical stability:** Hardened logprob extraction, temperature scaling (`PlattCalibrator`), and conformal score quantile handling against degenerate or extreme logprob inputs.
+- **Backend URI resolution, thread safety, and reasoning stripping:** Hardened `resolve_logit_backend` URI parsing, reasoning `<think>` tag stripping in `JudgeGate`, CLI input validation/output sanitization, and `StubBackend` Pass-2 response cycling for `ChoiceGate`.
+
+---
+
 ## [0.3.1] - 2026-11-07
 
 ### Added

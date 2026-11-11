@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logitgate"
-version = "0.3.1"
+version = "0.4.1"
 description = "Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,7 +43,7 @@ openai = []
 deepeval = ["deepeval>=1.0.0"]
 langgraph = ["langgraph>=0.0.1"]
 llamacpp = ["llama-cpp-python>=0.2.0"]
-recurrent = ["torch>=2.0.0", "transformers>=4.40.0", "huggingface-hub>=0.20.0", "safetensors>=0.4.0"]
+recurrent = ["torch>=2.0.0", "transformers>=4.40.0", "huggingface-hub>=0.20.0", "safetensors>=0.4.1"]
 pytest = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 test = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 all = [
@@ -53,7 +53,7 @@ all = [
     "torch>=2.0.0",
     "transformers>=4.40.0",
     "huggingface-hub>=0.20.0",
-    "safetensors>=0.4.0",
+    "safetensors>=0.4.1",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
