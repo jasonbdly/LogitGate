@@ -99,11 +99,11 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 Always test the push with `--dry-run` first:
 
 ```bash
-# 1. Dry run
-git push --dry-run origin main --tags
+# 1. Dry run (push only the specific release tag, not --tags)
+timeout -k 1 30 git push --dry-run origin main vX.Y.Z
 
-# 2. Execute push
-git push origin main --tags
+# 2. Execute push (triggers GitLab CI -> PyPI OIDC + GitLab Release + GitHub Release/Status mirror)
+timeout -k 1 30 git push origin main vX.Y.Z
 
 # 3. Confirm clean tracking state
 git status
