@@ -65,7 +65,7 @@ This atomically updates:
 
 ### Step 3: Verify Changelog Completeness
 
-Manually inspect `CHANGELOG.md` to ensure all user-visible changes are properly categorized:
+Manually inspect `CHANGELOG.md` to ensure all user-visible changes are properly categorized (note that `CHANGELOG.md` sections are syndicated verbatim to both GitLab Releases and GitHub Releases, so use inline code spans like ``odd-`K` `` rather than `$...$` LaTeX math):
 - `### Added`: New gates, traits, CLI commands, or capabilities.
 - `### Changed`: Behavioral changes or API adjustments.
 - `### Refactored`: Code deduplication, algorithmic optimizations, and layout improvements.

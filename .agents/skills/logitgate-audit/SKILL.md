@@ -43,8 +43,9 @@ When executing a full audit, launch five parallel read-only `research` subagents
    - Verify `extract_token_logprob` filters `NaN` and `±inf`, clamps small positive fast-math logprobs (`> 0.0`) to `0.0`, and deduplicates identical raw token keys before `logsumexp`.
    - Verify `_compute_missing_token_floor` remains finite when cumulative top-$K$ probability approaches or slightly exceeds `1.0`.
    - Verify `clamped_sigmoid`, `softmax_probabilities`, and `marginalize_pole_logprob` cannot overflow (`math.exp(>709)`), divide by zero, or produce `NaN` on saturated `±inf` poles.
-2. **Empty Backend Logprobs Guard:**
+2. **Empty & Unobserved Target-Token Logprobs Guards:**
    - Verify `LogitGate`, `ChoiceGate`, `ScoreGate`, and `auto_calibrate_backend` raise `BackendError` when a backend returns empty `top_logprobs` or all non-finite logprobs.
+   - Verify `LogitGate` abstains (`DecisionStatus.AMBIGUOUS` via `has_any_target_token`) when neither `A` nor `B` surface variants appear in `top_logprobs` on either pass (and when `max_positional_bias` is exceeded under a sign flip), and verify HTTP backends wire `allowed_tokens` into the system prompt and `top_k >= 2 * len(allowed_tokens)`.
 3. **Threshold Rounding & Input Validation:**
    - Verify `LogitGate` and `ScoreGate` compare `round(prob, 4)` / `round(score, 4)` against thresholds so reported 4-decimal metrics never contradict verdict status.
    - Verify `bool` is rejected for numeric thresholds, lengths, token caps, JSON schema `"integer"` / `"number"` fields, and calibration labels.
@@ -66,8 +67,9 @@ When executing a full audit, launch five parallel read-only `research` subagents
    - Verify `@check` invalidates cached gates when `logitgate.configure()` changes defaults and forwards `normalize`, `normalize_text`, and `validators` to underlying gates.
    - Verify `LogitGateMetric` respects `preset` thresholds and `LogitGateSystemOneModel` supports dict/object question items, `YesNoAnswer` / `ChoiceAnswer` / `ScoreAnswer` schemas, and neutral `"default"` temperature when an explicit `backend` is supplied without `model_name`.
    - Verify `LangGraphGuardNode` supports `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers across both sync and async invocation.
-4. **Documentation & Snippet Accuracy:**
+4. **Documentation, CI Centralization & Snippet Accuracy:**
    - Verify all `README.md` and `docs/` defaults match the implementation (`OllamaBackend` `model="qwen2.5:7b"`, `num_ctx=None`, `ScoreGate` `symmetric_debiasing=True`, `JudgeGate` `trigger="on_ambiguous_only"`), and `pytest tests/test_dx_and_tooling.py` executes all `README.md` and `docs/` code blocks cleanly.
+   - Verify `.gitlab-ci.yml` remains the single CI/CD pipeline (no duplicate `.github/workflows/` files) using official `glab` and `gh` CLIs for release and commit-status syndication.
 
 ---
 
@@ -92,7 +94,8 @@ When executing a full audit, launch five parallel read-only `research` subagents
 
 **Checklist:**
 1. **Psychometric & Debiasing Validity:**
-   - Verify `LogitGate`, `ChoiceGate`, and `ScoreGate` forward/reverse permutation passes invert token-to-label/score mappings and aggregate distributions in log-space (rather than averaging expected scores directly) without uncancelled positional bias or scale-direction errors, and verify `StubBackend` honors `[SCORING SCALE]` and `reverse_top_logprobs`.
+   - Verify `LogitGate`, `ChoiceGate`, and `ScoreGate` forward/reverse permutation passes invert token-to-label/score mappings and aggregate distributions in log-space (rather than averaging expected scores directly) without uncancelled positional bias or scale-direction errors, `ChoiceGate` defaults to fixed-point-free `"derangement"` permutations on odd `K`, and `StubBackend` honors `[SCORING SCALE]`, `"Choice:"`, and `reverse_top_logprobs`.
+   - Verify `Cascade` with `JudgeGate(trigger="adjudicate")` allows Tier-2 overrides of Tier-1 false negatives while keeping Tier-0 (`ASTGate`) structural failures strictly final.
    - Verify conformal calibration quantiles (`calibrate_cascade_thresholds`) use exact finite-sample order statistics and temperature scaling (`fit_calibration`) emits `CalibrationWarning` on degenerate or under-sampled data.
 2. **Cross-Gate API & Snapshot Replay Symmetry:**
    - Verify `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `JudgeGate`, `ASTGate`, and `Cascade` maintain consistent `evaluate()` / `aevaluate()` contracts, parameter propagation across `Cascade` / `@check` / `cli.py`, `replay_config()` serialization, and `VerdictSnapshot.replay()` / `explain()` behavior across all gate types.

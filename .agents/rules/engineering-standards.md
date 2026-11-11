@@ -15,14 +15,19 @@ These standards apply to all code, documentation, tests, and commits in the Logi
 
 ## 2. Numerical, Psychometric & Validation Invariants
 
-- **Logprob Sanitation & Presence:**
+- **Logprob Sanitation, Target-Token Abstention & Single-Char Enforcement:**
   - Always verify that backend `top_logprobs` responses are non-empty via `_ensure_logprobs_present` and raise `BackendError` when empty rather than defaulting to `P = 0.50` or uniform probabilities.
   - `extract_token_logprob` must ignore non-finite values (`NaN`, `±inf`), clamp small positive fast-math logprob noise (`> 0.0`) to `0.0`, and deduplicate identical raw token strings before marginalizing surface variants via `logsumexp`.
+  - When neither positive (`A`) nor negative (`B`) surface variants appear in `top_logprobs` on either pass (`has_any_target_token`), `LogitGate` must abstain (`DecisionStatus.AMBIGUOUS` with `abstained_reason` in `trace.metadata`) rather than silently computing `log_odds = 0.0`, and honor `max_positional_bias` abstention on sign-flipping passes.
+  - HTTP backends (`OllamaBackend`, `OpenAICompatBackend`, HTTP `LlamaCppBackend`) must wire `allowed_tokens` into the system prompt and scale `top_k >= 2 * len(allowed_tokens)` so conversational prefixes on chat-tuned models do not evict target tokens from `top_logprobs`.
 - **Temperature Lookup Precedence & Explicit-Backend Neutrality:**
   - Model temperature resolution (`get_model_temperature`) must check exact model key matches before longest-prefix substring matches so base model names (`qwen2.5`) never shadow more specific variants (`qwen2.5-coder:14b`).
   - When a caller injects an explicit `Backend` instance (e.g., `StubBackend` or custom `Backend`) into a gate or adapter (`LogitGateSystemOneModel`) without specifying `model_name` or `logit_temperature`, default to neutral temperature (`1.0` / `"default"`) rather than applying model-specific temperatures from `KNOWN_MODEL_TEMPERATURES`.
 - **Ordinal & Categorical Debiasing (`ScoreGate` & `ChoiceGate`):**
   - Combine forward and reverse debiasing passes in log-probability space across aligned labels/scores (log-linear pooling / geometric mean) before computing expected values or argmax choices. Never average forward and reverse expected scores directly (`0.5 * (E_fwd + E_rev)`), which masks bimodal/J-shaped distributions and leaves token-prior bias uncancelled.
+  - `ChoiceGate` must default Pass-2 option permutations to a fixed-point-free `"derangement"` (`shift = max(1, n // 2)`) rather than simple reversal (`"reverse"`), which pins the middle option (`(K - 1) // 2`) to the same letter slot on odd `K`.
+- **Cascade Failure Monotonicity vs. Adjudication (`Cascade` & `JudgeGate`):**
+  - Keep standard cascade routing fail-closed (`on_ambiguous_only` / `on_ambiguous_or_fail`), while supporting `trigger="adjudicate"` (`allow_fail_override=True`) so Tier-2 `JudgeGate` can rescue Tier-1 (`LogitGate`, `ScoreGate`, `MultiRubricGate`) false negatives while keeping deterministic Tier-0 (`ASTGate`) structural failures strictly final.
 - **Conformal Calibration Quantiles:**
   - Finite-sample split conformal thresholds (`calibrate_cascade_thresholds`) must use exact conservative order-statistic indices (`ceil((n + 1) * (1 - alpha))` and symmetric lower rank) and emit `CalibrationWarning` when calibration sample counts are insufficient for non-trivial coverage.
 - **AST & Schema Validation (`ASTGate`):**
@@ -49,11 +54,13 @@ These standards apply to all code, documentation, tests, and commits in the Logi
 - **Cross-Surface Feature Propagation:** Any new gate parameter or normalization capability must be wired consistently through `Cascade`, `VerdictSnapshot` (`replay_config()` and `replay()`), `@check` (`pytest_plugin.py`), and `cli.py`.
 - **Integration Polymorphism:** `LangGraphGuardNode` must support `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers (with both sync and async callable factories), and `LogitGateSystemOneModel` must support `YesNoAnswer`, `ChoiceAnswer`, and `ScoreAnswer` schemas.
 - **Local Verification Commands:** Ensure `~/.local/bin` is on `PATH` when invoking `uv` / `uvx` in non-interactive shells (`uvx ruff check src/logitgate tests`, `uv run --with mypy mypy src/logitgate tests`, `.venv/bin/pytest -q`).
+- **Centralized GitLab CI & GitHub Storefront Syndication:**
+  - `.gitlab-ci.yml` is the single source of truth for testing, linting, PyPI OIDC publishing, GitLab Releases, and syndicating commit statuses and releases to the GitHub mirror (`GITHUB_TOKEN`). Never add duplicate `.github/workflows/` pipelines, and prefer official CLIs (`glab`, `gh`) over custom inline HTTP wrappers in CI scripts.
 
 ## 5. Documentation Style
 
-- Technical documentation in `README.md` and `docs/` must remain direct, precise, and grounded in reproducible benchmarks.
-- Avoid marketing superlatives, unquantified claims, and time-based quickstart claims (use "Quickstart", not "30-Second Quickstart"). Use standard hyphens (`-`) or colons/parentheses rather than em-dashes (`—`) in prose.
+- Technical documentation in `README.md` and `docs/` must remain direct, precise, and grounded in reproducible benchmarks (clearly distinguishing zero-training `3B-14B` cascade performance from fine-tuned single-token `logprobs` classifiers required on sub-2B models).
+- Avoid marketing superlatives, unquantified claims, and time-based quickstart claims (use "Quickstart", not "30-Second Quickstart"). Use standard hyphens (`-`) or colons/parentheses rather than em-dashes (`—`) in prose, and use code spans (``odd-`K` ``) rather than inline `$...$` LaTeX math in `CHANGELOG.md` so syndicated GitHub Release notes render cleanly.
 - Every Python code block in `README.md` is executed by `tests/test_dx_and_tooling.py` and must run offline using default/stub configurations.
 
 ## 6. Git Hygiene & Command Execution
