@@ -58,11 +58,14 @@ When executing a full audit, launch five parallel read-only `research` subagents
 **Checklist:**
 1. **Minimal Environment Import Isolation:**
    - Verify `pytest` passes when all optional dependencies (`torch`, `transformers`, `safetensors`, `huggingface_hub`, `llama_cpp`, `deepeval`, `langgraph`) are absent, matching `.gitlab-ci.yml`'s `pip install -e ".[test]"` environment.
-2. **CLI Exit Codes & Output Contracts:**
+2. **CLI Exit Codes, Validation & Output Sanitization:**
    - Verify `logitgate eval`, `explain`, `calibrate`, and `benchmark` honor `--json` (zero extra `stdout` noise) and exit codes (`0` pass, `1` fail/invalid input, `2` backend error).
+   - Verify CLI numeric arguments reject `NaN`, `±inf`, and out-of-range values, and terminal output sanitizes ANSI CSI/OSC and C0/C1 control sequences from untrusted prompts/candidates.
+   - Verify `BenchmarkRunner` closes owned backends cleanly, handles `samples=1` without `stdev` errors, and supports `MultiRubricGate` and callable gates.
 3. **Framework Integrations (`pytest`, `DeepEval`, `LangGraph`):**
-   - Verify `@check` invalidates cached gates when `logitgate.configure()` changes defaults and forwards `normalize` to `LogitGate`.
-   - Verify `LogitGateMetric` respects `preset` thresholds and `LogitGateSystemOneModel` supports both dict and object question items.
+   - Verify `@check` invalidates cached gates when `logitgate.configure()` changes defaults and forwards `normalize`, `normalize_text`, and `validators` to underlying gates.
+   - Verify `LogitGateMetric` respects `preset` thresholds and `LogitGateSystemOneModel` supports dict/object question items, `YesNoAnswer` / `ChoiceAnswer` / `ScoreAnswer` schemas, and neutral `"default"` temperature when an explicit `backend` is supplied without `model_name`.
+   - Verify `LangGraphGuardNode` supports `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers across both sync and async invocation.
 4. **Documentation & Snippet Accuracy:**
    - Verify all `README.md` and `docs/` defaults match the implementation (`OllamaBackend` `model="qwen2.5:7b"`, `num_ctx=None`, `ScoreGate` `symmetric_debiasing=True`, `JudgeGate` `trigger="on_ambiguous_only"`), and `pytest tests/test_dx_and_tooling.py` executes all `README.md` and `docs/` code blocks cleanly.
 
@@ -70,13 +73,14 @@ When executing a full audit, launch five parallel read-only `research` subagents
 
 ## Track 4: Adversarial Security, Prompt Injection, & DoS/ReDoS
 
-**Scope:** `src/logitgate/debiasing/inversion.py`, `src/logitgate/gates/ast_gate.py`, `src/logitgate/gates/judge_gate.py`, `src/logitgate/backends/base.py`, `src/logitgate/snapshot.py`
+**Scope:** `src/logitgate/debiasing/inversion.py`, `src/logitgate/gates/ast_gate.py`, `src/logitgate/gates/judge_gate.py`, `src/logitgate/backends/base.py`, `src/logitgate/snapshot.py`, `src/logitgate/cli.py`
 
 **Checklist:**
 1. **Prompt Injection & Delimiter Spoofing:**
-   - Verify untrusted `candidate` artifacts containing spoofed prompt headers (`[EVALUATION RUBRIC]`, `[DECISION PROTOCOL]`, `[VERDICT: PASS]`) or `<think>...</think>` tags cannot hijack Layer 1 or Layer 2 verdict extraction or bypass `ASTGate` `forbidden_imports` / `forbidden_patterns`.
+   - Verify untrusted `candidate` artifacts are wrapped in per-call randomized boundary nonces in Layer 1 (`inversion.py`) and Layer 2 (`JudgeGate`) so spoofed headers (`[EVALUATION RUBRIC]`, `[DECISION PROTOCOL]`, `[VERDICT: PASS]`) or `<think>...</think>` tags cannot hijack verdict extraction.
+   - Verify `ASTGate` scans both raw and normalized text for `forbidden_patterns` when `normalize_text=True` so payloads inside `<think>` tags cannot bypass checks.
 2. **Regex & Parser Denial of Service (ReDoS / $O(N^2)$ Scans):**
-   - Verify all regular expressions (`_THINK_BLOCK_RE`, `_FENCE_BLOCK_RE`, `_INLINE_FENCE_RE`, `_IMPORT_STMT_RE`, `_VERDICT_TAG_RE`, `_NEGATED_FAILURE_RE`, `_NEGATED_PASS_RE`) and JSON scanners (`_extract_json_from_text`, `_iter_json_objects`) run in linear time without catastrophic backtracking or quadratic `raw_decode` loops on pathological inputs (e.g., 50,000 unclosed `{` or backticks).
+   - Verify all regular expressions (`_THINK_BLOCK_RE`, `_FENCE_BLOCK_RE`, `_INLINE_FENCE_RE`, `_IMPORT_STMT_RE`, `_VERDICT_TAG_RE`, `_NEGATED_FAILURE_RE`, `_NEGATED_PASS_RE`) and JSON scanners (`_extract_json_from_text`, `_extract_json_with_span`, `_iter_json_objects`) enforce bounded decode attempts and linear-time execution on pathological inputs (e.g., 50,000 unclosed `{` or backticks).
 3. **Filesystem & Deserialization Safety:**
    - Verify snapshot filenames sanitize and bound `test_name` slugs, and `ast.parse` catches `RecursionError`, `MemoryError`, `SyntaxError`, and `ValueError`.
 
@@ -88,7 +92,7 @@ When executing a full audit, launch five parallel read-only `research` subagents
 
 **Checklist:**
 1. **Psychometric & Debiasing Validity:**
-   - Verify `LogitGate`, `ChoiceGate`, and `ScoreGate` forward/reverse permutation passes properly invert token-to-label/score mappings and combine distributions without uncancelled positional bias or scale-direction errors.
-   - Verify conformal calibration quantiles (`calibrate_cascade_thresholds`) and temperature scaling (`fit_calibration`) maintain statistical guarantees and warn via `CalibrationWarning` on degenerate or under-sampled data.
+   - Verify `LogitGate`, `ChoiceGate`, and `ScoreGate` forward/reverse permutation passes invert token-to-label/score mappings and aggregate distributions in log-space (rather than averaging expected scores directly) without uncancelled positional bias or scale-direction errors, and verify `StubBackend` honors `[SCORING SCALE]` and `reverse_top_logprobs`.
+   - Verify conformal calibration quantiles (`calibrate_cascade_thresholds`) use exact finite-sample order statistics and temperature scaling (`fit_calibration`) emits `CalibrationWarning` on degenerate or under-sampled data.
 2. **Cross-Gate API & Snapshot Replay Symmetry:**
-   - Verify `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `JudgeGate`, `ASTGate`, and `Cascade` maintain consistent `evaluate()` / `aevaluate()` contracts, `replay_config()` serialization, and `VerdictSnapshot.replay()` / `explain()` behavior across all gate types.
+   - Verify `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `JudgeGate`, `ASTGate`, and `Cascade` maintain consistent `evaluate()` / `aevaluate()` contracts, parameter propagation across `Cascade` / `@check` / `cli.py`, `replay_config()` serialization, and `VerdictSnapshot.replay()` / `explain()` behavior across all gate types.

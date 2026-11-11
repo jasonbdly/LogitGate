@@ -13,31 +13,50 @@ These standards apply to all code, documentation, tests, and commits in the Logi
 - **No Unsolicited `stdout` Writes:**
   Library modules under `src/logitgate/` must never call `print()` to `stdout`, as CLI `--json` consumers and MCP stdio transports rely on clean standard output. Use `logging.getLogger(__name__)` for operational logs, or `sys.stderr` (respecting `LOGITGATE_QUIET=1`) for one-time developer notices.
 
-## 2. Numerical & Validation Invariants
+## 2. Numerical, Psychometric & Validation Invariants
 
 - **Logprob Sanitation & Presence:**
   - Always verify that backend `top_logprobs` responses are non-empty via `_ensure_logprobs_present` and raise `BackendError` when empty rather than defaulting to `P = 0.50` or uniform probabilities.
   - `extract_token_logprob` must ignore non-finite values (`NaN`, `±inf`), clamp small positive fast-math logprob noise (`> 0.0`) to `0.0`, and deduplicate identical raw token strings before marginalizing surface variants via `logsumexp`.
-- **Temperature Lookup Precedence:**
-  Model temperature resolution (`get_model_temperature`) must check exact model key matches before longest-prefix substring matches so base model names (`qwen2.5`) never shadow more specific variants (`qwen2.5-coder:14b`).
+- **Temperature Lookup Precedence & Explicit-Backend Neutrality:**
+  - Model temperature resolution (`get_model_temperature`) must check exact model key matches before longest-prefix substring matches so base model names (`qwen2.5`) never shadow more specific variants (`qwen2.5-coder:14b`).
+  - When a caller injects an explicit `Backend` instance (e.g., `StubBackend` or custom `Backend`) into a gate or adapter (`LogitGateSystemOneModel`) without specifying `model_name` or `logit_temperature`, default to neutral temperature (`1.0` / `"default"`) rather than applying model-specific temperatures from `KNOWN_MODEL_TEMPERATURES`.
+- **Ordinal & Categorical Debiasing (`ScoreGate` & `ChoiceGate`):**
+  - Combine forward and reverse debiasing passes in log-probability space across aligned labels/scores (log-linear pooling / geometric mean) before computing expected values or argmax choices. Never average forward and reverse expected scores directly (`0.5 * (E_fwd + E_rev)`), which masks bimodal/J-shaped distributions and leaves token-prior bias uncancelled.
+- **Conformal Calibration Quantiles:**
+  - Finite-sample split conformal thresholds (`calibrate_cascade_thresholds`) must use exact conservative order-statistic indices (`ceil((n + 1) * (1 - alpha))` and symmetric lower rank) and emit `CalibrationWarning` when calibration sample counts are insufficient for non-trivial coverage.
 - **AST & Schema Validation (`ASTGate`):**
   - In Python, `isinstance(True, int)` is `True`. JSON schema validation for `"integer"` and `"number"` types must explicitly reject `bool` (`not isinstance(val, bool)`).
   - `forbidden_imports` checks must inspect both `ast.Import` and `ast.ImportFrom` (`node.module` and `f"{node.module}.{alias.name}"`).
 - **Internal Probe Isolation (`JudgeGate`):**
-  When `JudgeGate` invokes an internal self-healing `_probe_gate` to classify an untagged critique, it must pass `save_on_fail=False` so internal probes never overwrite user failure snapshots in `.logitgate/failures/latest.json`.
+  - When `JudgeGate` invokes an internal self-healing `_probe_gate` to classify an untagged critique, it must pass `save_on_fail=False` so internal probes never overwrite user failure snapshots in `.logitgate/failures/latest.json`.
 
-## 3. Packaging & Optional Dependency Isolation
+## 3. Adversarial Security & Untrusted Input Isolation
+
+- **Randomized Prompt Boundary Nonces:**
+  - Untrusted `candidate` text must never be enclosed solely in static prompt headers. Layer 1 (`build_forward_prompt` / `build_reverse_prompt`) and Layer 2 (`JudgeGate`) prompts must wrap candidate artifacts in per-call randomized boundary nonces so spoofed `[EVALUATION RUBRIC]` or `[VERDICT: PASS]` strings inside candidates cannot hijack verdicts.
+- **Linear-Time Parsing & Bounded Scans:**
+  - Regular expressions running over untrusted model outputs must avoid nested/ambiguous quantifiers (no catastrophic backtracking), and fallback JSON scanners (`raw_decode` loops) must enforce bounded decode-attempt caps so pathological inputs (e.g., thousands of unclosed `{` or backticks) fail in `O(N)` time.
+- **Dual Raw + Normalized Security Scanning (`ASTGate`):**
+  - When `normalize_text=True` strips `<think>` blocks or markdown code fences, `forbidden_patterns` must still inspect the raw unstripped candidate in addition to normalized text so disallowed content inside `<think>` tags cannot bypass Layer 0 checks.
+- **Terminal Escape Sanitization (`cli.py`):**
+  - Sanitize ANSI CSI/OSC escape sequences and C0/C1 control characters before rendering untrusted prompts, candidates, or backend messages to terminal `stdout`/`stderr`, and validate all numeric CLI flags against `NaN`, `±inf`, and domain bounds.
+
+## 4. Packaging, Cross-Surface Parity & Tooling
 
 - Core `logitgate` requires only `httpx` and `pydantic`.
 - All optional integrations (`torch`, `transformers`, `safetensors`, `huggingface_hub`, `llama_cpp`, `deepeval`, `langgraph`) must be lazily imported inside the functions or classes that use them so `pytest` passes in minimal `pip install -e ".[test]"` containers without optional extras installed.
+- **Cross-Surface Feature Propagation:** Any new gate parameter or normalization capability must be wired consistently through `Cascade`, `VerdictSnapshot` (`replay_config()` and `replay()`), `@check` (`pytest_plugin.py`), and `cli.py`.
+- **Integration Polymorphism:** `LangGraphGuardNode` must support `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers (with both sync and async callable factories), and `LogitGateSystemOneModel` must support `YesNoAnswer`, `ChoiceAnswer`, and `ScoreAnswer` schemas.
+- **Local Verification Commands:** Ensure `~/.local/bin` is on `PATH` when invoking `uv` / `uvx` in non-interactive shells (`uvx ruff check src/logitgate tests`, `uv run --with mypy mypy src/logitgate tests`, `.venv/bin/pytest -q`).
 
-## 4. Documentation Style
+## 5. Documentation Style
 
 - Technical documentation in `README.md` and `docs/` must remain direct, precise, and grounded in reproducible benchmarks.
 - Avoid marketing superlatives, unquantified claims, and time-based quickstart claims (use "Quickstart", not "30-Second Quickstart"). Use standard hyphens (`-`) or colons/parentheses rather than em-dashes (`—`) in prose.
 - Every Python code block in `README.md` is executed by `tests/test_dx_and_tooling.py` and must run offline using default/stub configurations.
 
-## 5. Git Hygiene & Command Execution
+## 6. Git Hygiene & Command Execution
 
 Follow standard industry Git practices (Conventional Commits, 50/72 formatting, and `git bisect`-safe vertical commits):
 
