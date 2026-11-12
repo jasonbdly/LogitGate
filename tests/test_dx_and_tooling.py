@@ -501,9 +501,11 @@ def test_staff_audit_fixes_uri_resolution_and_roundtrip(clean_config: Any) -> No
     assert infer_backend_spec(b_llama_inproc) == "llamacpp:///qwen.gguf"
 
     # 6. URI-embedded model is picked up by LogitGate/ChoiceGate/ScoreGate for temperature lookup
+    from logitgate.debiasing.permutation import KNOWN_MODEL_TEMPERATURES
+
     g_uri = LogitGate("Check", backend="ollama://localhost:11434/gemma4:e4b")
     assert g_uri.model == "gemma4:e4b"
-    assert g_uri.logit_temperature == pytest.approx(0.95)
+    assert g_uri.logit_temperature == pytest.approx(KNOWN_MODEL_TEMPERATURES["gemma4:e4b"])
 
     # 7. ScoreGate works out-of-the-box on default StubBackend and rejects multi-token bounds
     s_default = ScoreGate("Rate quality", backend="stub://default")

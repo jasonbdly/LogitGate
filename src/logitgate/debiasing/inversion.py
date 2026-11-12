@@ -71,6 +71,69 @@ def compile_binary_prompt(
     return prefix + suffix
 
 
+def compile_cot_binary_prompt(
+    rubric: str,
+    candidate: Any,
+    verification_notes: str,
+    pass_token: str = "A",
+    fail_token: str = "B",
+    query_first: bool = True,
+    pass_description: str = "The candidate artifact satisfies all criteria in the evaluation rubric (PASS).",
+    fail_description: str = "The candidate artifact violates one or more criteria in the evaluation rubric (FAIL).",
+) -> str:
+    """Compiles a prefix-cache-friendly binary prompt incorporating step-by-step verification notes.
+
+    Places ``[VERIFICATION NOTES]`` in its own dedicated section outside ``[CANDIDATE ARTIFACT]``
+    so small models never mistake reviewer notes for part of the candidate artifact, while keeping
+    the entire prefix through ``[VERIFICATION NOTES]`` 100% byte-identical across Pass 1 and Pass 2.
+    """
+    notes_str = verification_notes.strip()
+    if not notes_str or len(notes_str) < 12:
+        return compile_binary_prompt(
+            rubric=rubric,
+            candidate=candidate,
+            pass_token=pass_token,
+            fail_token=fail_token,
+            query_first=query_first,
+            pass_description=pass_description,
+            fail_description=fail_description,
+        )
+
+    cand_str = render_candidate(candidate)
+    rubric_str = rubric.strip()
+    if query_first:
+        prefix = (
+            f"[EVALUATION RUBRIC]\n{rubric_str}\n\n"
+            f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+            f"[VERIFICATION NOTES]\n{notes_str}\n\n"
+        )
+    else:
+        prefix = (
+            f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+            f"[EVALUATION RUBRIC]\n{rubric_str}\n\n"
+            f"[VERIFICATION NOTES]\n{notes_str}\n\n"
+        )
+
+    t_pass = pass_token.strip().upper()
+    t_fail = fail_token.strip().upper()
+    mapping = {
+        t_pass: pass_description,
+        t_fail: fail_description,
+    }
+    sorted_tokens = sorted(mapping.keys())
+    option_lines = "\n".join(f"{tok}: {mapping[tok]}" for tok in sorted_tokens)
+    tokens_str = f"{sorted_tokens[0]} or {sorted_tokens[1]}" if len(sorted_tokens) == 2 else " or ".join(sorted_tokens)
+
+    suffix = (
+        f"[DECISION MAPPING]\n"
+        f"Based strictly on the evaluation rubric, candidate artifact, and verification notes above, "
+        f"select the single token representing your verdict:\n"
+        f"{option_lines}\n\n"
+        f"Respond with the single character {tokens_str} only."
+    )
+    return prefix + suffix
+
+
 def compile_batch_binary_prompt(
     rubrics: Sequence[str],
     candidate: Any,
@@ -188,15 +251,35 @@ def compile_score_prompt(
     else:
         prefix = f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n[EVALUATION RUBRIC]\n{rubric_str}\n\n"
 
+    span = max_score - min_score
+    anchors: list[str] = []
+    for tok_val in range(min_score, max_score + 1):
+        q = (max_score - tok_val) / span if inverted else (tok_val - min_score) / span
+        if q >= 0.99:
+            desc = "Highest quality (exemplary; satisfies every rubric criterion with no defects)"
+        elif q <= 0.01:
+            desc = "Lowest quality (severely flawed, unsafe, or violates core rubric criteria)"
+        elif q >= 0.65:
+            desc = "Good quality (solid compliance with only minor non-critical issues)"
+        elif q <= 0.35:
+            desc = "Poor quality (notable defects, omissions, or reliability issues)"
+        else:
+            desc = "Moderate quality (mixed or partial compliance)"
+        anchors.append(f"{tok_val}: {desc}")
+    anchor_block = "\n".join(anchors)
+
     if inverted:
         scale_desc = (
             f"Rate the candidate artifact on an inverted scale where {min_score} is highest quality "
-            f"and {max_score} is lowest quality based on the rubric.\n"
+            f"and {max_score} is lowest quality based on the rubric "
+            f"(override any normal low-to-high numbering mentioned above):\n"
+            f"{anchor_block}\n"
         )
     else:
         scale_desc = (
             f"Rate the candidate artifact from {min_score} to {max_score} where {min_score} is lowest quality "
-            f"and {max_score} is highest quality based on the rubric.\n"
+            f"and {max_score} is highest quality based on the rubric:\n"
+            f"{anchor_block}\n"
         )
 
     suffix = (

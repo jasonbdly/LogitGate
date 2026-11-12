@@ -4,142 +4,7 @@
     "hardware": "CPU (num_gpu=0)",
     "base_url": "http://localhost:11435",
     "residency": {
-      "ram_gb": 1.76,
-      "vram_gb": 0.0
-    },
-    "trials": 5,
-    "choice_gate": {
-      "overall_accuracy": "50.0% \u00b1 0.0%",
-      "accuracy_percentage": 50.0,
-      "permutation_stability": "15/16 (93.8%)",
-      "category_breakdown": {
-        "6_way_scaling": "10/20 (50.0%)",
-        "adversarial_keyword_decoy": "10/20 (50.0%)",
-        "priority_hierarchy_conflict": "10/20 (50.0%)",
-        "architectural_scope": "10/20 (50.0%)"
-      },
-      "latency_ms": "1005.2 \u00b1 310.1 ms",
-      "mean_latency_ms": 1005.2
-    },
-    "score_gate": {
-      "tier_means": {
-        "tier_5_flawless": 3.22,
-        "tier_4_suboptimal_complexity": 3.2,
-        "tier_3_code_smells": 3.0,
-        "tier_2_latent_defects": 3.07,
-        "tier_1_catastrophic": 2.56
-      },
-      "dynamic_range": 0.66,
-      "adjacent_monotonicity": "29/42 (69.0%)",
-      "adjacent_monotonicity_rate": 69.0,
-      "adjacent_breakdown": {
-        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "6/9 (66.7%)",
-        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "10/12 (83.3%)",
-        "tier_3_code_smells_vs_tier_2_latent_defects": "5/12 (41.7%)",
-        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
-      },
-      "all_pairs_monotonicity": "81/102 (79.4%)",
-      "spearman_rho": 0.6688,
-      "latency_ms": "602.6 \u00b1 276.7 ms",
-      "mean_latency_ms": 602.6
-    }
-  },
-  "llama3.2:3b_cpu": {
-    "model": "llama3.2:3b",
-    "hardware": "CPU (num_gpu=0)",
-    "base_url": "http://localhost:11435",
-    "residency": {
-      "ram_gb": 3.18,
-      "vram_gb": 0.0
-    },
-    "trials": 5,
-    "choice_gate": {
-      "overall_accuracy": "75.0% \u00b1 0.0%",
-      "accuracy_percentage": 75.0,
-      "permutation_stability": "15/16 (93.8%)",
-      "category_breakdown": {
-        "6_way_scaling": "20/20 (100.0%)",
-        "adversarial_keyword_decoy": "15/20 (75.0%)",
-        "priority_hierarchy_conflict": "10/20 (50.0%)",
-        "architectural_scope": "15/20 (75.0%)"
-      },
-      "latency_ms": "1422.5 \u00b1 441.3 ms",
-      "mean_latency_ms": 1422.5
-    },
-    "score_gate": {
-      "tier_means": {
-        "tier_5_flawless": 3.63,
-        "tier_4_suboptimal_complexity": 3.05,
-        "tier_3_code_smells": 2.55,
-        "tier_2_latent_defects": 2.54,
-        "tier_1_catastrophic": 2.05
-      },
-      "dynamic_range": 1.58,
-      "adjacent_monotonicity": "33/42 (78.6%)",
-      "adjacent_monotonicity_rate": 78.6,
-      "adjacent_breakdown": {
-        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
-        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
-        "tier_3_code_smells_vs_tier_2_latent_defects": "4/12 (33.3%)",
-        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
-      },
-      "all_pairs_monotonicity": "91/102 (89.2%)",
-      "spearman_rho": 0.8487,
-      "latency_ms": "872.1 \u00b1 401.0 ms",
-      "mean_latency_ms": 872.1
-    }
-  },
-  "qwen2.5-coder:1.5b_cpu": {
-    "model": "qwen2.5-coder:1.5b",
-    "hardware": "CPU (num_gpu=0)",
-    "base_url": "http://localhost:11435",
-    "residency": {
-      "ram_gb": 1.39,
-      "vram_gb": 0.0
-    },
-    "trials": 5,
-    "choice_gate": {
-      "overall_accuracy": "61.2% \u00b1 2.8%",
-      "accuracy_percentage": 61.2,
-      "permutation_stability": "13/16 (81.2%)",
-      "category_breakdown": {
-        "6_way_scaling": "19/20 (95.0%)",
-        "adversarial_keyword_decoy": "5/20 (25.0%)",
-        "priority_hierarchy_conflict": "5/20 (25.0%)",
-        "architectural_scope": "20/20 (100.0%)"
-      },
-      "latency_ms": "644.8 \u00b1 278.4 ms",
-      "mean_latency_ms": 644.8
-    },
-    "score_gate": {
-      "tier_means": {
-        "tier_5_flawless": 3.28,
-        "tier_4_suboptimal_complexity": 3.08,
-        "tier_3_code_smells": 3.03,
-        "tier_2_latent_defects": 3.02,
-        "tier_1_catastrophic": 3.02
-      },
-      "dynamic_range": 0.26,
-      "adjacent_monotonicity": "28/42 (66.7%)",
-      "adjacent_monotonicity_rate": 66.7,
-      "adjacent_breakdown": {
-        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
-        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "7/12 (58.3%)",
-        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
-        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
-      },
-      "all_pairs_monotonicity": "76/102 (74.5%)",
-      "spearman_rho": 0.5683,
-      "latency_ms": "434.7 \u00b1 192.1 ms",
-      "mean_latency_ms": 434.7
-    }
-  },
-  "qwen2.5-coder:3b_cpu": {
-    "model": "qwen2.5-coder:3b",
-    "hardware": "CPU (num_gpu=0)",
-    "base_url": "http://localhost:11435",
-    "residency": {
-      "ram_gb": 2.44,
+      "ram_gb": 1.45,
       "vram_gb": 0.0
     },
     "trials": 5,
@@ -148,35 +13,170 @@
       "accuracy_percentage": 75.0,
       "permutation_stability": "14/16 (87.5%)",
       "category_breakdown": {
+        "6_way_scaling": "10/20 (50.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "15/20 (75.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "777.1 \u00b1 229.2 ms",
+      "mean_latency_ms": 777.1
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.0,
+        "tier_4_suboptimal_complexity": 2.97,
+        "tier_3_code_smells": 2.92,
+        "tier_2_latent_defects": 2.92,
+        "tier_1_catastrophic": 2.76
+      },
+      "dynamic_range": 0.24,
+      "adjacent_monotonicity": "30/42 (71.4%)",
+      "adjacent_monotonicity_rate": 71.4,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "7/9 (77.8%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "10/12 (83.3%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "7/9 (77.8%)"
+      },
+      "all_pairs_monotonicity": "85/102 (83.3%)",
+      "spearman_rho": 0.7498,
+      "latency_ms": "1281.6 \u00b1 272.6 ms",
+      "mean_latency_ms": 1281.6
+    }
+  },
+  "llama3.2:3b_cpu": {
+    "model": "llama3.2:3b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 2.34,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "81.2% \u00b1 0.0%",
+      "accuracy_percentage": 81.2,
+      "permutation_stability": "14/16 (87.5%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "15/20 (75.0%)",
+        "priority_hierarchy_conflict": "10/20 (50.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "1193.3 \u00b1 378.0 ms",
+      "mean_latency_ms": 1193.3
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.64,
+        "tier_4_suboptimal_complexity": 3.02,
+        "tier_3_code_smells": 2.36,
+        "tier_2_latent_defects": 2.32,
+        "tier_1_catastrophic": 2.01
+      },
+      "dynamic_range": 1.63,
+      "adjacent_monotonicity": "33/42 (78.6%)",
+      "adjacent_monotonicity_rate": 78.6,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "4/12 (33.3%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
+      },
+      "all_pairs_monotonicity": "89/102 (87.3%)",
+      "spearman_rho": 0.8097,
+      "latency_ms": "2029.9 \u00b1 425.7 ms",
+      "mean_latency_ms": 2029.9
+    }
+  },
+  "qwen2.5-coder:1.5b_cpu": {
+    "model": "qwen2.5-coder:1.5b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 1.11,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "75.0% \u00b1 0.0%",
+      "accuracy_percentage": 75.0,
+      "permutation_stability": "12/16 (75.0%)",
+      "category_breakdown": {
         "6_way_scaling": "20/20 (100.0%)",
         "adversarial_keyword_decoy": "5/20 (25.0%)",
         "priority_hierarchy_conflict": "15/20 (75.0%)",
         "architectural_scope": "20/20 (100.0%)"
       },
-      "latency_ms": "1265.0 \u00b1 568.2 ms",
-      "mean_latency_ms": 1265.0
+      "latency_ms": "605.0 \u00b1 188.0 ms",
+      "mean_latency_ms": 605.0
     },
     "score_gate": {
       "tier_means": {
-        "tier_5_flawless": 3.61,
-        "tier_4_suboptimal_complexity": 2.99,
-        "tier_3_code_smells": 2.85,
-        "tier_2_latent_defects": 3.04,
-        "tier_1_catastrophic": 2.78
+        "tier_5_flawless": 3.31,
+        "tier_4_suboptimal_complexity": 3.19,
+        "tier_3_code_smells": 3.17,
+        "tier_2_latent_defects": 3.21,
+        "tier_1_catastrophic": 3.12
       },
-      "dynamic_range": 0.83,
+      "dynamic_range": 0.19,
+      "adjacent_monotonicity": "25/42 (59.5%)",
+      "adjacent_monotonicity_rate": 59.5,
+      "adjacent_breakdown": {
+        "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
+        "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "4/12 (33.3%)",
+        "tier_3_code_smells_vs_tier_2_latent_defects": "5/12 (41.7%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "7/9 (77.8%)"
+      },
+      "all_pairs_monotonicity": "71/102 (69.6%)",
+      "spearman_rho": 0.4918,
+      "latency_ms": "1002.0 \u00b1 198.0 ms",
+      "mean_latency_ms": 1002.0
+    }
+  },
+  "qwen2.5-coder:3b_cpu": {
+    "model": "qwen2.5-coder:3b",
+    "hardware": "CPU (num_gpu=0)",
+    "base_url": "http://localhost:11435",
+    "residency": {
+      "ram_gb": 2.09,
+      "vram_gb": 0.0
+    },
+    "trials": 5,
+    "choice_gate": {
+      "overall_accuracy": "81.2% \u00b1 0.0%",
+      "accuracy_percentage": 81.2,
+      "permutation_stability": "16/16 (100.0%)",
+      "category_breakdown": {
+        "6_way_scaling": "20/20 (100.0%)",
+        "adversarial_keyword_decoy": "10/20 (50.0%)",
+        "priority_hierarchy_conflict": "15/20 (75.0%)",
+        "architectural_scope": "20/20 (100.0%)"
+      },
+      "latency_ms": "1183.8 \u00b1 378.4 ms",
+      "mean_latency_ms": 1183.8
+    },
+    "score_gate": {
+      "tier_means": {
+        "tier_5_flawless": 3.88,
+        "tier_4_suboptimal_complexity": 3.03,
+        "tier_3_code_smells": 2.83,
+        "tier_2_latent_defects": 2.9,
+        "tier_1_catastrophic": 2.49
+      },
+      "dynamic_range": 1.39,
       "adjacent_monotonicity": "28/42 (66.7%)",
       "adjacent_monotonicity_rate": 66.7,
       "adjacent_breakdown": {
         "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
         "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "9/12 (75.0%)",
-        "tier_3_code_smells_vs_tier_2_latent_defects": "2/12 (16.7%)",
-        "tier_2_latent_defects_vs_tier_1_catastrophic": "8/9 (88.9%)"
+        "tier_3_code_smells_vs_tier_2_latent_defects": "4/12 (33.3%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
       },
-      "all_pairs_monotonicity": "77/102 (75.5%)",
-      "spearman_rho": 0.6013,
-      "latency_ms": "838.3 \u00b1 399.8 ms",
-      "mean_latency_ms": 838.3
+      "all_pairs_monotonicity": "82/102 (80.4%)",
+      "spearman_rho": 0.7153,
+      "latency_ms": "1971.3 \u00b1 417.3 ms",
+      "mean_latency_ms": 1971.3
     }
   },
   "gemma4:e4b_cpu": {
@@ -184,7 +184,7 @@
     "hardware": "CPU (num_gpu=0)",
     "base_url": "http://localhost:11435",
     "residency": {
-      "ram_gb": 9.57,
+      "ram_gb": 9.41,
       "vram_gb": 0.0
     },
     "trials": 5,
@@ -198,39 +198,39 @@
         "priority_hierarchy_conflict": "20/20 (100.0%)",
         "architectural_scope": "20/20 (100.0%)"
       },
-      "latency_ms": "4186.4 \u00b1 1619.0 ms",
-      "mean_latency_ms": 4186.4
+      "latency_ms": "3918.4 \u00b1 868.1 ms",
+      "mean_latency_ms": 3918.4
     },
     "score_gate": {
       "tier_means": {
-        "tier_5_flawless": 4.66,
-        "tier_4_suboptimal_complexity": 2.73,
-        "tier_3_code_smells": 2.01,
-        "tier_2_latent_defects": 1.7,
-        "tier_1_catastrophic": 1.0
+        "tier_5_flawless": 4.21,
+        "tier_4_suboptimal_complexity": 2.87,
+        "tier_3_code_smells": 1.95,
+        "tier_2_latent_defects": 1.75,
+        "tier_1_catastrophic": 1.41
       },
-      "dynamic_range": 3.66,
-      "adjacent_monotonicity": "33/42 (78.6%)",
-      "adjacent_monotonicity_rate": 78.6,
+      "dynamic_range": 2.8,
+      "adjacent_monotonicity": "36/42 (85.7%)",
+      "adjacent_monotonicity_rate": 85.7,
       "adjacent_breakdown": {
         "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
         "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
-        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
-        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
+        "tier_3_code_smells_vs_tier_2_latent_defects": "8/12 (66.7%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "7/9 (77.8%)"
       },
-      "all_pairs_monotonicity": "93/102 (91.2%)",
-      "spearman_rho": 0.8907,
-      "latency_ms": "6028.0 \u00b1 1678.2 ms",
-      "mean_latency_ms": 6028.0
+      "all_pairs_monotonicity": "96/102 (94.1%)",
+      "spearman_rho": 0.9207,
+      "latency_ms": "7145.9 \u00b1 1534.7 ms",
+      "mean_latency_ms": 7145.9
     }
   },
   "gemma4:e4b_gpu1": {
     "model": "gemma4:e4b",
-    "hardware": "GPU 1 (16GB)",
+    "hardware": "GPU 1 (12GB)",
     "base_url": "http://localhost:11435",
     "residency": {
-      "ram_gb": 3.25,
-      "vram_gb": 3.25
+      "ram_gb": 3.21,
+      "vram_gb": 3.21
     },
     "trials": 5,
     "choice_gate": {
@@ -243,30 +243,30 @@
         "priority_hierarchy_conflict": "20/20 (100.0%)",
         "architectural_scope": "20/20 (100.0%)"
       },
-      "latency_ms": "137.4 \u00b1 20.8 ms",
-      "mean_latency_ms": 137.4
+      "latency_ms": "137.8 \u00b1 14.8 ms",
+      "mean_latency_ms": 137.8
     },
     "score_gate": {
       "tier_means": {
-        "tier_5_flawless": 4.58,
-        "tier_4_suboptimal_complexity": 2.74,
-        "tier_3_code_smells": 2.02,
-        "tier_2_latent_defects": 1.69,
-        "tier_1_catastrophic": 1.01
+        "tier_5_flawless": 4.2,
+        "tier_4_suboptimal_complexity": 2.87,
+        "tier_3_code_smells": 1.94,
+        "tier_2_latent_defects": 1.73,
+        "tier_1_catastrophic": 1.38
       },
-      "dynamic_range": 3.57,
-      "adjacent_monotonicity": "33/42 (78.6%)",
-      "adjacent_monotonicity_rate": 78.6,
+      "dynamic_range": 2.82,
+      "adjacent_monotonicity": "36/42 (85.7%)",
+      "adjacent_monotonicity_rate": 85.7,
       "adjacent_breakdown": {
         "tier_5_flawless_vs_tier_4_suboptimal_complexity": "9/9 (100.0%)",
         "tier_4_suboptimal_complexity_vs_tier_3_code_smells": "12/12 (100.0%)",
-        "tier_3_code_smells_vs_tier_2_latent_defects": "6/12 (50.0%)",
-        "tier_2_latent_defects_vs_tier_1_catastrophic": "6/9 (66.7%)"
+        "tier_3_code_smells_vs_tier_2_latent_defects": "8/12 (66.7%)",
+        "tier_2_latent_defects_vs_tier_1_catastrophic": "7/9 (77.8%)"
       },
-      "all_pairs_monotonicity": "93/102 (91.2%)",
-      "spearman_rho": 0.8907,
-      "latency_ms": "165.0 \u00b1 24.1 ms",
-      "mean_latency_ms": 165.0
+      "all_pairs_monotonicity": "96/102 (94.1%)",
+      "spearman_rho": 0.9207,
+      "latency_ms": "188.3 \u00b1 25.6 ms",
+      "mean_latency_ms": 188.3
     }
   },
   "qwen2.5:14b_gpu1": {

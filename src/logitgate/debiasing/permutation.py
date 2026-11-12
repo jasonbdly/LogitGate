@@ -21,12 +21,16 @@ class CalibrationResult(BaseModel):
 
 KNOWN_MODEL_TEMPERATURES: dict[str, float] = {
     "qwen2.5-coder:14b": 1.05,
+    "qwen2.5-coder:3b": 0.75,
+    "qwen2.5-coder:1.5b": 0.85,
     "qwen2.5:14b": 1.05,
     "qwen2.5:7b": 1.05,
     "qwen2.5": 1.05,
-    "gemma4:e4b": 0.95,
-    "gemma4": 0.95,
+    "gemma4:e4b": 4.00,
+    "gemma4": 2.50,
     "gpt-4o-mini": 1.15,
+    "llama3.2:3b": 1.00,
+    "llama3.2:1b": 1.40,
     "llama3": 1.10,
 }
 

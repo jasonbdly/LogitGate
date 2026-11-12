@@ -50,7 +50,17 @@ from logitgate.models import DecisionStatus
 
 def unload_all(urls: list[str]) -> None:
     """Unloads all active models on the target Ollama servers."""
-    known = ["gemma4:e4b", "qwen2.5:14b", "qwen2.5-coder:14b", "gemma4:26b", "gemma4:31b"]
+    known = [
+        "llama3.2:1b",
+        "llama3.2:3b",
+        "qwen2.5-coder:1.5b",
+        "qwen2.5-coder:3b",
+        "gemma4:e4b",
+        "qwen2.5:14b",
+        "qwen2.5-coder:14b",
+        "gemma4:26b",
+        "gemma4:31b",
+    ]
     for base_url in set(urls):
         try:
             with urllib.request.urlopen(f"{base_url}/api/ps", timeout=5.0) as resp:
@@ -74,10 +84,19 @@ def unload_all(urls: list[str]) -> None:
                 continue
 
 
+def _judge_budget(model_name: str, is_cpu: bool = False) -> tuple[int, bool | None]:
+    """Returns (max_tokens, think) for JudgeGate on CPU vs GPU models."""
+    del model_name
+    if is_cpu:
+        return 200, False
+    return 256, False
+
+
 def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, Any]:
     """Evaluates the 32-item reasoning depth suite (Tiers A, B-Compound, B-Atomic, C, D)."""
     print(f"\n=== [Suite 2: 32-Item Reasoning Depth] Model: {model_name} ===", flush=True)
     out: dict[str, Any] = {}
+    max_tok, think_mode = _judge_budget(model_name, is_cpu=False)
 
     def _run_binary_tier(tier_key: str, items: list[dict[str, Any]], rubric_override: str | None = None) -> dict[str, Any]:
         l1_correct = 0
@@ -110,8 +129,8 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
                     backend=backend,
                     model=model_name,
                     trigger="on_ambiguous_or_fail",
-                    max_tokens=250,
-                    think=False,
+                    max_tokens=max_tok,
+                    think=think_mode,
                 )
                 v_j = jg.evaluate(item["candidate"])
                 # Monotonic fail safety: if L1 was decisively FAILED (p <= 0.20), keep fail
@@ -198,8 +217,8 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
                     backend=backend,
                     model=model_name,
                     trigger="on_ambiguous_only",
-                    max_tokens=250,
-                    think=False,
+                    max_tokens=max_tok,
+                    think=think_mode,
                 )
                 rule_passes.append(jg.evaluate(item["candidate"]).passed)
         casc_pass = all(rule_passes)
@@ -258,7 +277,7 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
     label = f"{model_name} ({'Pure CPU' if is_cpu else 'GPU'})"
     print(f"\n=== [Suite 1: 24-Item Multi-Domain Cascade] {label} ===", flush=True)
 
-    max_tok = 80 if is_cpu else 250
+    max_tok, think_mode = _judge_budget(model_name, is_cpu=is_cpu)
     # Warm-up call
     LogitGate(rubric="Warmup check?", backend=backend, model=model_name).evaluate("ok")
 
@@ -267,7 +286,7 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
     base_tokens = 0
     base_correct = 0
     for item in MULTI_DOMAIN_24_ITEMS:
-        jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=False)
+        jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=think_mode)
         v = jg.evaluate(item["candidate"])
         base_tokens += v.total_tokens_generated
         if v.passed == item["expected"]:
@@ -323,7 +342,7 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
 
             # on_ambiguous_or_fail invokes JudgeGate for failure diagnostics
             t_j = time.perf_counter()
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=False)
+            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=think_mode)
             v_j = jg.evaluate(item["candidate"])
             dt_j = (time.perf_counter() - t_j) * 1000.0
             time_ambig_or_fail_ms += dt_l0_l1 + dt_j
@@ -335,7 +354,7 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
             # AMBIGUOUS: both modes escalate to JudgeGate!
             l2_escalated_count += 1
             t_j = time.perf_counter()
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=False)
+            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=think_mode)
             v_j = jg.evaluate(item["candidate"])
             dt_j = (time.perf_counter() - t_j) * 1000.0
             time_ambig_or_fail_ms += dt_l0_l1 + dt_j

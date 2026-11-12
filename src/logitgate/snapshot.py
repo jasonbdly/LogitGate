@@ -355,12 +355,12 @@ class VerdictSnapshot(BaseModel):
 
     def replay(
         self,
-        backend: str | LogitBackend | None = None,
+        backend: str | LogitBackend | GenerativeBackend | None = None,
         model: str | None = None,
     ) -> Verdict:
         """
-        Re-runs Layer 1 LogitGate, MultiRubricGate, or ScoreGate using self.rubric, self.candidate,
-        and self.gate_config against the specified (or default) backend.
+        Re-runs Layer 1 LogitGate, MultiRubricGate, ScoreGate, or Layer 2 JudgeGate using
+        self.rubric, self.candidate, and self.gate_config against the specified (or default) backend.
         """
         from logitgate.gates.logit_gate import LogitGate, ScoreGate
 
@@ -369,6 +369,30 @@ class VerdictSnapshot(BaseModel):
             backend, model, gate_kwargs
         )
         owns_backend = not isinstance(effective_backend, LogitBackend)
+
+        if gate_kwargs.get("gate_type") == "JudgeGate":
+            from logitgate.gates.judge_gate import JudgeGate
+
+            judge_allowed = {
+                "max_tokens",
+                "think",
+                "symmetric_debiasing",
+                "name",
+            }
+            judge_init = {k: v for k, v in gate_kwargs.items() if k in judge_allowed}
+            judge_owns = not isinstance(effective_backend, GenerativeBackend)
+            judge_gate = JudgeGate(
+                rubric=self.rubric,
+                backend=effective_backend,
+                model=effective_model,
+                trigger="always",
+                **judge_init,
+            )
+            try:
+                return judge_gate.evaluate(self.candidate, save_on_fail=False)
+            finally:
+                if judge_owns:
+                    judge_gate.backend.close()
 
         if gate_kwargs.get("gate_type") == "ScoreGate":
             score_allowed = {
@@ -434,7 +458,7 @@ class VerdictSnapshot(BaseModel):
 
     async def areplay(
         self,
-        backend: str | LogitBackend | None = None,
+        backend: str | LogitBackend | GenerativeBackend | None = None,
         model: str | None = None,
     ) -> Verdict:
         """Async version of `replay`."""
@@ -445,6 +469,30 @@ class VerdictSnapshot(BaseModel):
             backend, model, gate_kwargs
         )
         owns_backend = not isinstance(effective_backend, LogitBackend)
+
+        if gate_kwargs.get("gate_type") == "JudgeGate":
+            from logitgate.gates.judge_gate import JudgeGate
+
+            judge_allowed = {
+                "max_tokens",
+                "think",
+                "symmetric_debiasing",
+                "name",
+            }
+            judge_init = {k: v for k, v in gate_kwargs.items() if k in judge_allowed}
+            judge_owns = not isinstance(effective_backend, GenerativeBackend)
+            judge_gate = JudgeGate(
+                rubric=self.rubric,
+                backend=effective_backend,
+                model=effective_model,
+                trigger="always",
+                **judge_init,
+            )
+            try:
+                return await judge_gate.aevaluate(self.candidate, save_on_fail=False)
+            finally:
+                if judge_owns:
+                    await judge_gate.backend.aclose()
 
         if gate_kwargs.get("gate_type") == "ScoreGate":
             score_allowed = {
@@ -573,6 +621,7 @@ class VerdictSnapshot(BaseModel):
             trigger="always",
             max_tokens=max_tokens,
             think=think,
+            symmetric_debiasing=self.gate_config.get("symmetric_debiasing", True),
         )
         try:
             judge_verdict = judge.evaluate(self.candidate, save_on_fail=False)
@@ -603,6 +652,7 @@ class VerdictSnapshot(BaseModel):
             trigger="always",
             max_tokens=max_tokens,
             think=think,
+            symmetric_debiasing=self.gate_config.get("symmetric_debiasing", True),
         )
         try:
             judge_verdict = await judge.aevaluate(self.candidate, save_on_fail=False)

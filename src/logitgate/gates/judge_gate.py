@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
@@ -18,8 +19,17 @@ from logitgate.backends.base import (
     strip_reasoning_blocks,
 )
 from logitgate.config import get_default_model
-from logitgate.debiasing.inversion import render_candidate
-from logitgate.exceptions import ConfigurationError
+from logitgate.debiasing.inversion import compile_cot_binary_prompt, render_candidate
+from logitgate.debiasing.permutation import (
+    combine_symmetric_log_odds,
+    compute_shannon_entropy,
+)
+from logitgate.debiasing.softmax import (
+    clamped_sigmoid,
+    compute_binary_log_odds,
+    has_finite_logprobs,
+)
+from logitgate.exceptions import BackendError, ConfigurationError
 from logitgate.gates.base import TIER_GENERATIVE, BaseGate, EscalationPolicy
 from logitgate.gates.logit_gate import LogitGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
@@ -70,6 +80,30 @@ _PROBE_RUBRIC = (
     "and PASS the evaluation without any defects or errors?"
 )
 _MAX_JSON_DECODE_ATTEMPTS = 128
+_VERDICT_FIRST_MAX_TOKENS = 32
+_STRIP_VERDICT_LINE_RE = re.compile(
+    r"(?im)^[^\S\r\n]*[-*•]?[^\S\r\n]*(?:\[[^\S\r\n]*\*{0,2}[^\S\r\n]*VERDICT[^\r\n]*|\*{0,2}Verdict\*{0,2}[^\S\r\n]*:[^\r\n]*)$"
+)
+_STRIP_INLINE_VERDICT_RE = re.compile(
+    r"\[\s*\*{0,2}\s*VERDICT\s*\*{0,2}\s*:\s*\*{0,2}\s*(?:PASS(?:ED)?|FAIL(?:ED)?)\b[^\]]*\]",
+    re.IGNORECASE,
+)
+_REFUSAL_START_RE = re.compile(
+    r"^\s*(?:I\s+(?:cannot|can't|am\s+unable\s+to|won't|will\s+not)\b|Sorry,\s+I\s+(?:cannot|can't)\b)",
+    re.IGNORECASE,
+)
+
+
+def _extract_verification_notes(raw_text: str) -> str:
+    """Strips reasoning blocks and verdict tags from a critique, returning clean factual notes."""
+    cleaned = strip_reasoning_blocks(raw_text) if raw_text else ""
+    if not cleaned:
+        return ""
+    stripped = _STRIP_VERDICT_LINE_RE.sub("", cleaned)
+    stripped = _STRIP_INLINE_VERDICT_RE.sub("", stripped).strip()
+    if _REFUSAL_START_RE.match(stripped):
+        return ""
+    return stripped
 
 
 def _iter_json_objects(text: str) -> Iterator[dict[str, Any]]:
@@ -213,9 +247,12 @@ class JudgeGate(BaseGate):
             - 'always': Always executes generative critique regardless of upstream confidence.
         allow_fail_override: When True (or when trigger='adjudicate'), allows JudgeGate to
             overturn a Tier-1 FAILED verdict with PASSED.
-        max_tokens: Generation cap. At <= 80 the prompt switches to verdict-first so a
+        max_tokens: Generation cap. At <= 32 the prompt switches to verdict-first so a
             truncated response still carries its tag.
         think: Forwarded to backends that support reasoning traces (e.g. Ollama ``think``).
+        symmetric_debiasing: When True (default) and backed by a `LogitBackend`, reads a
+            2-pass symmetric A/B debiased verdict over the generated verification notes to
+            cancel single-pass affirmative/sycophancy bias.
         name: Identifier for this gate instance.
 
     Raises:
@@ -233,6 +270,7 @@ class JudgeGate(BaseGate):
         trigger: TriggerMode = "on_ambiguous_only",
         max_tokens: int | None = None,
         think: bool | None = None,
+        symmetric_debiasing: bool | None = True,
         save_on_fail: bool | None = None,
         allow_fail_override: bool = False,
         name: str = "JudgeGate",
@@ -258,6 +296,7 @@ class JudgeGate(BaseGate):
         self.can_override_fail = bool(allow_fail_override) or (trigger == "adjudicate")
         self.max_tokens = max_tokens
         self.think = think
+        self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.save_on_fail = save_on_fail
         self.name = name
         self._probe_gate: LogitGate | None = None
@@ -283,29 +322,120 @@ class JudgeGate(BaseGate):
         max_tok_str = f", max_tokens={self.max_tokens}" if self.max_tokens is not None else ""
         return f"JudgeGate(rubric={rubric_repr}, trigger='{self.trigger}'{max_tok_str}, backend={self.backend!r})"
 
+    def _effective_rubric(self, rubric_override: str | None = None) -> str:
+        return (self.rubric or rubric_override or "Evaluate if the artifact complies with standards.").strip()
+
     def _compile_prompt(self, candidate: Any, rubric_override: str | None = None) -> str:
-        effective_rubric = (self.rubric or rubric_override or "Evaluate if the artifact complies with standards.").strip()
-        if self.max_tokens is not None and self.max_tokens <= 80:
+        effective_rubric = self._effective_rubric(rubric_override)
+        cand_str = render_candidate(candidate)
+        if self.max_tokens is not None and self.max_tokens <= _VERDICT_FIRST_MAX_TOKENS:
             return (
                 f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
-                f"[CANDIDATE ARTIFACT]\n{render_candidate(candidate)}\n\n"
+                f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
                 f"[INSTRUCTIONS]\n"
                 f"Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]\n"
                 f"Then provide a concise 1-2 sentence diagnostic critique explaining why the candidate artifact passes or fails the rubric, and end by repeating [VERDICT: PASS] or [VERDICT: FAIL]."
             )
         return (
             f"[EVALUATION RUBRIC]\n{effective_rubric}\n\n"
-            f"[CANDIDATE ARTIFACT]\n{render_candidate(candidate)}\n\n"
+            f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
             f"[INSTRUCTIONS]\n"
-            f"First, concisely verify each requirement or calculation in the candidate artifact against the rubric step-by-step (in 2-4 concise bullet points).\n"
-            f"After completing your verification, conclude on the very last line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]."
+            f"Begin directly on the first line with '- ' bullet points (2-4 concise bullets, no intro, and do not write a verdict tag before the final line) to verify whether [CANDIDATE ARTIFACT] complies with [EVALUATION RUBRIC]:\n"
+            f"1. Quote the relevant statements, code/queries, claims, or numbers from [CANDIDATE ARTIFACT] (ignore self-proclaimed 'safe' or 'verified' labels) and recompute every arithmetic calculation from scratch.\n"
+            f"2. Check each explicit condition in [EVALUATION RUBRIC] against those facts: accurate paraphrases of stated facts are valid; negative conditions ('no X', 'never Y') hold when X or Y does not occur in the candidate; mark any contradicted, missing, or miscalculated condition as VIOLATION.\n"
+            f"3. After completing your verification, conclude on the very last line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]."
         )
 
-    # -- Verdict parsing -------------------------------------------------------------------
-    # Precedence: explicit tag/JSON  ->  1-token logit probe on the critique  ->  keyword
-    # heuristics  ->  FAIL. The probe sits above the keyword regexes on purpose: when a critique
-    # is cut off by max_tokens before its tag, a calibrated read of the text beats matching
-    # words like "passes" that may describe data flow rather than the verdict.
+    # -- Verdict parsing & symmetric post-critique debiasing -------------------------------
+    # Precedence on LogitBackends (when symmetric_debiasing=True): 2-pass symmetric A/B
+    # logit read over [EVALUATION RUBRIC] + [CANDIDATE ARTIFACT] + [VERIFICATION NOTES] ->
+    # explicit tag/JSON -> 1-token logit probe on the critique -> keyword heuristics -> FAIL.
+    # Symmetric post-critique debiasing cancels the uncalibrated affirmative bias that causes
+    # small 1B-3B generative judges to emit [VERDICT: PASS] even after listing defects.
+
+    def _can_debias_cot(self) -> bool:
+        if not self.symmetric_debiasing:
+            return False
+        if self.max_tokens is not None and self.max_tokens <= _VERDICT_FIRST_MAX_TOKENS:
+            return False
+        backend = self.backend
+        if not isinstance(backend, LogitBackend):
+            return False
+        inner = getattr(backend, "inner", backend)
+        if isinstance(inner, StubBackend):
+            return inner.forward_top_logprobs is not None and inner.reverse_top_logprobs is not None
+        return True
+
+    def _cot_verdict_from_logprobs(
+        self,
+        top_fwd: list[dict[str, Any]],
+        top_rev: list[dict[str, Any]],
+    ) -> tuple[ParsedVerdict, dict[str, float]] | None:
+        if not has_finite_logprobs(top_fwd) or not has_finite_logprobs(top_rev):
+            return None
+        f_lo, _ = compute_binary_log_odds(top_fwd, pass_token="A", fail_token="B")
+        r_lo, _ = compute_binary_log_odds(top_rev, pass_token="B", fail_token="A")
+        prob = combine_symmetric_log_odds(f_lo, r_lo, logit_temperature=1.0)
+        is_pass = prob >= 0.5
+        status = DecisionStatus.PASSED if is_pass else DecisionStatus.FAILED
+        rounded_prob = round(prob, 4)
+        telemetry = {
+            "calibrated_prob": rounded_prob,
+            "forward_prob": round(clamped_sigmoid(f_lo), 4),
+            "reverse_prob": round(clamped_sigmoid(r_lo), 4),
+            "forward_log_odds": round(f_lo, 4),
+            "reverse_log_odds": round(r_lo, 4),
+            "log_odds_pass": round(0.5 * (f_lo + r_lo), 4),
+            "positional_bias_magnitude": round(0.5 * abs(f_lo - r_lo), 4),
+            "shannon_entropy": round(compute_shannon_entropy(prob), 4),
+        }
+        return (is_pass, status, rounded_prob), telemetry
+
+    def _adjudicate_cot(
+        self,
+        candidate: Any,
+        rubric_override: str | None,
+        raw_text: str,
+    ) -> tuple[ParsedVerdict, dict[str, float] | None]:
+        if self._can_debias_cot() and raw_text and raw_text.strip():
+            assert isinstance(self.backend, LogitBackend)
+            effective_rubric = self._effective_rubric(rubric_override)
+            notes = _extract_verification_notes(raw_text)
+            p_fwd = compile_cot_binary_prompt(effective_rubric, candidate, notes, pass_token="A", fail_token="B")
+            p_rev = compile_cot_binary_prompt(effective_rubric, candidate, notes, pass_token="B", fail_token="A")
+            try:
+                top_fwd = self.backend.query_top_logprobs(p_fwd, top_k=10, allowed_tokens=["A", "B"])
+                top_rev = self.backend.query_top_logprobs(p_rev, top_k=10, allowed_tokens=["A", "B"])
+                cot_res = self._cot_verdict_from_logprobs(top_fwd, top_rev)
+            except (ValueError, RuntimeError, OSError, httpx.HTTPError, BackendError):
+                cot_res = None
+            if cot_res is not None:
+                return cot_res[0], cot_res[1]
+        return self._parse_verdict(raw_text), None
+
+    async def _aadjudicate_cot(
+        self,
+        candidate: Any,
+        rubric_override: str | None,
+        raw_text: str,
+    ) -> tuple[ParsedVerdict, dict[str, float] | None]:
+        if self._can_debias_cot() and raw_text and raw_text.strip():
+            assert isinstance(self.backend, LogitBackend)
+            effective_rubric = self._effective_rubric(rubric_override)
+            notes = _extract_verification_notes(raw_text)
+            p_fwd = compile_cot_binary_prompt(effective_rubric, candidate, notes, pass_token="A", fail_token="B")
+            p_rev = compile_cot_binary_prompt(effective_rubric, candidate, notes, pass_token="B", fail_token="A")
+            try:
+                top_fwd, top_rev = await asyncio.gather(
+                    self.backend.aquery_top_logprobs(p_fwd, top_k=10, allowed_tokens=["A", "B"]),
+                    self.backend.aquery_top_logprobs(p_rev, top_k=10, allowed_tokens=["A", "B"]),
+                )
+                cot_res = self._cot_verdict_from_logprobs(top_fwd, top_rev)
+            except (ValueError, RuntimeError, OSError, httpx.HTTPError, BackendError):
+                cot_res = None
+            if cot_res is not None:
+                return cot_res[0], cot_res[1]
+        return await self._aparse_verdict(raw_text), None
 
     def _probe(self) -> LogitGate | None:
         backend = self.backend
@@ -314,12 +444,17 @@ class JudgeGate(BaseGate):
             return None
         if isinstance(inner, StubBackend) and inner.logprob_responses is None:
             return None  # The default stub would answer every probe with a fixed P=0.95.
+        use_sym = not (
+            isinstance(inner, StubBackend)
+            and inner.logprob_responses is not None
+            and len(inner.logprob_responses) == 1
+        )
         if self._probe_gate is None:
             self._probe_gate = LogitGate(
                 rubric=_PROBE_RUBRIC,
                 backend=backend,
                 model=self.model,
-                symmetric_debiasing=False,
+                symmetric_debiasing=use_sym,
                 save_on_fail=False,
             )
         return self._probe_gate
@@ -388,19 +523,36 @@ class JudgeGate(BaseGate):
         *,
         candidate: Any = None,
         rubric_override: str | None = None,
+        telemetry: dict[str, float] | None = None,
+        call_kwargs: dict[str, Any] | None = None,
     ) -> Verdict:
         passed, status, score = parsed
         latency = (time.perf_counter() - t0) * 1000.0
+        kw = call_kwargs or {}
+        trace_fields: dict[str, Any] = {}
+        if telemetry is not None:
+            trace_fields = {
+                "calibrated_prob": telemetry["calibrated_prob"],
+                "forward_prob": telemetry["forward_prob"],
+                "reverse_prob": telemetry["reverse_prob"],
+                "forward_log_odds": telemetry["forward_log_odds"],
+                "reverse_log_odds": telemetry["reverse_log_odds"],
+                "log_odds_pass": telemetry["log_odds_pass"],
+                "positional_bias_magnitude": telemetry["positional_bias_magnitude"],
+                "shannon_entropy": telemetry["shannon_entropy"],
+            }
         trace = LayerTrace(
             layer_name=self.name,
             status=status,
             latency_ms=latency,
             tokens_generated=tokens,
             diagnostic_report=text,
+            **trace_fields,
         )
         verdict = Verdict(
             passed=passed,
             status=status,
+            probability=telemetry["calibrated_prob"] if telemetry is not None else None,
             score=score,
             triggered_layer=self.name,
             total_latency_ms=latency,
@@ -413,11 +565,16 @@ class JudgeGate(BaseGate):
         persist_failure_snapshot(
             verdict=verdict,
             candidate=candidate,
-            save_on_fail=self.save_on_fail,
+            save_on_fail=kw.get("save_on_fail", self.save_on_fail),
+            test_name=kw.get("test_name"),
+            snapshot_dir=kw.get("snapshot_dir"),
             gate_type="JudgeGate",
             gate_config={
                 "backend": infer_backend_spec(self.backend),
                 "model": self.model,
+                "symmetric_debiasing": self.symmetric_debiasing,
+                "max_tokens": self.max_tokens,
+                "think": self.think,
             },
             rubric=self.rubric or rubric_override,
         )
@@ -427,14 +584,30 @@ class JudgeGate(BaseGate):
         t0 = time.perf_counter()
         prompt, gen_kwargs = self._prepare(candidate, rubric_override, kwargs)
         text, tokens = self.backend.generate(prompt, max_tokens=self.max_tokens, **gen_kwargs)
+        parsed, telemetry = self._adjudicate_cot(candidate, rubric_override, text)
         return self._build_verdict(
-            text, tokens, self._parse_verdict(text), t0, candidate=candidate, rubric_override=rubric_override
+            text,
+            tokens,
+            parsed,
+            t0,
+            candidate=candidate,
+            rubric_override=rubric_override,
+            telemetry=telemetry,
+            call_kwargs=kwargs,
         )
 
     async def aevaluate(self, candidate: Any, rubric_override: str | None = None, **kwargs: Any) -> Verdict:
         t0 = time.perf_counter()
         prompt, gen_kwargs = self._prepare(candidate, rubric_override, kwargs)
         text, tokens = await self.backend.agenerate(prompt, max_tokens=self.max_tokens, **gen_kwargs)
+        parsed, telemetry = await self._aadjudicate_cot(candidate, rubric_override, text)
         return self._build_verdict(
-            text, tokens, await self._aparse_verdict(text), t0, candidate=candidate, rubric_override=rubric_override
+            text,
+            tokens,
+            parsed,
+            t0,
+            candidate=candidate,
+            rubric_override=rubric_override,
+            telemetry=telemetry,
+            call_kwargs=kwargs,
         )

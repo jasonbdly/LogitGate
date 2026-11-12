@@ -153,9 +153,9 @@ def measure_cpu_latencies(
 
 
 def eval_multi_domain_24_cpu(backend: OllamaBackend, model_name: str) -> dict[str, Any]:
-    """Evaluates the 24-item multi-domain suite on CPU (max_tokens=60 for diagnostics)."""
+    """Evaluates the 24-item multi-domain suite on CPU (max_tokens=200 for step-by-step diagnostics)."""
     print(f"\n--- [Suite 1: 24-Item Multi-Domain Cascade] {model_name} (CPU) ---", flush=True)
-    max_tok = 60
+    max_tok = 200
 
     # 1. Baseline Generative Judge (System-2 CoT on all 24 items)
     t0 = time.perf_counter()
@@ -250,7 +250,7 @@ def eval_reasoning_tiers_cpu(backend: OllamaBackend, model_name: str) -> dict[st
             elif v_l1.status == DecisionStatus.FAILED:
                 casc_pass = False
             else:
-                jg = JudgeGate(rubric=rubric, backend=backend, model=model_name, max_tokens=60, think=False)
+                jg = JudgeGate(rubric=rubric, backend=backend, model=model_name, max_tokens=200, think=False)
                 casc_pass = jg.evaluate(it["candidate"]).passed
 
             if casc_pass == it["expected"]:

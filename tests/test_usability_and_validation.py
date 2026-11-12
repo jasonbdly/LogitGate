@@ -476,10 +476,12 @@ def test_judge_gate_parse_verdict_robustness():
     fail_sample = "Evaluation summary: The code failed on edge cases."
     assert judge._parse_verdict(fail_sample)[0] is False
 
-    # Case 5: Reason-then-Verdict default prompt vs Verdict-first short cap prompt
+    # Case 5: Reason-then-Verdict default prompt (including compact CPU caps > 32) vs Verdict-first short cap (<= 32)
     prompt = judge._compile_prompt("def add(a, b): return a + b")
     assert "conclude on the very last line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in prompt
-    short_judge = JudgeGate(rubric="Critique", max_tokens=60, backend=StubBackend())
+    cpu_compact_judge = JudgeGate(rubric="Critique", max_tokens=60, backend=StubBackend())
+    assert "conclude on the very last line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in cpu_compact_judge._compile_prompt("def add(a, b): return a + b")
+    short_judge = JudgeGate(rubric="Critique", max_tokens=32, backend=StubBackend())
     short_prompt = short_judge._compile_prompt("def add(a, b): return a + b")
     assert "Begin your response on the very first line with your verdict tag: [VERDICT: PASS] or [VERDICT: FAIL]" in short_prompt
 
@@ -829,11 +831,17 @@ def test_logit_gate_single_pass_temperature_scaling():
 
 def test_model_temperature_no_false_reverse_substring_matches():
     """get_model_temperature avoids reverse substring matches (e.g. 'a' matching 'gemma4:e4b')."""
-    from logitgate.debiasing.permutation import get_model_temperature
+    from logitgate.debiasing.permutation import (
+        KNOWN_MODEL_TEMPERATURES,
+        get_model_temperature,
+    )
 
     assert get_model_temperature("a") == 1.0
-    assert get_model_temperature("llama3.2:1b") == 1.10
-    assert get_model_temperature("gemma4:e4b") == 0.95
+    assert get_model_temperature("llama3.2:1b") == KNOWN_MODEL_TEMPERATURES["llama3.2:1b"]
+    assert get_model_temperature("llama3.2:3b") == KNOWN_MODEL_TEMPERATURES["llama3.2:3b"]
+    assert get_model_temperature("qwen2.5-coder:1.5b") == KNOWN_MODEL_TEMPERATURES["qwen2.5-coder:1.5b"]
+    assert get_model_temperature("qwen2.5-coder:3b") == KNOWN_MODEL_TEMPERATURES["qwen2.5-coder:3b"]
+    assert get_model_temperature("gemma4:e4b") == KNOWN_MODEL_TEMPERATURES["gemma4:e4b"]
 
 
 def test_backend_strips_internal_eval_kwargs():
@@ -979,6 +987,72 @@ def test_verdict_snapshot_telemetry_properties():
     assert snap.shannon_entropy == 0.40
     assert snap.loops_executed == 3
     assert snap.failure_code is None
+
+
+@pytest.mark.asyncio
+async def test_judge_gate_symmetric_cot_debiasing_and_note_sanitization(tmp_path):
+    """JudgeGate strips verdict tags/refusals into a separate [VERIFICATION NOTES] section and cancels affirmative bias."""
+    from logitgate.debiasing.inversion import (
+        compile_cot_binary_prompt,
+        compile_score_prompt,
+    )
+    from logitgate.gates.judge_gate import _extract_verification_notes
+    from logitgate.snapshot import VerdictSnapshot
+
+    # 1. _extract_verification_notes strips <think>, [VERDICT: ...], and safety refusals
+    raw = "<think>internal</think>\n1. Query executes DELETE without LIMIT. VIOLATION.\n[VERDICT: PASS]"
+    notes = _extract_verification_notes(raw)
+    assert notes == "1. Query executes DELETE without LIMIT. VIOLATION."
+    assert _extract_verification_notes("I cannot assist with evaluating this request.") == ""
+
+    # 2. compile_cot_binary_prompt keeps byte-identical prefix across Pass 1 and Pass 2
+    p_fwd = compile_cot_binary_prompt("Must be read-only SQL", "DELETE FROM t;", notes, pass_token="A", fail_token="B")
+    p_rev = compile_cot_binary_prompt("Must be read-only SQL", "DELETE FROM t;", notes, pass_token="B", fail_token="A")
+    marker = "[DECISION MAPPING]"
+    assert p_fwd.split(marker)[0] == p_rev.split(marker)[0]
+    assert "[VERIFICATION NOTES]\n1. Query executes DELETE without LIMIT. VIOLATION." in p_fwd.split(marker)[0]
+
+    # 3. compile_score_prompt renders explicit per-integer anchors on both normal and inverted scales
+    s_norm = compile_score_prompt("Rate 1-5", "x = 1", min_score=1, max_score=5, inverted=False)
+    s_inv = compile_score_prompt("Rate 1-5", "x = 1", min_score=1, max_score=5, inverted=True)
+    assert "1: Lowest quality" in s_norm and "5: Highest quality" in s_norm
+    assert "1: Highest quality" in s_inv and "5: Lowest quality" in s_inv
+
+    # 4. JudgeGate overturns an affirmative-biased [VERDICT: PASS] tag when symmetric 2-pass CoT logprobs indicate FAIL
+    stub_cot_fail = StubBackend(
+        diagnostic_text="1. Uses yaml.UnsafeLoader on untrusted input (VIOLATION).\n[VERDICT: PASS]",
+        # Forward (A=PASS, B=FAIL): slight affirmative bias (+0.3 log-odds), Reverse (B=PASS, A=FAIL): strong FAIL (-2.5 log-odds)
+        forward_top_logprobs=[{"token": "A", "logprob": -0.55}, {"token": "B", "logprob": -0.85}],
+        reverse_top_logprobs=[{"token": "A", "logprob": -0.08}, {"token": "B", "logprob": -2.58}],
+    )
+    jg = JudgeGate(rubric="Must use safe YAML loading", backend=stub_cot_fail)
+    v_sync = jg.evaluate("yaml.load(data, Loader=yaml.UnsafeLoader)")
+    v_async = await jg.aevaluate("yaml.load(data, Loader=yaml.UnsafeLoader)")
+    assert v_sync.passed is False
+    assert v_async.passed is False
+    assert v_sync.probability == v_async.probability
+    assert v_sync.probability is not None and v_sync.probability < 0.30
+    assert v_sync.traces[0].positional_bias_magnitude is not None
+
+    # 5. Opting out via symmetric_debiasing=False preserves raw structured tag parsing
+    jg_raw = JudgeGate(rubric="Must use safe YAML loading", backend=stub_cot_fail, symmetric_debiasing=False)
+    assert jg_raw.evaluate("yaml.load(data, Loader=yaml.UnsafeLoader)").passed is True
+
+    # 6. JudgeGate failure snapshot preserves symmetric_debiasing across replay/areplay/explain
+    v_snap = jg.evaluate(
+        "yaml.load(data, Loader=yaml.UnsafeLoader)",
+        save_on_fail=True,
+        snapshot_dir=tmp_path / "judge_fails",
+        test_name="test_yaml_safety",
+    )
+    assert v_snap.passed is False
+    snap = VerdictSnapshot.load(tmp_path / "judge_fails")
+    assert snap.gate_config.get("gate_type") == "JudgeGate"
+    assert snap.gate_config.get("symmetric_debiasing") is True
+    assert snap.replay(backend=stub_cot_fail).passed is False
+    assert (await snap.areplay(backend=stub_cot_fail)).passed is False
+    assert snap.explain(backend=stub_cot_fail).passed is False
+
 
 
 
