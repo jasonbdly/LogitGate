@@ -2,19 +2,23 @@ from logitgate.debiasing.inversion import (
     compile_batch_binary_prompt,
     compile_binary_prompt,
     compile_choice_prompt,
+    compile_cot_binary_prompt,
     compile_score_prompt,
 )
 from logitgate.debiasing.permutation import (
+    KNOWN_BINARY_MODEL_TEMPERATURES,
     KNOWN_MODEL_TEMPERATURES,
     CalibrationResult,
     DebiasedLogitResult,
     SurfaceTokenMap,
+    aauto_calibrate_backend,
     auto_calibrate_backend,
     combine_symmetric_log_odds,
     compute_shannon_entropy,
     compute_symmetric_debiased_verdict,
     fit_calibration,
     get_model_temperature,
+    has_known_or_cached_temperature,
     marginalize_pole_logprob,
 )
 from logitgate.debiasing.softmax import (
@@ -24,15 +28,18 @@ from logitgate.debiasing.softmax import (
 )
 
 __all__ = [
+    "KNOWN_BINARY_MODEL_TEMPERATURES",
     "KNOWN_MODEL_TEMPERATURES",
     "CalibrationResult",
     "DebiasedLogitResult",
     "SurfaceTokenMap",
+    "aauto_calibrate_backend",
     "auto_calibrate_backend",
     "combine_symmetric_log_odds",
     "compile_batch_binary_prompt",
     "compile_binary_prompt",
     "compile_choice_prompt",
+    "compile_cot_binary_prompt",
     "compile_score_prompt",
     "compute_binary_log_odds",
     "compute_normalized_probabilities",
@@ -41,5 +48,6 @@ __all__ = [
     "extract_token_logprob",
     "fit_calibration",
     "get_model_temperature",
+    "has_known_or_cached_temperature",
     "marginalize_pole_logprob",
 ]

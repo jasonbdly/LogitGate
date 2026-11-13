@@ -117,18 +117,21 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
 
         if backend is not None:
             from logitgate.backends.base import resolve_logit_backend
+            from logitgate.config import get_default_model
 
             self.backend = resolve_logit_backend(backend, model=model_name)
             self.model_name = (
                 model_name
                 or getattr(self.backend, "model", None)
                 or getattr(self.backend, "model_name", None)
+                or get_default_model()
                 or "default"
             )
         elif api_base is not None:
             from logitgate.backends.ollama import OllamaBackend
+            from logitgate.config import get_default_model
 
-            self.model_name = model_name or "qwen2.5:7b"
+            self.model_name = model_name or get_default_model() or "qwen2.5:7b"
             self.backend = OllamaBackend(base_url=api_base, model=self.model_name)
         else:
             import os
@@ -148,6 +151,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                     or getattr(self.backend, "model", None)
                     or getattr(self.backend, "model_name", None)
                     or get_default_model()
+                    or "default"
                 )
             else:
                 self.model_name = model_name or get_default_model() or "qwen2.5:7b"
@@ -240,7 +244,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                 int_probs = {int(k): float(val) for k, val in raw_tok_probs.items() if str(k).isdigit()}
                 max_tok_prob = max(int_probs.values()) if int_probs else 1.0
                 scores[q_id] = ScoreAnswer(
-                    score=v.score or float(min_s),
+                    score=v.score if v.score is not None else float(min_s),
                     probabilities=int_probs,
                     confidence=round(max_tok_prob, 4),
                 )
@@ -291,6 +295,27 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
         state: Any,
         questions: dict[str, Any],
     ) -> tuple[Any, float | None]:
+        from logitgate.backends.base import StubBackend
+        from logitgate.debiasing.permutation import has_known_or_cached_temperature
+        from logitgate.gates.logit_gate import (
+            _lazy_calibrate_async,
+            _should_lazy_auto_calibrate,
+        )
+
+        needs_precal = False
+        if self.logit_temperature == "auto":
+            inner = getattr(self.backend, "inner", self.backend)
+            needs_precal = (
+                isinstance(self.backend, LogitBackend)
+                and not isinstance(inner, StubBackend)
+                and bool(self.model_name and self.model_name.strip().lower() not in ("", "default", "stub"))
+                and not has_known_or_cached_temperature(self.model_name, binary=True)
+            )
+        elif self.logit_temperature is None:
+            needs_precal = _should_lazy_auto_calibrate(None, self.model_name, self.backend, binary=True)
+        if needs_precal:
+            await _lazy_calibrate_async(self.model_name, self.backend, binary=True)
+
         nouls: dict[str, Any] = {}
         choices: dict[str, Any] = {}
         scores: dict[str, Any] = {}
@@ -332,7 +357,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                 int_probs = {int(k): float(val) for k, val in raw_tok_probs.items() if str(k).isdigit()}
                 max_tok_prob = max(int_probs.values()) if int_probs else 1.0
                 scores[q_id] = ScoreAnswer(
-                    score=v.score or float(min_s),
+                    score=v.score if v.score is not None else float(min_s),
                     probabilities=int_probs,
                     confidence=round(max_tok_prob, 4),
                 )
@@ -448,6 +473,8 @@ class LogitGateMetric(BaseMetric):
         return self.score
 
     def is_successful(self) -> bool:
+        if self.success is not None:
+            return bool(self.success)
         if self.threshold is None or self.score is None:
             return False
         return self.score >= self.threshold

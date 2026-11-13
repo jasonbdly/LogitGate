@@ -29,6 +29,7 @@ from logitgate.cascade import Cascade
 from logitgate.config import (
     LogitGateDefaults,
     configure,
+    get_default_auto_calibrate,
     get_default_backend,
     get_default_model,
     get_default_save_failures,
@@ -39,19 +40,23 @@ from logitgate.debiasing.inversion import (
     compile_batch_binary_prompt,
     compile_binary_prompt,
     compile_choice_prompt,
+    compile_cot_binary_prompt,
     compile_score_prompt,
 )
 from logitgate.debiasing.permutation import (
+    KNOWN_BINARY_MODEL_TEMPERATURES,
     KNOWN_MODEL_TEMPERATURES,
     CalibrationResult,
     DebiasedLogitResult,
     SurfaceTokenMap,
+    aauto_calibrate_backend,
     auto_calibrate_backend,
     combine_symmetric_log_odds,
     compute_shannon_entropy,
     compute_symmetric_debiased_verdict,
     fit_calibration,
     get_model_temperature,
+    has_known_or_cached_temperature,
     marginalize_pole_logprob,
 )
 from logitgate.debiasing.softmax import (
@@ -124,6 +129,7 @@ def __dir__() -> list[str]:
 __version__ = "0.4.1"
 
 __all__ = [
+    "KNOWN_BINARY_MODEL_TEMPERATURES",
     "KNOWN_MODEL_TEMPERATURES",
     "ASTFailureCode",
     "ASTGate",
@@ -167,6 +173,7 @@ __all__ = [
     "VRAMWatermarkStatus",
     "Verdict",
     "VerdictSnapshot",
+    "aauto_calibrate_backend",
     "as_async_conditional_edge",
     "as_conditional_edge",
     "auto_calibrate_backend",
@@ -176,6 +183,7 @@ __all__ = [
     "compile_batch_binary_prompt",
     "compile_binary_prompt",
     "compile_choice_prompt",
+    "compile_cot_binary_prompt",
     "compile_score_prompt",
     "compute_binary_log_odds",
     "compute_normalized_probabilities",
@@ -185,11 +193,13 @@ __all__ = [
     "execute_adaptive_recurrent_loops",
     "extract_token_logprob",
     "fit_calibration",
+    "get_default_auto_calibrate",
     "get_default_backend",
     "get_default_model",
     "get_default_save_failures",
     "get_default_snapshot_dir",
     "get_model_temperature",
+    "has_known_or_cached_temperature",
     "infer_backend_spec",
     "load_calibration_dataset",
     "marginalize_pole_logprob",

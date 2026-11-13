@@ -21,17 +21,17 @@ Empirical measurements gathered on local inference across 5 distinct model archi
 
 | Model Configuration | Model Family | Compute Device | Single-Pass Latency ($N=5$) | 2-Pass Symmetric Latency ($N=5$) | 4-Rubric Batch Total ($N=5$) | Per-Rubric Batch Latency ($N=5$) | 24-Item Multi-Domain Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | GPU (RTX 4070, 1.1 GB) | **16.0 ± 3.9 ms** | **33.6 ± 1.9 ms** | **194.7 ± 14.6 ms** | **48.7 ± 3.7 ms** | **16/24 (66.7%)** |
-| **`llama3.2:1b`** | 1B General Model | GPU (RTX 4070, 1.5 GB) | **15.7 ± 3.5 ms** | **31.7 ± 1.2 ms** | **150.9 ± 6.2 ms** | **37.7 ± 1.6 ms** | **16/24 (66.7%)** |
-| **`qwen2.5-coder:3b`** | 3B Code Model | GPU (RTX 4070, 2.1 GB) | **19.9 ± 5.2 ms** | **45.8 ± 2.7 ms** | **241.0 ± 12.2 ms** | **60.3 ± 3.1 ms** | **20/24 (83.3%)** |
-| **`llama3.2:3b`** | 3B General Model | GPU (RTX 4070, 2.3 GB) | **19.8 ± 3.8 ms** | **40.9 ± 2.8 ms** | **194.6 ± 4.8 ms** | **48.7 ± 1.2 ms** | **20/24 (83.3%)** |
-| **`gemma4:e4b`** | 4B General Model | GPU (RTX 4070, 3.2 GB) | **43.0 ± 10.9 ms** | **101.3 ± 7.3 ms** | **461.2 ± 6.5 ms** | **115.3 ± 1.6 ms** | **24/24 (100.0%)** |
+| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | GPU (RTX 4070, 1.1 GB) | **17.4 ± 4.2 ms** | **36.5 ± 1.5 ms** | **200.4 ± 12.3 ms** | **50.1 ± 3.1 ms** | **17/24 (70.8%)** |
+| **`llama3.2:1b`** | 1B General Model | GPU (RTX 4070, 1.5 GB) | **15.6 ± 4.2 ms** | **37.0 ± 7.7 ms** | **161.4 ± 10.4 ms** | **40.3 ± 2.6 ms** | **17/24 (70.8% Judge)** |
+| **`qwen2.5-coder:3b`** | 3B Code Model | GPU (RTX 4070, 2.1 GB) | **21.4 ± 5.4 ms** | **49.3 ± 1.7 ms** | **254.6 ± 4.4 ms** | **63.7 ± 1.1 ms** | **22/24 (91.7%)** |
+| **`llama3.2:3b`** | 3B General Model | GPU (RTX 4070, 2.3 GB) | **19.8 ± 3.8 ms** | **45.7 ± 6.1 ms** | **216.5 ± 5.8 ms** | **54.1 ± 1.4 ms** | **20/24 (83.3%)** |
+| **`gemma4:e4b`** | 4B General Model | GPU (RTX 4070, 3.2 GB) | **41.7 ± 6.8 ms** | **110.5 ± 7.2 ms** | **488.7 ± 6.6 ms** | **122.2 ± 1.6 ms** | **24/24 (100.0%)** |
 | **`qwen2.5:14b`** | 14B General Model | GPU (RTX 4070) | **36.8 ± 6.5 ms** | **90.0 ± 4.1 ms** | **450.1 ± 18.8 ms** | **112.5 ± 4.7 ms** | **23/24 (95.8%)** |
 | **`qwen2.5-coder:14b`** | 14B Code Model | GPU (RTX 4070) | **36.5 ± 6.3 ms** | **90.9 ± 3.3 ms** | **447.4 ± 3.9 ms** | **111.8 ± 1.0 ms** | **23/24 (95.8%)** |
-| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | Pure CPU (0 GPU, 1.1 GB) | **40.8 ± 2.6 ms** | **292.2 ± 47.2 ms** | **1,629.1 ± 41.7 ms** | **407.3 ± 10.4 ms** | **15/24 (62.5%)** |
-| **`llama3.2:1b`** | 1B General Model | Pure CPU (0 GPU, 1.5 GB) | **44.0 ± 0.9 ms** | **394.5 ± 67.5 ms** | **2,087.2 ± 106.4 ms** | **521.8 ± 26.6 ms** | **16/24 (66.7%)** |
-| **`qwen2.5-coder:3b`** | 3B Code Model | Pure CPU (0 GPU, 2.1 GB) | **60.3 ± 2.1 ms** | **543.7 ± 91.0 ms** | **3,122.2 ± 126.0 ms** | **780.5 ± 31.5 ms** | **19/24 (79.2%)** |
-| **`llama3.2:3b`** | 3B General Model | Pure CPU (0 GPU, 2.3 GB) | **66.1 ± 1.7 ms** | **551.1 ± 89.8 ms** | **3,194.4 ± 141.0 ms** | **798.6 ± 35.2 ms** | **21/24 (87.5%)** |
+| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | Pure CPU (0 GPU, 1.1 GB) | **41.7 ± 1.8 ms** | **304.0 ± 52.1 ms** | **1,694.1 ± 89.6 ms** | **423.5 ± 22.4 ms** | **18/24 (75.0%)** |
+| **`llama3.2:1b`** | 1B General Model | Pure CPU (0 GPU, 1.5 GB) | **47.0 ± 1.0 ms** | **392.3 ± 52.0 ms** | **2,153.1 ± 29.9 ms** | **538.3 ± 7.5 ms** | **16/24 (66.7% Judge)** |
+| **`qwen2.5-coder:3b`** | 3B Code Model | Pure CPU (0 GPU, 2.1 GB) | **64.4 ± 1.0 ms** | **566.8 ± 96.1 ms** | **3,209.9 ± 134.7 ms** | **802.5 ± 33.7 ms** | **22/24 (91.7%)** |
+| **`llama3.2:3b`** | 3B General Model | Pure CPU (0 GPU, 2.3 GB) | **69.0 ± 4.8 ms** | **587.1 ± 93.4 ms** | **3,307.9 ± 123.6 ms** | **827.0 ± 30.9 ms** | **22/24 (91.7%)** |
 | *`gemma4:e4b` (CPU)* | *4B General Model* | *Pure CPU (0 GPU, 9.4 GB)* | *166.9 ± 2.5 ms* | *2,413.8 ± 551.7 ms* | *11,031.3 ± 43.2 ms* | *2,757.8 ± 10.8 ms* | *23/24 (95.8%)* |
 
 ### Benchmark Analysis & Insights:
@@ -56,12 +56,27 @@ Evaluated across **24 items spanning 4 domains** ([`benchmarks/data/multi_domain
 
 | Model Configuration | Baseline Judge Time | Cascade Time (`on_ambiguous_or_fail`) | Cascade Time (`on_ambiguous_only`) | Speedup (`on_ambiguous_only`) | CoT Tokens Saved | Baseline Accuracy | Cascade Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 37,203.5 ms | 22,658.7 ms | **8,054.6 ms** | **4.6x** | 2,696 | 24/24 (100.0%) | **24/24 (100.0%)** |
+| **`gemma4:e4b` (GPU)** | 39,147.1 ms | 22,658.7 ms | **8,510.3 ms** | **4.6x** | 2,696 | 24/24 (100.0%) | **24/24 (100.0%)** |
 | **`gemma4:e4b` (Pure CPU)** | 513,598.1 ms | 344,147.5 ms | **142,086.2 ms** | **3.6x** | 2,916 | 23/24 (95.8%) | **23/24 (95.8%)** |
-| **`llama3.2:3b` (GPU)** | 23,417.8 ms | 19,210.4 ms | **13,742.5 ms** | **1.7x** | 1,412 | 19/24 (79.2%) | **20/24 (83.3%)** |
-| **`llama3.2:3b` (Pure CPU)** | 286,166.0 ms | 212,480.0 ms | **115,683.6 ms** | **2.5x** | 1,768 | 19/24 (79.2%) | **21/24 (87.5%)** |
+| **`qwen2.5-coder:3b` (GPU)** | 25,994.8 ms | - | **5,958.5 ms** | **4.4x** | 2,993 | 18/24 (75.0%) | **22/24 (91.7%)** |
+| **`qwen2.5-coder:3b` (Pure CPU)** | 280,087.4 ms | - | **70,928.0 ms** | **4.0x** | 2,316 | 17/24 (70.8%) | **22/24 (91.7%)** |
+| **`llama3.2:3b` (GPU)** | 24,465.5 ms | 19,210.4 ms | **15,541.7 ms** | **1.6x** | 1,358 | 19/24 (79.2%) | **20/24 (83.3%)** |
+| **`llama3.2:3b` (Pure CPU)** | 308,723.9 ms | 212,480.0 ms | **123,454.6 ms** | **2.5x** | 1,833 | 18/24 (75.0%) | **22/24 (91.7%)** |
+| **`qwen2.5-coder:1.5b` (Pure CPU)** | 140,101.9 ms | - | **95,787.5 ms** | **1.5x** | 466 | 15/24 (62.5%) | **18/24 (75.0%)** |
 | **`qwen2.5:14b` (GPU)** | 138,858.1 ms | 57,625.2 ms | **8,160.3 ms** | **17.0x** | 2,566 | 23/24 (95.8%) | **23/24 (95.8%)** |
 | **`qwen2.5-coder:14b` (GPU)** | 133,724.5 ms | 65,616.0 ms | **11,786.2 ms** | **11.3x** | 2,578 | 24/24 (100.0%) | **23/24 (95.8%)** |
+
+#### Heterogeneous Model Cascades (`--judge-backend` / `--judge-model`)
+
+Users with constrained VRAM or mixed local/remote infrastructure can pair a compact `1.5B-3B` model at Layer 1 (`LogitGate`) with a stronger `4B-26B` model at Layer 2 (`JudgeGate`), evaluated directly via `logitgate benchmark --backend ... --judge-backend ... --judge-model ...` on [`benchmarks/data/multi_domain_24.json`](../benchmarks/data/multi_domain_24.json):
+
+| Cascade Topology (`Layer 1 >> Layer 2`) | Hardware Layout | `JudgeGate` p50 / Mean | Cascade p50 / Mean | Fast-Path Rate | Token Reduction | Cascade Accuracy |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b >> gemma4:e4b`** | Co-resident single 12 GB GPU (`5.30 GB` combined VRAM) | 1,520.4 ms / 1,628.3 ms | **62.9 ms / 549.9 ms** | **71%** | **69%** | **23/24 (95.8%)** |
+| **`llama3.2:3b >> gemma4:26b`** | Local `3B` GPU endpoint $\to$ `26B` MoE Judge endpoint | 882.8 ms / 885.7 ms | **733.1 ms / 587.9 ms** | **46%** | **43%** | **23/24 (95.8%)** |
+| **`qwen2.5-coder:1.5b >> gemma4:26b`** | Local `1.5B` GPU endpoint $\to$ `26B` MoE Judge endpoint | 882.8 ms / 885.7 ms | **913.3 ms / 782.0 ms** | **25%** | **23%** | **23/24 (95.8%)** |
+
+- **Single-GPU Co-Residency Rule**: On a single GPU, a heterogeneous cascade delivers its **24.2x median (`62.9 ms` vs `1,520.4 ms`) and 3.0x mean speedup** only when both models stay resident in VRAM simultaneously (`2.09 GB + 3.21 GB = 5.30 GB < 12 GB`, with `OLLAMA_MAX_LOADED_MODELS >= 2`). If `VRAM(L1) + VRAM(L2)` exceeds card memory, alternating Layer-1 and Layer-2 calls triggers per-item GGUF weight reloads that erase the fast-path savings; in that regime, either run a homogeneous `4B` cascade or point `JudgeGate` at a remote API/LAN server.
 
 ---
 
@@ -86,20 +101,20 @@ Raw benchmark outputs are stored in [`benchmarks/cpu_results.json`](../benchmark
 
 | Model Configuration | Model Family | Host RAM | Single-Pass Triage ($N=5$) | 2-Pass Symmetric ($N=5$) | 4-Rubric Batch Total ($N=5$) | Suite 1 Cascade Acc | Suite 2 Reasoning (32 Items) | `ChoiceGate` Routing | `ScoreGate` Monotonicity |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | **1.11 GB** | **40.8 ± 2.6 ms** | **292.2 ± 47.2 ms** | **1,629.1 ± 41.7 ms** | 15/24 (62.5%, 1.3x) | 18/32 (56.2%) | **6/6 (100.0%)** | 6/8 (75.0%) |
-| **`llama3.2:1b`** | 1B General Model | **1.45 GB** | **44.0 ± 0.9 ms** | **394.5 ± 67.5 ms** | **2,087.2 ± 106.4 ms** | 16/24 (66.7%, 1.3x) | 20/32 (62.5%) | 4/6 (66.7%) | 4/8 (50.0%) |
-| **`qwen2.5-coder:3b`** | 3B Code Model | **2.09 GB** | **60.3 ± 2.1 ms** | **543.7 ± 91.0 ms** | **3,122.2 ± 126.0 ms** | 19/24 (79.2%, 2.0x) | 20/32 (62.5%) | **6/6 (100.0%)** | 7/8 (87.5%) |
-| **`llama3.2:3b`** | 3B General Model | **2.34 GB** | **66.1 ± 1.7 ms** | **551.1 ± 89.8 ms** | **3,194.4 ± 141.0 ms** | **21/24 (87.5%, 2.5x)** | **24/32 (75.0%)** | **6/6 (100.0%)** | **8/8 (100.0%)** |
+| **`qwen2.5-coder:1.5b`** | 1.5B Code Model | **1.11 GB** | **41.7 ± 1.8 ms** | **304.0 ± 52.1 ms** | **1,694.1 ± 89.6 ms** | 18/24 (75.0%, 1.5x) | 19/32 (59.4%) | **6/6 (100.0%)** | 6/8 (75.0%) |
+| **`llama3.2:1b`** | 1B General Model | **1.45 GB** | **47.0 ± 1.0 ms** | **392.3 ± 52.0 ms** | **2,153.1 ± 29.9 ms** | 15/24 (62.5%, 1.3x) | 18/32 (56.2%) | 4/6 (66.7%) | 4/8 (50.0%) |
+| **`qwen2.5-coder:3b`** | 3B Code Model | **2.09 GB** | **64.4 ± 1.0 ms** | **566.8 ± 96.1 ms** | **3,209.9 ± 134.7 ms** | **22/24 (91.7%, 4.0x)** | 21/32 (65.6%) | **6/6 (100.0%)** | 7/8 (87.5%) |
+| **`llama3.2:3b`** | 3B General Model | **2.34 GB** | **69.0 ± 4.8 ms** | **587.1 ± 93.4 ms** | **3,307.9 ± 123.6 ms** | **22/24 (91.7%, 2.5x)** | **24/32 (75.0%)** | **6/6 (100.0%)** | **8/8 (100.0%)** |
 | *`gemma4:e4b` (CPU)* | *4B General Model* | *9.41 GB* | *166.9 ± 2.5 ms* | *2,413.8 ± 551.7 ms* | *11,031.3 ± 43.2 ms* | *23/24 (95.8%, 3.6x)* | *31/32 (96.9%)* | *6/6 (100.0%)* | *8/8 (100.0%)* |
 
 ##### Key Insights for CPU-Bound Automated Testing:
-1. **3B CPU Sweet Spot (`llama3.2:3b`)**:
-   - Reduces RAM consumption by **75%** (from 9.41 GB down to 2.34 GB), fitting inside standard 4 GB/7 GB GitHub Actions free runners.
-   - Runs 2-pass symmetric debiased gating in **551.1 ms** (**4.4x faster** than `gemma4:e4b` on CPU at 2.41 s) and resolves `14/24` (`58.3%`) of Suite 1 items at Layers 0-1, reaching **21/24 (87.5%)** cascade accuracy with a **2.5x** wall-time speedup (`115.7s` vs `286.2s` standalone judge).
-   - Reaches **24/32 (75.0%)** on the 32-item reasoning suite (`8/8` on Tier A), **6/6 (100.0%)** `ChoiceGate` routing (`81.2%` on the 32-item adversarial suite), and **8/8 (100.0%)** `ScoreGate` pairwise rank monotonicity ($H=3.63 > M=2.82 > L=2.10$).
+1. **3B CPU Sweet Spot (`qwen2.5-coder:3b` & `llama3.2:3b` at 91.7% Cascade Accuracy)**:
+   - Both `3B` models cut host RAM by **75%-78%** (from `9.41 GB` down to `2.09-2.34 GB`), fitting comfortably inside standard 4 GB/7 GB GitHub Actions free runners.
+   - With task-separated binary temperature calibration ($T_{\text{bin}} = 0.40$ on `qwen2.5-coder:3b`), `qwen2.5-coder:3b` resolves `19/24` (`79.2%`) of Suite 1 items at Layers 0-1 in `566.8 ms` per 2-pass check, completing the 24-item CPU suite in **70.9 s** (**3.95x faster** than its `280.1 s` CPU Judge baseline and **2.0x faster** in wall-clock time than `gemma4:e4b` CPU at `142.1 s`) while reaching **22/24 (91.7%)** accuracy.
+   - `llama3.2:3b` also reaches **22/24 (91.7%)** on Suite 1 (`2.5x` speedup) via Layer-1 + Layer-2 log-odds evidence fusion, and leads among 3B models on multi-hop reasoning (**24/32 = 75.0%**) and continuous scoring (**8/8 = 100.0%** pairwise monotonicity, Spearman $\rho = 0.8097$).
 2. **Low-Memory Micro-Gate (`qwen2.5-coder:1.5b` & `llama3.2:1b`)**:
-   - **1.11 GB - 1.45 GB RAM footprint**, suited for pre-commit git hooks and constrained Docker test containers.
-   - Executes single-pass triage in **40.8-44.0 ms** and 2-pass debiasing in **292.2-394.5 ms** on pure CPU, reaching **75.0%** accuracy on the hardened 16-item `ChoiceGate` routing suite.
+   - **1.11 GB - 1.45 GB RAM footprint**, suited for pre-commit git hooks and constrained Docker test containers, or as a fast Layer-1 filter in front of a remote Layer-2 judge (`23/24 = 95.8%`).
+   - Calibrating `qwen2.5-coder:1.5b` for zero-shot `A/B` symbol-binding attenuation lifts its pure-CPU Suite 1 cascade accuracy from `62.5%` to **18/24 (75.0%, 1.46x speedup)** while executing single-pass triage in **41.7 ms** and 2-pass debiasing in **304.0 ms**.
 3. **Multi-Rubric Batching on CPU**:
    - On CPU, running 4 rubrics via `evaluate_batch` takes **1.63 s** on `qwen2.5-coder:1.5b` and **3.19 s** on `llama3.2:3b` (vs **11.03 s** on `gemma4:e4b`), avoiding the CPU memory bus saturation of redundant prefill passes.
 
@@ -143,8 +158,9 @@ Evaluated across the 24-item multi-domain benchmark suite ([`benchmarks/data/mul
 | :--- | :--- | :--- | :--- | :--- |
 | **`gemma4:e4b` (GPU)** | 2/24 (8.3%) | 19/24 (79.2%) | 3/24 (12.5%) | **21/24 (87.5%)** |
 | **`gemma4:e4b` (Pure CPU, 0 GPU)** | 2/24 (8.3%) | 19/24 (79.2%) | 3/24 (12.5%) | **21/24 (87.5%)** |
+| **`qwen2.5-coder:3b` (GPU / Pure CPU)** | 2/24 (8.3%) | 17/24 (70.8%) | 5/24 (20.8%) | **19/24 (79.2%)** |
 | **`llama3.2:3b` (Pure CPU, 0 GPU)** | 2/24 (8.3%) | 12/24 (50.0%) | 10/24 (41.7%) | **14/24 (58.3%)** |
-| **`qwen2.5-coder:3b` (Pure CPU, 0 GPU)** | 2/24 (8.3%) | 8/24 (33.3%) | 14/24 (58.3%) | **10/24 (41.7%)** |
+| **`qwen2.5-coder:1.5b` (GPU)** | 2/24 (8.3%) | 7/24 (29.2%) | 15/24 (62.5%) | **9/24 (37.5%)** |
 | **`qwen2.5:14b` (GPU)** | 2/24 (8.3%) | 22/24 (91.7%) | 0/24 (0.0%) | **24/24 (100.0%)** |
 | **`qwen2.5-coder:14b` (GPU)** | 2/24 (8.3%) | 21/24 (87.5%) | 1/24 (4.2%) | **23/24 (95.8%)** |
 
@@ -323,8 +339,9 @@ In traditional LLM-as-a-judge frameworks, evaluators often ask for a verdict bef
 
 `JudgeGate` handles Layer 2 verdict extraction in four ordered stages:
 1. **Reason-Then-Verdict Prompting**: On standard calls (`max_tokens > 32`), `JudgeGate` anchors Line 1 with `- ` bullet points quoting relevant evidence and checking every requirement or calculation before emitting `[VERDICT: PASS]` or `[VERDICT: FAIL]` on the concluding line. Only for ultra-short emergency caps (`max_tokens <= 32`) does it switch to Verdict-First on Line 1 so the tag is not truncated.
-2. **Symmetric 2-Pass Post-Critique Logit Adjudication**: When backed by a `LogitBackend` with `symmetric_debiasing=True` (default), `JudgeGate` strips any `<think>` blocks, `[VERDICT: ...]` tags, and safety-refusal text into `[VERIFICATION NOTES]` and performs a 2-pass `A/B` log-odds read over `[EVALUATION RUBRIC] + [CANDIDATE ARTIFACT] + [VERIFICATION NOTES]`, cancelling affirmative bias on `1B-3B` models while reusing the shared prompt prefix.
-3. **Structured Tag & Self-Healing Logit Probe**: If `symmetric_debiasing=False` (or logprobs are unavailable), `JudgeGate` parses the concluding `[VERDICT: ...]` / JSON field, or runs a debiased `LogitGate` probe on its own generated critique text before falling back to heuristics:
+2. **Symmetric 2-Pass Post-Critique Logit Adjudication & Cascade Evidence Fusion**: When backed by a `LogitBackend` with `symmetric_debiasing=True` (default), `JudgeGate` strips any `<think>` blocks, `[VERDICT: ...]` tags, and safety-refusal text into `[VERIFICATION NOTES]` and performs a calibrated 2-pass `A/B` log-odds read over `[EVALUATION RUBRIC] + [CANDIDATE ARTIFACT] + [VERIFICATION NOTES]`, cancelling affirmative bias on `1B-3B` models while reusing the shared prompt prefix. Inside `Cascade(..., fuse_logits=True, prior_weight=0.30)`, when Layer 1 has permutation-consistent signal ($|z_1| \ge 1.0$, same nonzero sign on $f_1, r_1$) and Layer 2 produces an uncertain split permutation tie ($|z_2| < 1.0$, $f_2, r_2$ disagree or hit $0$), the cascade fuses $z_{\text{fused}} = (1 - w) z_2 + w \cdot \operatorname{clamp}(z_1, -2, 2)$ rather than discarding the Layer-1 log-odds read.
+3. **Dynamic Bring-Your-Own (BYO) Model Auto-Calibration**: Different model families span two orders of magnitude in raw first-token log-odds scale ($T_{\text{bin}} \approx 0.06-0.40$ on compact Qwen Coder models with zero-shot `A/B` symbol-binding attenuation, $T \approx 1.0$ on Llama 3.2 3B, and $T \approx 4.0$ on Gemma 4). When `LOGITGATE_AUTO_CALIBRATE=1` (default), any unrecognized BYO model lazily runs a one-time micro-calibration pass on its first live `.evaluate()` / `.aevaluate()` call and caches a task-separated profile (`binary_temperature`, `multiclass_temperature`, `probe_auroc`, `median_abs_log_odds`) to `~/.cache/logitgate/calibration.json`. Low-AUROC models ($\text{AUROC} < 0.70$) are automatically clamped to $T \ge 1.0$ so uncertain items escalate to `JudgeGate` instead of false-shortcutting at Layer 1.
+4. **Structured Tag & Self-Healing Logit Probe**: If `symmetric_debiasing=False` (or logprobs are unavailable), `JudgeGate` parses the concluding `[VERDICT: ...]` / JSON field, or runs a debiased `LogitGate` probe on its own generated critique text before falling back to heuristics:
    ```python
 # Inside JudgeGate._probe:
 probe = LogitGate(
@@ -334,9 +351,9 @@ probe = LogitGate(
     symmetric_debiasing=True,
     save_on_fail=False,
 )
-is_pass = probe.evaluate(critique_text).probability >= 0.5
+is_pass = (probe.evaluate(critique_text).probability or 0.0) > 0.5
    ```
-4. **Negation-Safe Line Fallback**: If the backend only implements `GenerativeBackend`, it falls back to negation-safe parsing of concluding lines.
+5. **Negation-Safe Line Fallback**: If the backend only implements `GenerativeBackend`, it falls back to negation-safe parsing of concluding lines.
 
 ---
 

@@ -45,6 +45,7 @@ from dataset import (
 
 from logitgate import ASTGate, ChoiceGate, JudgeGate, LogitGate, ScoreGate
 from logitgate.backends.ollama import OllamaBackend
+from logitgate.cascade import fuse_escalated_verdict
 from logitgate.models import DecisionStatus
 
 
@@ -133,8 +134,12 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
                     think=think_mode,
                 )
                 v_j = jg.evaluate(item["candidate"])
-                # Monotonic fail safety: if L1 was decisively FAILED (p <= 0.20), keep fail
-                casc_pass = False if v_l1.status == DecisionStatus.FAILED else v_j.passed
+                # Monotonic fail safety: if L1 was decisively FAILED (p <= 0.20), keep fail;
+                # if L1 was AMBIGUOUS, apply Cascade's calibrated prior tie-breaker fusion.
+                if v_l1.status == DecisionStatus.FAILED:
+                    casc_pass = False
+                else:
+                    casc_pass, _, _, _ = fuse_escalated_verdict(v_l1, v_j)
                 layer_used = "JudgeGate"
 
             if casc_pass == item["expected"]:
@@ -220,7 +225,8 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
                     max_tokens=max_tok,
                     think=think_mode,
                 )
-                rule_passes.append(jg.evaluate(item["candidate"]).passed)
+                fused_atomic_pass, _, _, _ = fuse_escalated_verdict(v, jg.evaluate(item["candidate"]))
+                rule_passes.append(fused_atomic_pass)
         casc_pass = all(rule_passes)
         if casc_pass == item["expected"]:
             casc_b_atom_correct += 1
@@ -361,7 +367,8 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
             time_ambig_only_ms += dt_l0_l1 + dt_j
             tokens_ambig_or_fail += v_j.total_tokens_generated
             tokens_ambig_only += v_j.total_tokens_generated
-            if v_j.passed == item["expected"]:
+            fused_pass, _, _, _ = fuse_escalated_verdict(v_l1, v_j)
+            if fused_pass == item["expected"]:
                 correct_ambig_or_fail += 1
                 correct_ambig_only += 1
 

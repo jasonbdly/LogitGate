@@ -55,7 +55,7 @@ def check(
         if ast_check is True:
             return ASTGate(syntax=True, normalize=normalize) >> gate
         if isinstance(ast_check, ASTGate):
-            if normalize and not ast_check.normalize:
+            if normalize and ast_check.normalize != normalize:
                 cloned = ASTGate(
                     syntax=ast_check.syntax,
                     forbidden_imports=ast_check.forbidden_imports,
@@ -112,7 +112,9 @@ def check(
         state: dict[Any, BaseGate] = {}
 
         def gate() -> BaseGate:
-            from logitgate.config import LogitGateDefaults
+            import os
+
+            from logitgate.config import LogitGateDefaults, is_temperature_configured
 
             cfg_key = (
                 LogitGateDefaults.backend if backend is None else None,
@@ -120,6 +122,9 @@ def check(
                 LogitGateDefaults.pass_threshold if threshold is None else None,
                 LogitGateDefaults.fail_threshold,
                 LogitGateDefaults.logit_temperature,
+                LogitGateDefaults.auto_calibrate,
+                is_temperature_configured(),
+                os.environ.get("LOGITGATE_CACHE_DIR"),
                 LogitGateDefaults.num_ctx,
             )
             if cfg_key not in state:

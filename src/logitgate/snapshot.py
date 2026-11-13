@@ -40,12 +40,19 @@ def _atomic_write_text(path: Path, content: str) -> None:
     """Writes text to a temporary file in the same directory and atomically replaces `path`."""
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp_path = Path(tmp_name)
+    fd_owned = True
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd_owned = False
             handle.write(content)
             handle.flush()
         os.replace(tmp_path, path)
     except BaseException:
+        if fd_owned:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
@@ -66,12 +73,11 @@ def reset_snapshot_notices() -> None:
         _NOTIFIED_SNAPSHOT_SAVED = False
         _NOTIFIED_SNAPSHOT_HINT = False
         _SESSION_SNAPSHOTS.clear()
-    try:
-        from logitgate.integrations.pytest_plugin import _CHECK_SNAPSHOT_PATHS
-
-        _CHECK_SNAPSHOT_PATHS.clear()
-    except ImportError:
-        pass
+    plugin_mod = sys.modules.get("logitgate.integrations.pytest_plugin")
+    if plugin_mod is not None:
+        check_paths = getattr(plugin_mod, "_CHECK_SNAPSHOT_PATHS", None)
+        if isinstance(check_paths, list):
+            check_paths.clear()
 
 
 def _should_log_console_notice() -> bool:
@@ -326,7 +332,10 @@ class VerdictSnapshot(BaseModel):
             raise FileNotFoundError(f"Snapshot path '{path}' does not exist")
 
         content = target.read_text(encoding="utf-8")
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except RecursionError as e:
+            raise ValueError(f"Malformed snapshot JSON (maximum nesting depth exceeded): {e}") from e
         return cls.model_validate(data)
 
     @staticmethod
@@ -334,14 +343,23 @@ class VerdictSnapshot(BaseModel):
         backend: str | LogitBackend | GenerativeBackend | None,
         model: str | None,
         gate_config: dict[str, Any],
+        *,
+        prefer_judge: bool = False,
     ) -> tuple[Any, str | None]:
-        cfg_backend = gate_config.get("backend")
+        has_judge_cfg = prefer_judge and (
+            gate_config.get("judge_backend") is not None or gate_config.get("judge_model") is not None
+        )
+        cfg_backend = (
+            gate_config.get("judge_backend")
+            if (prefer_judge and gate_config.get("judge_backend") is not None)
+            else gate_config.get("backend")
+        )
+        cfg_model = gate_config.get("judge_model") if has_judge_cfg else gate_config.get("model")
         if backend is not None:
             effective_backend: Any = backend
-        elif (
-            model is not None
-            and isinstance(cfg_backend, str)
-            and cfg_backend.startswith("stub://")
+        elif isinstance(cfg_backend, str) and (
+            cfg_backend.startswith("custom://")
+            or (model is not None and cfg_backend.startswith("stub://"))
         ):
             effective_backend = None
         else:
@@ -349,7 +367,7 @@ class VerdictSnapshot(BaseModel):
         effective_model = (
             model
             if model is not None
-            else (gate_config.get("model") if backend is None else None)
+            else (cfg_model if backend is None else None)
         )
         return effective_backend, effective_model
 
@@ -377,6 +395,7 @@ class VerdictSnapshot(BaseModel):
                 "max_tokens",
                 "think",
                 "symmetric_debiasing",
+                "logit_temperature",
                 "name",
             }
             judge_init = {k: v for k, v in gate_kwargs.items() if k in judge_allowed}
@@ -417,12 +436,40 @@ class VerdictSnapshot(BaseModel):
                 if owns_backend:
                     score_gate.backend.close()
 
+        if gate_kwargs.get("gate_type") == "ChoiceGate":
+            from logitgate.gates.logit_gate import ChoiceGate
+
+            options = gate_kwargs.get("options")
+            if not isinstance(options, dict) or len(options) < 2:
+                raise ValueError("ChoiceGate snapshot is missing valid 'options' metadata for replay")
+            choice_allowed = {
+                "symmetric_debiasing",
+                "permutation_mode",
+                "query_first",
+                "logit_temperature",
+                "name",
+            }
+            choice_init = {k: v for k, v in gate_kwargs.items() if k in choice_allowed}
+            choice_gate = ChoiceGate(
+                question=gate_kwargs.get("question") or self.rubric,
+                options=options,
+                backend=effective_backend,
+                model=effective_model,
+                **choice_init,
+            )
+            try:
+                return choice_gate.evaluate(self.candidate, save_on_fail=False)
+            finally:
+                if owns_backend:
+                    choice_gate.backend.close()
+
         allowed_keys = {
             "pass_threshold",
             "fail_threshold",
             "symmetric_debiasing",
             "query_first",
             "logit_temperature",
+            "max_positional_bias",
             "preset",
             "name",
         }
@@ -477,6 +524,7 @@ class VerdictSnapshot(BaseModel):
                 "max_tokens",
                 "think",
                 "symmetric_debiasing",
+                "logit_temperature",
                 "name",
             }
             judge_init = {k: v for k, v in gate_kwargs.items() if k in judge_allowed}
@@ -517,12 +565,40 @@ class VerdictSnapshot(BaseModel):
                 if owns_backend:
                     await score_gate.backend.aclose()
 
+        if gate_kwargs.get("gate_type") == "ChoiceGate":
+            from logitgate.gates.logit_gate import ChoiceGate
+
+            options = gate_kwargs.get("options")
+            if not isinstance(options, dict) or len(options) < 2:
+                raise ValueError("ChoiceGate snapshot is missing valid 'options' metadata for replay")
+            choice_allowed = {
+                "symmetric_debiasing",
+                "permutation_mode",
+                "query_first",
+                "logit_temperature",
+                "name",
+            }
+            choice_init = {k: v for k, v in gate_kwargs.items() if k in choice_allowed}
+            choice_gate = ChoiceGate(
+                question=gate_kwargs.get("question") or self.rubric,
+                options=options,
+                backend=effective_backend,
+                model=effective_model,
+                **choice_init,
+            )
+            try:
+                return await choice_gate.aevaluate(self.candidate, save_on_fail=False)
+            finally:
+                if owns_backend:
+                    await choice_gate.backend.aclose()
+
         allowed_keys = {
             "pass_threshold",
             "fail_threshold",
             "symmetric_debiasing",
             "query_first",
             "logit_temperature",
+            "max_positional_bias",
             "preset",
             "name",
         }
@@ -610,9 +686,14 @@ class VerdictSnapshot(BaseModel):
         from logitgate.gates.judge_gate import JudgeGate
 
         effective_backend, effective_model = self._resolve_replay_backend_and_model(
-            backend, model, self.gate_config
+            backend, model, self.gate_config, prefer_judge=True
         )
         owns_backend = not isinstance(effective_backend, GenerativeBackend)
+        judge_temp = (
+            self.gate_config.get("logit_temperature")
+            if self.gate_config.get("gate_type") == "JudgeGate"
+            else None
+        )
 
         judge = JudgeGate(
             rubric=self.rubric,
@@ -622,6 +703,7 @@ class VerdictSnapshot(BaseModel):
             max_tokens=max_tokens,
             think=think,
             symmetric_debiasing=self.gate_config.get("symmetric_debiasing", True),
+            logit_temperature=judge_temp,
         )
         try:
             judge_verdict = judge.evaluate(self.candidate, save_on_fail=False)
@@ -641,9 +723,14 @@ class VerdictSnapshot(BaseModel):
         from logitgate.gates.judge_gate import JudgeGate
 
         effective_backend, effective_model = self._resolve_replay_backend_and_model(
-            backend, model, self.gate_config
+            backend, model, self.gate_config, prefer_judge=True
         )
         owns_backend = not isinstance(effective_backend, GenerativeBackend)
+        judge_temp = (
+            self.gate_config.get("logit_temperature")
+            if self.gate_config.get("gate_type") == "JudgeGate"
+            else None
+        )
 
         judge = JudgeGate(
             rubric=self.rubric,
@@ -653,6 +740,7 @@ class VerdictSnapshot(BaseModel):
             max_tokens=max_tokens,
             think=think,
             symmetric_debiasing=self.gate_config.get("symmetric_debiasing", True),
+            logit_temperature=judge_temp,
         )
         try:
             judge_verdict = await judge.aevaluate(self.candidate, save_on_fail=False)

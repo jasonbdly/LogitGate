@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Generic BYO dynamic auto-calibration & task-separated temperatures:** Added `KNOWN_BINARY_MODEL_TEMPERATURES` alongside `KNOWN_MODEL_TEMPERATURES`, upgraded `fit_calibration()` with AUROC- and log-odds scale-regularized optimization ($O(1/N)$ MAP decay and `AUROC < 0.70 -> T >= 1.0` fail-safe clamping), added `auto_calibrate_backend()` / `aauto_calibrate_backend()` and lazy first-use BYO calibration (`LOGITGATE_AUTO_CALIBRATE=1`), and exposed `is_temperature_configured()` + `has_known_or_cached_temperature()`.
+- **Symmetric 2-pass post-critique `JudgeGate` adjudication & `Cascade` log-odds fusion:** `JudgeGate` now runs calibrated 2-pass `A/B` post-critique logit adjudication (`compile_cot_binary_prompt`, `logit_temperature`) before falling back to structured tags or `_probe()`, and `Cascade(..., fuse_logits=True, prior_weight=0.30)` fuses permutation-consistent Tier-1 priors (`abs(z1) >= 1.0`) with uncertain permutation-split Tier-2 critiques (`abs(z2) < 1.0`) via `fuse_escalated_verdict()`.
+- **Heterogeneous cascade benchmarking (`--judge-backend` / `--judge-model`):** `run_benchmark()` and `logitgate benchmark` now support separate Tier-1 and Tier-2 backends/models with combined call metering, pre-warmed lazy BYO calibration, and `--cascade-trigger adjudicate`.
+- **Expanded snapshot replay & explain parity:** Added `ChoiceGate` and `LogitGate(max_positional_bias=...)` replay in `VerdictSnapshot.replay()` / `areplay()`, and persisted `judge_backend` / `judge_model` in heterogeneous `Cascade` snapshots so `VerdictSnapshot.explain()` / `aexplain()` route cleanly to Tier 2.
+
+### Changed
+- **Per-evaluation nonce boundary isolation:** Prompt compilers accept an optional cryptographic `boundary_nonce` (passed automatically by `LogitGate`, `ChoiceGate`, `ScoreGate`, and `JudgeGate`) so candidates and verification notes are wrapped in unpredictable `<candidate_{nonce}>` / `<notes_{nonce}>` tags.
+- **`RecurrentPyTorchBackend` security default:** Changed `trust_remote_code` default from `True` to `False`.
+
+### Fixed
+- **ReDoS & adversarial fail-closed hardening:** Replaced potentially backtracking regexes in `JudgeGate` with linear $O(N)$ patterns, restricted verdict tag extraction to post-`<think>` text, neutralized spoofed section headers in verification notes, enforced strict `> 0.5` and target-token presence on CoT logit reads, handled safety refusals before `_probe()`, and converted CoT `BackendError` fallbacks cleanly.
+- **Systems, concurrency, & resource ownership:** Added per-event-loop `asyncio.Lock` and sync `threading.Lock` singleflight guards for lazy BYO calibration, locked read-modify-write cache persistence, prevented injected `httpx` clients from silent replacement with default clients, preserved caller-owned backends on gate `__init__` validation failures, offloaded `LlamaCppBackend` in-process initialization into `run_in_executor`, forwarded `ASTGate` per-call snapshot kwargs inside `Cascade`, and hardened `sanitize_terminal_text` against ANSI CSI/OSC sequences and Unicode BiDi controls.
+
+---
+
 ## [0.4.1] - 2026-11-10
 
 ### Added

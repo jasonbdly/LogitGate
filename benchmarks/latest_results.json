@@ -79,6 +79,74 @@
         "l2_escalated": "3/24 (12.5%)",
         "l0_plus_l1_rate": "21/24 (87.5%)"
       }
+    },
+    "llama3.2:1b_gpu": {
+      "model": "llama3.2:1b (GPU)",
+      "baseline_time_ms": 16456.8,
+      "baseline_tokens": 3721,
+      "baseline_accuracy": "17/24 (70.8%)",
+      "cascade_ambig_only_time_ms": 15654.1,
+      "cascade_ambig_only_tokens": 3414,
+      "cascade_ambig_only_accuracy": "13/24 (54.2%)",
+      "speedup_ambig_only": 1.05,
+      "tokens_saved_ambig_only": 307,
+      "layer_resolution": {
+        "l0_ast": "2/24 (8.3%)",
+        "l1_decisive": "0/24 (0.0%)",
+        "l2_escalated": "22/24 (91.7%)",
+        "l0_plus_l1_rate": "2/24 (8.3%)"
+      }
+    },
+    "llama3.2:3b_gpu": {
+      "model": "llama3.2:3b (GPU)",
+      "baseline_time_ms": 24465.5,
+      "baseline_tokens": 3464,
+      "baseline_accuracy": "19/24 (79.2%)",
+      "cascade_ambig_only_time_ms": 15541.7,
+      "cascade_ambig_only_tokens": 2106,
+      "cascade_ambig_only_accuracy": "20/24 (83.3%)",
+      "speedup_ambig_only": 1.57,
+      "tokens_saved_ambig_only": 1358,
+      "layer_resolution": {
+        "l0_ast": "2/24 (8.3%)",
+        "l1_decisive": "9/24 (37.5%)",
+        "l2_escalated": "13/24 (54.2%)",
+        "l0_plus_l1_rate": "11/24 (45.8%)"
+      }
+    },
+    "qwen2.5-coder:1.5b_gpu": {
+      "model": "qwen2.5-coder:1.5b (GPU)",
+      "baseline_time_ms": 15038.9,
+      "baseline_tokens": 3270,
+      "baseline_accuracy": "17/24 (70.8%)",
+      "cascade_ambig_only_time_ms": 11133.7,
+      "cascade_ambig_only_tokens": 2289,
+      "cascade_ambig_only_accuracy": "17/24 (70.8%)",
+      "speedup_ambig_only": 1.35,
+      "tokens_saved_ambig_only": 981,
+      "layer_resolution": {
+        "l0_ast": "2/24 (8.3%)",
+        "l1_decisive": "7/24 (29.2%)",
+        "l2_escalated": "15/24 (62.5%)",
+        "l0_plus_l1_rate": "9/24 (37.5%)"
+      }
+    },
+    "qwen2.5-coder:3b_gpu": {
+      "model": "qwen2.5-coder:3b (GPU)",
+      "baseline_time_ms": 25994.8,
+      "baseline_tokens": 3647,
+      "baseline_accuracy": "18/24 (75.0%)",
+      "cascade_ambig_only_time_ms": 5958.5,
+      "cascade_ambig_only_tokens": 654,
+      "cascade_ambig_only_accuracy": "22/24 (91.7%)",
+      "speedup_ambig_only": 4.36,
+      "tokens_saved_ambig_only": 2993,
+      "layer_resolution": {
+        "l0_ast": "2/24 (8.3%)",
+        "l1_decisive": "17/24 (70.8%)",
+        "l2_escalated": "5/24 (20.8%)",
+        "l0_plus_l1_rate": "19/24 (79.2%)"
+      }
     }
   },
   "suite_2_reasoning_depth_32": {
@@ -2749,5 +2817,53 @@
         "correct_both": true
       }
     ]
+  },
+  "heterogeneous_cascades_24": {
+    "qwen2.5-coder:3b_to_gemma4:e4b_same_gpu": {
+      "l1_model": "qwen2.5-coder:3b",
+      "judge_model": "gemma4:e4b",
+      "topology": "Co-resident single 12GB GPU (2.09 GB + 3.21 GB = 5.30 GB VRAM)",
+      "judge_only_p50_ms": 1520.4,
+      "judge_only_mean_ms": 1628.3,
+      "judge_only_accuracy": "24/24 (100.0%)",
+      "cascade_p50_ms": 62.9,
+      "cascade_p95_ms": 1882.6,
+      "cascade_mean_ms": 549.9,
+      "cascade_accuracy": "23/24 (95.8%)",
+      "fast_path_rate": "71%",
+      "mean_speedup": 3.0,
+      "p50_speedup": 24.2,
+      "token_reduction": "69%"
+    },
+    "llama3.2:3b_to_gemma4:26b_dual_gpu": {
+      "l1_model": "llama3.2:3b",
+      "judge_model": "gemma4:26b",
+      "topology": "Local 3B Layer-1 endpoint -> Remote 26B MoE Judge endpoint",
+      "judge_only_p50_ms": 882.8,
+      "judge_only_mean_ms": 885.7,
+      "judge_only_accuracy": "24/24 (100.0%)",
+      "cascade_p50_ms": 733.1,
+      "cascade_p95_ms": 1284.6,
+      "cascade_mean_ms": 587.9,
+      "cascade_accuracy": "23/24 (95.8%)",
+      "fast_path_rate": "46%",
+      "mean_speedup": 1.5,
+      "token_reduction": "43%"
+    },
+    "qwen2.5-coder:1.5b_to_gemma4:26b_dual_gpu": {
+      "l1_model": "qwen2.5-coder:1.5b",
+      "judge_model": "gemma4:26b",
+      "topology": "Local 1.5B Layer-1 endpoint -> Remote 26B MoE Judge endpoint",
+      "judge_only_p50_ms": 882.8,
+      "judge_only_mean_ms": 885.7,
+      "judge_only_accuracy": "24/24 (100.0%)",
+      "cascade_p50_ms": 913.3,
+      "cascade_p95_ms": 1288.8,
+      "cascade_mean_ms": 782.0,
+      "cascade_accuracy": "23/24 (95.8%)",
+      "fast_path_rate": "25%",
+      "mean_speedup": 1.1,
+      "token_reduction": "23%"
+    }
   }
 }

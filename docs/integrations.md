@@ -70,7 +70,7 @@ print(f"Score: {metric.score}, Passed: {metric.is_successful()}")
 ```
 
 ### B. As a Standalone DeepEval Metric
-Directly evaluate any LLM test case against a calibrated LogitGate rubric:
+Directly evaluate any LLM test case against a calibrated LogitGate rubric. `LogitGateMetric` accepts `fail_threshold`, `logit_temperature`, and `preset`, and `is_successful()` honors gate abstention (`AMBIGUOUS` $\to$ `False`):
 
 ```python
 from deepeval.test_case import LLMTestCase

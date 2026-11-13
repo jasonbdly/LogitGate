@@ -90,9 +90,9 @@ class BaseGate(abc.ABC):
     def replay_config(self) -> dict[str, Any] | None:
         """Returns the gate constructor config needed to replay this gate from a snapshot.
 
-        `VerdictSnapshot.replay()` reconstructs a `LogitGate` or `MultiRubricGate`, so only gates
-        that can be faithfully rebuilt that way return a dict. Everything else returns ``None``
-        and is recorded in the snapshot by name only.
+        `VerdictSnapshot.replay()` reconstructs `LogitGate`, `MultiRubricGate`, `ChoiceGate`,
+        `ScoreGate`, and `JudgeGate`, so gates supporting faithful reconstruction return a
+        config dict. Everything else returns ``None`` and is recorded in the snapshot by name only.
         """
         return None
 
@@ -148,11 +148,25 @@ class BaseGate(abc.ABC):
         """
         from logitgate.cascade import Cascade
         if isinstance(self, Cascade) and isinstance(other, Cascade):
-            return Cascade(gates=list(self.gates) + list(other.gates))
+            return Cascade(
+                gates=list(self.gates) + list(other.gates),
+                name=self.name,
+                fuse_logits=self.fuse_logits,
+                prior_weight=self.prior_weight,
+            )
         if isinstance(self, Cascade):
-            return Cascade(gates=list(self.gates) + [other])
+            return Cascade(
+                gates=list(self.gates) + [other],
+                name=self.name,
+                fuse_logits=self.fuse_logits,
+                prior_weight=self.prior_weight,
+            )
         if isinstance(other, Cascade):
-            return Cascade(gates=[self] + list(other.gates))
+            return Cascade(
+                gates=[self] + list(other.gates),
+                fuse_logits=other.fuse_logits,
+                prior_weight=other.prior_weight,
+            )
         return Cascade(gates=[self, other])
 
     def __or__(self, other: BaseGate) -> Cascade:

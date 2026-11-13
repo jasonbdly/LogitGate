@@ -20,23 +20,32 @@ def softmax_probabilities(logprobs: Mapping[Any, float], temperature: float = 1.
     """Temperature-scaled softmax renormalized over the given label set only."""
     if not logprobs:
         return {}
-    temp = max(temperature, 1e-6) if math.isfinite(temperature) else 1.0
-    scaled = {k: float(lp) / temp for k, lp in logprobs.items()}
-    if any(not math.isfinite(v) for v in scaled.values()):
-        finite_vals = [v for v in scaled.values() if math.isfinite(v)]
-        if not finite_vals:
-            return {k: 1.0 / len(scaled) for k in scaled}
-        max_lp = max(finite_vals)
-        exp_vals = {
-            k: (math.exp(lp - max_lp) if math.isfinite(lp) else 0.0)
-            for k, lp in scaled.items()
-        }
-    else:
-        max_lp = max(scaled.values())
-        exp_vals = {k: math.exp(lp - max_lp) for k, lp in scaled.items()}
+    if isinstance(temperature, bool) or not math.isfinite(temperature) or temperature <= 0.0:
+        raise ValueError(f"temperature must be a finite positive float, got {temperature!r}")
+    temp = max(float(temperature), 1e-6)
+    raw_vals: dict[Any, float] = {}
+    for k, lp in logprobs.items():
+        if isinstance(lp, bool):
+            raise TypeError(f"Logprob for key {k!r} must be numeric, got bool")
+        raw_vals[k] = float(lp)
+
+    if any(math.isnan(v) for v in raw_vals.values()):
+        return {k: 1.0 / len(raw_vals) for k in raw_vals}
+
+    pos_inf_keys = [k for k, v in raw_vals.items() if math.isinf(v) and v > 0]
+    if pos_inf_keys:
+        p = 1.0 / len(pos_inf_keys)
+        return {k: (p if k in pos_inf_keys else 0.0) for k in raw_vals}
+
+    finite_scaled = {k: v / temp for k, v in raw_vals.items() if math.isfinite(v)}
+    if not finite_scaled:
+        return {k: 1.0 / len(raw_vals) for k in raw_vals}
+
+    max_lp = max(finite_scaled.values())
+    exp_vals = {k: (math.exp(finite_scaled[k] - max_lp) if k in finite_scaled else 0.0) for k in raw_vals}
     total = sum(exp_vals.values())
     if not (total > 0.0) or not math.isfinite(total):
-        return {k: 1.0 / len(scaled) for k in scaled}
+        return {k: 1.0 / len(raw_vals) for k in raw_vals}
     return {k: v / total for k, v in exp_vals.items()}
 
 

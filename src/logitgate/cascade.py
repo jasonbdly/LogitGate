@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Generator, Sequence
 from typing import Any
 
+from logitgate.debiasing.permutation import compute_shannon_entropy
+from logitgate.debiasing.softmax import clamped_sigmoid
 from logitgate.exceptions import ConfigurationError
 from logitgate.gates.base import TIER_GENERATIVE, TIER_LOGIT, BaseGate, EscalationPolicy
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
@@ -48,6 +51,106 @@ def _verdict_fields(source: Verdict, **overrides: Any) -> dict[str, Any]:
     return fields
 
 
+def _same_nonzero_sign(a: float, b: float) -> bool:
+    """Underflow-safe check that two floats share the same strictly non-zero sign."""
+    return (a > 0.0 and b > 0.0) or (a < 0.0 and b < 0.0)
+
+
+def _select_upstream_logit_trace(upstream: Verdict | None) -> LayerTrace | None:
+    """Selects the weakest non-passing Tier-1 trace carrying full log-odds evidence."""
+    if upstream is None or not upstream.traces:
+        return None
+    with_logits = [
+        tr
+        for tr in upstream.traces
+        if tr.log_odds_pass is not None
+        and math.isfinite(tr.log_odds_pass)
+        and tr.forward_log_odds is not None
+        and math.isfinite(tr.forward_log_odds)
+        and tr.reverse_log_odds is not None
+        and math.isfinite(tr.reverse_log_odds)
+    ]
+    if not with_logits:
+        return upstream.traces[-1]
+    non_passing = [tr for tr in with_logits if tr.status != DecisionStatus.PASSED]
+    pool = non_passing or with_logits
+    return min(pool, key=lambda tr: float(tr.log_odds_pass))  # type: ignore[arg-type]
+
+
+def fuse_escalated_verdict(
+    upstream: Verdict | None,
+    verdict: Verdict,
+    *,
+    prior_weight: float = 0.30,
+) -> tuple[bool, DecisionStatus, float | None, float | None]:
+    """Fuses calibrated Layer-1 prior log-odds with permutation-split Layer-2 post-critique log-odds.
+
+    When an ambiguous Tier-1 logit gate escalates to a Tier-2 judge that emits calibrated
+    post-critique log-odds, both layers produce log-odds on the ``logit(P)`` scale. Whenever
+    Tier 2's forward and reverse passes agree on polarity (same nonzero sign) or Tier 2 is
+    decisive (``abs(z2) >= 1.0``), Tier 2's reasoned critique governs directly. When Tier 2 is
+    permutation-split and uncertain (``abs(z2) < 1.0``) while Tier 1 was permutation-consistent
+    and non-trivial (``abs(z1) >= 1.0``), blending ``(1 - w) * z2 + w * clamp(z1, -2, 2)``
+    breaks the tie using Tier 1's debiased semantic signal without overriding decisive critiques.
+    """
+    if (
+        isinstance(prior_weight, bool)
+        or not isinstance(prior_weight, (int, float))
+        or not math.isfinite(float(prior_weight))
+        or not (0.0 <= float(prior_weight) <= 1.0)
+    ):
+        raise ConfigurationError(f"prior_weight must be between 0.0 and 1.0, got {prior_weight!r}")
+    w = float(prior_weight)
+    fallback_prob = (
+        verdict.probability
+        if verdict.probability is not None
+        else (upstream.probability if upstream is not None else None)
+    )
+    if (
+        upstream is None
+        or upstream.status != DecisionStatus.AMBIGUOUS
+        or w <= 0.0
+        or not upstream.traces
+        or not verdict.traces
+    ):
+        return verdict.passed, verdict.status, fallback_prob, None
+
+    tr1 = _select_upstream_logit_trace(upstream)
+    tr2 = verdict.traces[-1]
+    if tr1 is None or (tr1.metadata or {}).get("abstained_reason") or (tr2.metadata or {}).get("abstained_reason"):
+        return verdict.passed, verdict.status, fallback_prob, None
+
+    z1 = tr1.log_odds_pass
+    z2 = tr2.log_odds_pass
+    f1, r1 = tr1.forward_log_odds, tr1.reverse_log_odds
+    f2, r2 = tr2.forward_log_odds, tr2.reverse_log_odds
+    if (
+        z1 is not None
+        and z2 is not None
+        and f1 is not None
+        and r1 is not None
+        and f2 is not None
+        and r2 is not None
+        and math.isfinite(z1)
+        and math.isfinite(z2)
+        and math.isfinite(f1)
+        and math.isfinite(r1)
+        and math.isfinite(f2)
+        and math.isfinite(r2)
+        and abs(z1) >= 1.0
+        and abs(z2) < 1.0
+        and _same_nonzero_sign(f1, r1)
+        and not _same_nonzero_sign(f2, r2)
+    ):
+        z1_clamped = max(-2.0, min(2.0, float(z1)))
+        z_fused = (1.0 - w) * float(z2) + w * z1_clamped
+        passed = z_fused > 0.0
+        status = DecisionStatus.PASSED if passed else DecisionStatus.FAILED
+        return passed, status, round(clamped_sigmoid(z_fused), 4), round(z_fused, 4)
+
+    return verdict.passed, verdict.status, fallback_prob, None
+
+
 class Cascade(BaseGate):
     """Sequential gate pipeline that only pays for expensive layers when cheaper ones are unsure.
 
@@ -62,7 +165,8 @@ class Cascade(BaseGate):
       gate (unless its policy is ``"always"``). This is the path that lets a typical cascade
       finish in one or two forward passes with zero generated tokens.
     - When a decisive upstream FAILED escalates under ``"on_ambiguous_or_fail"``, the final
-      verdict stays FAILED. The judge adds the diagnostic but can't overturn the failure.
+      verdict stays FAILED unless the generative gate uses ``escalation_policy="adjudicate"``
+      (or sets ``can_override_fail=True``).
 
     Inner gates run with ``save_on_fail=False``. On failure the cascade writes one snapshot
     containing every layer's trace.
@@ -70,16 +174,42 @@ class Cascade(BaseGate):
     Args:
         gates: Ordered sequence of gate instances to execute sequentially.
         name: Identifier for this cascade pipeline.
+        fuse_logits: Whether to fuse permutation-consistent Tier-1 log-odds with an
+            uncertain/permutation-split Tier-2 critique. Defaults to ``True``.
+        prior_weight: Weight in ``[0.0, 1.0]`` assigned to the clamped Tier-1 prior when
+            log-odds fusion triggers. Defaults to ``0.30``.
 
     Raises:
-        ConfigurationError: If gates sequence is empty.
+        ConfigurationError: If gates is empty, contains non-``BaseGate`` elements, or
+            parameters are invalid.
     """
 
-    def __init__(self, gates: Sequence[BaseGate], name: str = "Cascade") -> None:
+    def __init__(
+        self,
+        gates: Sequence[BaseGate],
+        name: str = "Cascade",
+        *,
+        fuse_logits: bool = True,
+        prior_weight: float = 0.30,
+    ) -> None:
         if not gates:
             raise ConfigurationError("Cascade requires at least one gate")
+        if any(not isinstance(g, BaseGate) for g in gates):
+            raise ConfigurationError("Cascade gates must all inherit from BaseGate")
+        if not isinstance(fuse_logits, bool):
+            raise ConfigurationError(f"fuse_logits must be a bool, got {type(fuse_logits).__name__}")
+        if isinstance(prior_weight, bool):
+            raise ConfigurationError(f"prior_weight must be between 0.0 and 1.0, got {prior_weight!r}")
+        try:
+            pw = float(prior_weight)
+        except (TypeError, ValueError) as e:
+            raise ConfigurationError(f"prior_weight must be a float between 0.0 and 1.0, got {prior_weight!r}") from e
+        if not math.isfinite(pw) or not (0.0 <= pw <= 1.0):
+            raise ConfigurationError(f"prior_weight must be between 0.0 and 1.0, got {prior_weight!r}")
         self.gates = list(gates)
         self.name = name
+        self.fuse_logits = fuse_logits
+        self.prior_weight = pw
 
     def __repr__(self) -> str:
         pipeline_repr = " >> ".join(repr(g) for g in self.gates)
@@ -170,33 +300,89 @@ class Cascade(BaseGate):
                 passed, status = verdict.passed, verdict.status
                 overrode_judge_pass = False
                 can_override = getattr(gate, "can_override_fail", False) or policy == "adjudicate"
-                if (
+                locked_upstream_fail = (
                     upstream is not None
                     and upstream.status == DecisionStatus.FAILED
                     and policy == "on_ambiguous_or_fail"
                     and not can_override
-                ):
+                )
+                fused_lo: float | None = None
+                tr1_prior_lo: float | None = None
+                judge_lo_orig: float | None = None
+                if locked_upstream_fail:
                     if verdict.passed:
                         overrode_judge_pass = True
                     passed, status = False, DecisionStatus.FAILED
+                    effective_prob = (
+                        upstream.probability
+                        if (upstream is not None and upstream.probability is not None)
+                        else verdict.probability
+                    )
+                elif self.fuse_logits:
+                    passed, status, effective_prob, fused_lo = fuse_escalated_verdict(
+                        upstream,
+                        verdict,
+                        prior_weight=self.prior_weight,
+                    )
+                    if fused_lo is not None and traces and upstream is not None and upstream.traces:
+                        tr1 = _select_upstream_logit_trace(upstream)
+                        tr1_prior_lo = tr1.log_odds_pass if tr1 is not None else upstream.traces[-1].log_odds_pass
+                        last_tr = traces[-1]
+                        judge_lo_orig = last_tr.log_odds_pass
+                        fused_entropy = (
+                            round(compute_shannon_entropy(effective_prob), 4)
+                            if effective_prob is not None
+                            else last_tr.shannon_entropy
+                        )
+                        traces[-1] = last_tr.model_copy(
+                            update={
+                                "status": status,
+                                "calibrated_prob": effective_prob,
+                                "log_odds_pass": fused_lo,
+                                "shannon_entropy": fused_entropy,
+                                "metadata": {
+                                    **last_tr.metadata,
+                                    "judge_log_odds": judge_lo_orig,
+                                    "fused_log_odds": fused_lo,
+                                    "prior_log_odds": tr1_prior_lo,
+                                    "prior_weight": self.prior_weight,
+                                },
+                            }
+                        )
+                else:
+                    effective_prob = (
+                        verdict.probability
+                        if verdict.probability is not None
+                        else (upstream.probability if upstream is not None else None)
+                    )
+                fused_score = (
+                    (upstream.score if (upstream is not None and upstream.score is not None) else 0.0)
+                    if overrode_judge_pass
+                    else (
+                        upstream.score
+                        if (upstream is not None and upstream.score is not None)
+                        else (
+                            (effective_prob if effective_prob is not None else (1.0 if passed else 0.0))
+                            if (fused_lo is not None and passed != verdict.passed)
+                            else verdict.score
+                        )
+                    )
+                )
+                fused_reason = verdict.reason
+                if fused_lo is not None and passed != verdict.passed:
+                    prior_desc = f"{tr1_prior_lo:+.2f}" if tr1_prior_lo is not None else "n/a"
+                    judge_desc = f"{judge_lo_orig:+.2f}" if judge_lo_orig is not None else "n/a"
+                    fused_reason = (
+                        f"Fused Tier-1 prior (z1={prior_desc}) with split Tier-2 critique "
+                        f"(z2={judge_desc}, z_fused={fused_lo:+.2f}): {verdict.reason}"
+                    )
                 fields = _verdict_fields(
                     verdict,
                     passed=passed,
                     status=status,
-                    probability=(
-                        upstream.probability
-                        if (upstream is not None and upstream.probability is not None)
-                        else verdict.probability
-                    ),
-                    score=(
-                        (upstream.score if (upstream is not None and upstream.score is not None) else 0.0)
-                        if overrode_judge_pass
-                        else (
-                            upstream.score
-                            if (upstream is not None and upstream.score is not None)
-                            else verdict.score
-                        )
-                    ),
+                    probability=effective_prob,
+                    score=fused_score,
+                    reason=fused_reason,
                     choice=(
                         verdict.choice
                         if verdict.choice is not None
@@ -258,13 +444,13 @@ class Cascade(BaseGate):
     ) -> Verdict:
         if verdict.passed:
             return verdict
+        from logitgate.backends.base import infer_backend_spec
+
         gate_config: dict[str, Any] = {"cascade_gates": [g.name for g in self.gates]}
         replay = replay_cfg or next((cfg for g in self.gates if (cfg := g.replay_config()) is not None), None)
         if replay is not None:
             gate_config.update(replay)
         else:
-            from logitgate.backends.base import infer_backend_spec
-
             for g in reversed(self.gates):
                 g_backend = getattr(g, "backend", None)
                 if g_backend is not None:
@@ -277,6 +463,19 @@ class Cascade(BaseGate):
                     if g_model:
                         gate_config["model"] = g_model
                     break
+        for g in self.gates:
+            if g.layer_tier >= TIER_GENERATIVE:
+                jg_backend = getattr(g, "backend", None)
+                if jg_backend is not None:
+                    gate_config["judge_backend"] = infer_backend_spec(jg_backend)
+                    jg_model = (
+                        getattr(g, "model", None)
+                        or getattr(jg_backend, "model", None)
+                        or getattr(jg_backend, "model_name", None)
+                    )
+                    if jg_model:
+                        gate_config["judge_model"] = jg_model
+                break
         effective_save = kwargs.get("save_on_fail")
         if effective_save is None:
             for g in self.gates:

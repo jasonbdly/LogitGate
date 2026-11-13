@@ -265,6 +265,7 @@ class _HTTPClientMixin:
         async_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._client = client
+        self._owns_client = client is None
         self._async_client = async_client
         self._async_client_loop = None
         self._owns_async_client = async_client is None
@@ -277,8 +278,10 @@ class _HTTPClientMixin:
             lock = threading.RLock()
             self._http_lock = lock
         with lock:
-            if self._client is None or self._client.is_closed:
+            owns_client = getattr(self, "_owns_client", True)
+            if self._client is None or (owns_client and self._client.is_closed):
                 self._client = httpx.Client(timeout=self.timeout)
+                self._owns_client = True
             return self._client
 
     @property
@@ -301,7 +304,7 @@ class _HTTPClientMixin:
                 and bound_loop is not None
                 and (bound_loop is not current_loop or bound_loop.is_closed())
             )
-            if self._async_client is None or self._async_client.is_closed or loop_changed:
+            if self._async_client is None or (owns_client and self._async_client.is_closed) or loop_changed:
                 self._async_client = httpx.AsyncClient(timeout=self.timeout)
                 self._async_client_loop = current_loop
                 self._owns_async_client = True
@@ -313,8 +316,11 @@ class _HTTPClientMixin:
         """Closes the synchronous HTTP client session if initialized."""
         lock = getattr(self, "_http_lock", None) or threading.RLock()
         with lock:
+            owns = getattr(self, "_owns_client", True)
             if self._client is not None and not self._client.is_closed:
                 self._client.close()
+            if owns:
+                self._client = None
 
     async def aclose(self) -> None:
         """Closes the asynchronous HTTP client session if initialized."""
@@ -507,8 +513,12 @@ def infer_backend_spec(backend: Any) -> str:
     """Infers a canonical URI specifier string from a resolved backend instance."""
     if isinstance(backend, str):
         return backend
-    if hasattr(backend, "inner") and isinstance(backend.inner, LogitBackend):
-        backend = backend.inner
+    for _ in range(4):
+        inner = getattr(backend, "inner", None)
+        if isinstance(inner, (LogitBackend, GenerativeBackend)):
+            backend = inner
+        else:
+            break
     if isinstance(backend, StubBackend):
         return f"stub://{backend.default_prob}" if backend.default_prob != 0.95 else "stub://default"
     cls_name = backend.__class__.__name__
@@ -549,7 +559,7 @@ def infer_backend_spec(backend: Any) -> str:
         if q_parts and base_spec != "recurrent":
             return f"{base_spec}?{'&'.join(q_parts)}"
         return base_spec
-    return "stub://default"
+    return f"custom://{cls_name}"
 
 
 def resolve_logit_backend(

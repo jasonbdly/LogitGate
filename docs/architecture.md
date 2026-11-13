@@ -54,12 +54,13 @@ flowchart TD
    - **Trigger Policies**:
      - `on_ambiguous_only` (default): Executes ONLY when Layer 1 confidence is genuinely ambiguous ($0.20 < P < 0.85$). Clean passes and decisive failures bypass Layer 2.
      - `on_ambiguous_or_fail`: Executes if Layer 1 was ambiguous ($0.20 < P < 0.85$) OR if Layer 1 failed, providing actionable diagnostic feedback.
+     - `adjudicate`: Escalates both ambiguous items AND Layer-1 semantic failures while allowing Tier-2 `JudgeGate` to overturn Tier-1 false-negative failures (deterministic Tier-0 `ASTGate` failures remain final).
      - `always`: Forces generative critique on every artifact regardless of upstream confidence.
    - **Monotonic Failure Preservation**:
-     - When Layer 1 decisively fails ($P \le \text{fail\_threshold}$) and escalates to Layer 2 for diagnostic reporting, the final Verdict preserves `passed=False` even if the downstream generative judge's text critique phrasing is lenient.
-   - **Reason-Then-Verdict & Self-Healing Probe**:
-     - Evaluates step-by-step reasoning bullets before emitting the concluding tag `[VERDICT: PASS]` or `[VERDICT: FAIL]`.
-     - If the model omits the tag, `JudgeGate` automatically dogfoods a 1-token `LogitGate` probe on its own generated critique text to determine the verdict deterministically.
+     - Under `on_ambiguous_or_fail`, when Layer 1 decisively fails ($P \le \text{fail\_threshold}$) and escalates to Layer 2 for diagnostic reporting, the final Verdict preserves `passed=False` even if the downstream generative judge's text critique phrasing is lenient.
+   - **Post-Critique Logit Adjudication & Prior-Evidence Fusion**:
+     - When backed by a `LogitBackend`, `JudgeGate` performs symmetric 2-pass post-critique `A/B` log-odds adjudication over its verification notes, and `Cascade(..., fuse_logits=True, prior_weight=0.30)` fuses permutation-consistent Layer-1 priors ($|z_1| \ge 1.0$) with uncertain split Layer-2 critiques ($|z_2| < 1.0$) before falling back to structured `[VERDICT: ...]` tags or the self-healing 1-token `_probe()`.
+     - If tags are omitted, `JudgeGate` runs its self-healing 1-token `LogitGate` probe on the generated critique text before heuristic fallback.
 
 ---
 
@@ -70,7 +71,7 @@ flowchart TD
 | Hardware Tier | Recommended Model | Backend Specifier / Config | Typical Single-Pass Latency | Target Workflows |
 | :--- | :--- | :--- | :--- | :--- |
 | **0-GPU CI Runners / Air-Gapped** | Offline Deterministic Stub | `stub://default` | **< 0.05 ms** | Unit tests, mock suites, CI smoke tests |
-| **CPU-Only Laptops / Edge** | `gemma4:e4b` / `llama3.2:3b` | `ollama://localhost:11434/gemma4:e4b` (`options={"num_gpu": 0}`) | **~170 ms** | Local developer testing without discrete GPU |
+| **CPU-Only Laptops / Edge** | `qwen2.5-coder:3b` / `llama3.2:3b` / `gemma4:e4b` | `ollama://localhost:11434/qwen2.5-coder:3b` (`options={"num_gpu": 0}`) | **~64–170 ms** (`2.1 GB` RAM on 3B) | Local developer testing & CPU CI without discrete GPU |
 | **8–12 GB VRAM Consumer GPU** | `qwen2.5:7b` / `gemma4:e4b` | `ollama://localhost:11434/gemma4:e4b` | **~40–45 ms** | Desktop development, real-time agent loops |
 | **16–24 GB VRAM Workstation** | `qwen2.5-coder:14b` / `qwen2.5:14b` | `ollama://localhost:11434/qwen2.5-coder:14b` | **~40–50 ms** | Production evaluation suites, coding agents |
 | **Cloud Inference / Hosted APIs** | `gpt-4o-mini` / `vLLM` | `openai://api.openai.com/v1` or `vllm://localhost:8000/v1` | **~60–120 ms** (network bounded) | High-concurrency enterprise pipelines |

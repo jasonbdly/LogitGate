@@ -81,15 +81,15 @@ Where $\sum_i P_i$ is the cumulative softmax probability of all returned top-$K$
 
 Language models often suffer from overconfidence or underconfidence depending on parameter scale and post-training alignment (Guo et al., 2017).
 
-LogitGate provides temperature scaling via `fit_calibration()` to optimize the scaling parameter $T$:
+LogitGate provides AUROC- and log-odds scale-regularized temperature scaling via `fit_calibration()`:
 
 $$P_i(T) = \sigma\left(\frac{\bar{L}_i}{T}\right)$$
 
-The optimal temperature $T^*$ is found by minimizing the Brier Score over validation calibration pairs:
+The optimal temperature $T^*$ is found by minimizing the empirical Brier Score regularized by a small-sample MAP prior that decays at $\mathcal{O}(1/N)$ as calibration sample count grows:
 
 $$T^* = \arg\min_{T > 0} \frac{1}{N} \sum_{i=1}^N \left( \sigma\left(\frac{\bar{L}_i}{T}\right) - y_i \right)^2$$
 
-Where $y_i \in \{0, 1\}$ is the ground truth label. LogitGate includes built-in temperatures for popular models (`KNOWN_MODEL_TEMPERATURES`) and supports automatic caching via `~/.cache/logitgate/calibration.json`.
+Where $y_i \in \{0, 1\}$ is the ground truth label. Because zero-shot binary `A/B` polarity swaps on compact sub-4B models exhibit greater symbol-binding attenuation than multi-option prompts, LogitGate separates binary calibration tables (`KNOWN_BINARY_MODEL_TEMPERATURES`) from multiclass tables (`KNOWN_MODEL_TEMPERATURES` for `ChoiceGate`, `ScoreGate`, and `JudgeGate`). For any unrecognized Bring-Your-Own (BYO) model when `LOGITGATE_AUTO_CALIBRATE=1` (default), `auto_calibrate_backend()` / lazy first-use calibration evaluates micro-probes once and persists both temperatures (`binary_temperature`, `multiclass_temperature`, `probe_auroc`, `median_abs_log_odds`) to `~/.cache/logitgate/calibration.json`, automatically clamping low-AUROC models ($\text{AUROC} < 0.70$) to $T \ge 1.0$ so uncertain predictions escalate cleanly to `JudgeGate`.
 
 ---
 

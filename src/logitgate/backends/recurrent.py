@@ -65,6 +65,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         min_loops: int | None = None,
         max_loops: int | None = None,
         kl_threshold: float | None = None,
+        trust_remote_code: bool = False,
         **kwargs: Any,
     ) -> None:
         if num_loops < 1:
@@ -76,6 +77,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         self.min_loops = min_loops
         self.max_loops = max_loops
         self.kl_threshold = kl_threshold
+        self.trust_remote_code = bool(trust_remote_code)
         self._model = model
         self._tokenizer = tokenizer
         self.torch_dtype = torch_dtype
@@ -105,7 +107,9 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
                 ) from err
 
             if self._tokenizer is None:
-                self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name, trust_remote_code=self.trust_remote_code
+                )
 
             if self._model is None:
                 target_dtype = self.torch_dtype or (torch.bfloat16 if torch.cuda.is_available() else torch.float32)
@@ -122,7 +126,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
                     self._model = AutoModelForCausalLM.from_pretrained(
                         self.model_name,
                         torch_dtype=target_dtype,
-                        trust_remote_code=True,
+                        trust_remote_code=self.trust_remote_code,
                         device_map=self.device if self.device != "auto" else "auto",
                     )
                     if self.device not in ("auto", "cuda") and hasattr(self._model, "to"):

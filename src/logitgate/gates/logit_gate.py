@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import math
+import secrets
+import threading
 import time
+import weakref
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from logitgate.backends.base import LogitBackend, resolve_logit_backend
-from logitgate.config import LogitGateDefaults, get_default_model
+from logitgate.backends.base import LogitBackend, StubBackend, resolve_logit_backend
+from logitgate.config import (
+    LogitGateDefaults,
+    get_default_model,
+    is_temperature_configured,
+)
 from logitgate.debiasing.inversion import (
     compile_batch_binary_prompt,
     compile_binary_prompt,
@@ -46,39 +53,169 @@ def _ensure_logprobs_present(top_fwd: TopLogprobs, top_rev: TopLogprobs | None =
         )
 
 
+def _same_nonzero_sign(a: float, b: float) -> bool:
+    return (a > 0.0 and b > 0.0) or (a < 0.0 and b < 0.0)
+
+
+def _validate_prob_threshold(name: str, value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigurationError(f"{name} must be between 0.0 and 1.0, got {value!r}")
+    vf = float(value)
+    if not math.isfinite(vf) or not (0.0 <= vf <= 1.0):
+        raise ConfigurationError(f"{name} must be between 0.0 and 1.0, got {value!r}")
+    return vf
+
+
+_SYNC_CAL_META_LOCK = threading.Lock()
+_SYNC_CAL_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_ASYNC_CAL_LOCKS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[tuple[str, str], asyncio.Lock]
+] = weakref.WeakKeyDictionary()
+
+
+def _cal_lock_key(model_name: str) -> tuple[str, str]:
+    from logitgate.debiasing.permutation import (
+        _cache_key_for_path,
+        get_calibration_cache_path,
+    )
+
+    return _cache_key_for_path(get_calibration_cache_path()), model_name.strip().lower()
+
+
+def _get_sync_cal_lock(key: tuple[str, str]) -> threading.Lock:
+    with _SYNC_CAL_META_LOCK:
+        lock = _SYNC_CAL_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _SYNC_CAL_LOCKS[key] = lock
+        return lock
+
+
+def _get_async_cal_lock(key: tuple[str, str]) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    with _SYNC_CAL_META_LOCK:
+        loop_locks = _ASYNC_CAL_LOCKS.get(loop)
+        if loop_locks is None:
+            loop_locks = {}
+            _ASYNC_CAL_LOCKS[loop] = loop_locks
+        lock = loop_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            loop_locks[key] = lock
+        return lock
+
+
 def _resolve_logit_temperature(
     logit_temperature: float | Literal["auto"] | None,
     effective_model: str | None,
     backend: Any,
+    *,
+    binary: bool = False,
 ) -> float:
     """Resolves logit temperature from explicit value, 'auto', global config, or model calibration."""
     if logit_temperature == "auto":
         from logitgate.debiasing.permutation import (
             auto_calibrate_backend,
             get_model_temperature,
+            has_known_or_cached_temperature,
         )
 
-        temp = get_model_temperature(effective_model)
-        if temp == 1.0 and effective_model not in ("default", "stub", None):
-            cal_res = auto_calibrate_backend(backend, model_key=effective_model)
-            temp = cal_res.optimal_temperature
+        if has_known_or_cached_temperature(effective_model, binary=binary):
+            temp = get_model_temperature(effective_model, binary=binary)
+        elif effective_model not in ("default", "stub", None, ""):
+            assert isinstance(effective_model, str)
+            cal_lock = _get_sync_cal_lock(_cal_lock_key(effective_model))
+            with cal_lock:
+                if has_known_or_cached_temperature(effective_model, binary=binary):
+                    temp = get_model_temperature(effective_model, binary=binary)
+                else:
+                    cal_res = auto_calibrate_backend(
+                        backend,
+                        model_key=effective_model,
+                        strict_cache_io=False,
+                    )
+                    temp = (
+                        cal_res.optimal_temperature
+                        if binary
+                        else (cal_res.multiclass_temperature or cal_res.optimal_temperature)
+                    )
+        else:
+            temp = 1.0
         effective_temp = temp
     elif logit_temperature is not None:
-        if isinstance(logit_temperature, bool):
+        if isinstance(logit_temperature, bool) or not isinstance(logit_temperature, (int, float)):
             raise ConfigurationError(f"logit_temperature must be a positive float, got {logit_temperature!r}")
-        effective_temp = float(logit_temperature)
+        try:
+            effective_temp = float(logit_temperature)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"logit_temperature must be a positive float, got {logit_temperature!r}") from exc
     else:
         from logitgate.debiasing.permutation import get_model_temperature
 
-        if LogitGateDefaults.logit_temperature != 1.0:
+        if is_temperature_configured():
             effective_temp = LogitGateDefaults.logit_temperature
         else:
-            model_temp = get_model_temperature(effective_model)
-            effective_temp = model_temp if model_temp != 1.0 else LogitGateDefaults.logit_temperature
+            effective_temp = get_model_temperature(effective_model, binary=binary)
 
     if not math.isfinite(effective_temp) or effective_temp <= 0.0:
         raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
     return effective_temp
+
+
+def _should_lazy_auto_calibrate(
+    logit_temperature: float | Literal["auto"] | None,
+    effective_model: str | None,
+    backend: Any,
+    *,
+    binary: bool = False,
+) -> bool:
+    """Returns True when an unknown BYO model should lazily calibrate on first live evaluation."""
+    if logit_temperature is not None:
+        return False
+    if is_temperature_configured() or not LogitGateDefaults.auto_calibrate:
+        return False
+    if not effective_model or effective_model.strip().lower() in ("", "default", "stub"):
+        return False
+    if not isinstance(backend, LogitBackend):
+        return False
+    inner = getattr(backend, "inner", backend)
+    if isinstance(inner, StubBackend):
+        return False
+    from logitgate.debiasing.permutation import has_known_or_cached_temperature
+
+    return not has_known_or_cached_temperature(effective_model, binary=binary)
+
+
+def _lazy_calibrate_sync(model_name: str, backend: LogitBackend, *, binary: bool) -> float:
+    from logitgate.debiasing.permutation import (
+        auto_calibrate_backend,
+        get_model_temperature,
+        has_known_or_cached_temperature,
+    )
+
+    if has_known_or_cached_temperature(model_name, binary=binary):
+        return get_model_temperature(model_name, binary=binary)
+    with _get_sync_cal_lock(_cal_lock_key(model_name)):
+        if has_known_or_cached_temperature(model_name, binary=binary):
+            return get_model_temperature(model_name, binary=binary)
+        cal = auto_calibrate_backend(backend, model_key=model_name, strict_cache_io=False)
+        return cal.optimal_temperature if binary else (cal.multiclass_temperature or cal.optimal_temperature)
+
+
+async def _lazy_calibrate_async(model_name: str, backend: LogitBackend, *, binary: bool) -> float:
+    from logitgate.debiasing.permutation import (
+        aauto_calibrate_backend,
+        get_model_temperature,
+        has_known_or_cached_temperature,
+    )
+
+    if has_known_or_cached_temperature(model_name, binary=binary):
+        return get_model_temperature(model_name, binary=binary)
+    async with _get_async_cal_lock(_cal_lock_key(model_name)):
+        if has_known_or_cached_temperature(model_name, binary=binary):
+            return get_model_temperature(model_name, binary=binary)
+        cal = await aauto_calibrate_backend(backend, model_key=model_name, strict_cache_io=False)
+        return cal.optimal_temperature if binary else (cal.multiclass_temperature or cal.optimal_temperature)
 
 
 class LogitGate(BaseGate):
@@ -100,12 +237,18 @@ class LogitGate(BaseGate):
             passes and averages them in log-odds space.
         query_first: When True, compiles prompt with rubric and candidate first, ensuring
             identical KV-cache prefixes across both passes.
-        logit_temperature: Post-hoc temperature scaling parameter (default: 1.0).
+        logit_temperature: Post-hoc temperature scaling parameter, ``"auto"`` to calibrate via
+            micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
+            unknown BYO models when ``auto_calibrate=True``).
+        preset: Optional threshold preset (``"strict"``, ``"balanced"``, ``"fast_triage"``).
+        save_on_fail: Override failure snapshot persistence for this gate.
+        max_positional_bias: Optional maximum allowed positional log-odds divergence across
+            opposite-polarity passes before abstaining to AMBIGUOUS.
         name: Identifier for this gate instance.
 
     Raises:
         ConfigurationError: If rubric is empty, thresholds are outside [0, 1],
-            pass_threshold <= fail_threshold, or logit_temperature <= 0.
+            pass_threshold <= fail_threshold, max_positional_bias <= 0, or logit_temperature <= 0.
     """
 
     def __init__(
@@ -145,46 +288,56 @@ class LogitGate(BaseGate):
             default_fail = LogitGateDefaults.fail_threshold
             default_sym = True
 
-        effective_pass_thresh = (
-            default_pass if pass_threshold is None else pass_threshold
-        )
-        effective_fail_thresh = (
-            default_fail if fail_threshold is None else fail_threshold
-        )
+        raw_pass_thresh = default_pass if pass_threshold is None else pass_threshold
+        raw_fail_thresh = default_fail if fail_threshold is None else fail_threshold
         effective_sym = (
-            default_sym if symmetric_debiasing is None else symmetric_debiasing
+            default_sym if symmetric_debiasing is None else bool(symmetric_debiasing)
         )
 
-        if not rubric or not rubric.strip():
+        if not isinstance(rubric, str) or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
-        if isinstance(effective_pass_thresh, bool) or not (0.0 <= effective_pass_thresh <= 1.0):
-            raise ConfigurationError(f"pass_threshold must be between 0.0 and 1.0, got {effective_pass_thresh!r}")
-        if isinstance(effective_fail_thresh, bool) or not (0.0 <= effective_fail_thresh <= 1.0):
-            raise ConfigurationError(f"fail_threshold must be between 0.0 and 1.0, got {effective_fail_thresh!r}")
+        effective_pass_thresh = _validate_prob_threshold("pass_threshold", raw_pass_thresh)
+        effective_fail_thresh = _validate_prob_threshold("fail_threshold", raw_fail_thresh)
         if effective_pass_thresh <= effective_fail_thresh:
             raise ConfigurationError(
                 f"pass_threshold ({effective_pass_thresh}) must be strictly greater than fail_threshold ({effective_fail_thresh})"
             )
 
-        if max_positional_bias is not None and (
-            isinstance(max_positional_bias, bool)
-            or not math.isfinite(float(max_positional_bias))
-            or float(max_positional_bias) <= 0.0
-        ):
-            raise ConfigurationError(
-                f"max_positional_bias must be a positive float, got {max_positional_bias!r}"
+        if max_positional_bias is not None:
+            if isinstance(max_positional_bias, bool) or not isinstance(max_positional_bias, (int, float)):
+                raise ConfigurationError(
+                    f"max_positional_bias must be a positive float, got {max_positional_bias!r}"
+                )
+            bias_val = float(max_positional_bias)
+            if not math.isfinite(bias_val) or bias_val <= 0.0:
+                raise ConfigurationError(
+                    f"max_positional_bias must be a positive float, got {max_positional_bias!r}"
+                )
+        else:
+            bias_val = None
+
+        owns_backend = not isinstance(backend, LogitBackend)
+        resolved_backend = resolve_logit_backend(backend, model=model)
+        try:
+            effective_model = (
+                model
+                or getattr(resolved_backend, "model", None)
+                or getattr(resolved_backend, "model_name", None)
+                or get_default_model()
             )
+            effective_temp = _resolve_logit_temperature(
+                logit_temperature,
+                effective_model,
+                resolved_backend,
+                binary=True,
+            )
+        except BaseException:
+            if owns_backend:
+                resolved_backend.close()
+            raise
 
-        self.backend = resolve_logit_backend(backend, model=model)
-        effective_model = (
-            model
-            or getattr(self.backend, "model", None)
-            or getattr(self.backend, "model_name", None)
-            or get_default_model()
-        )
+        self.backend = resolved_backend
         self.model = effective_model
-        effective_temp = _resolve_logit_temperature(logit_temperature, effective_model, self.backend)
-
         self.rubric = rubric.strip()
         self.preset = preset
         self.save_on_fail = save_on_fail
@@ -193,7 +346,14 @@ class LogitGate(BaseGate):
         self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
-        self.max_positional_bias = float(max_positional_bias) if max_positional_bias is not None else None
+        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
+            logit_temperature,
+            effective_model,
+            self.backend,
+            binary=True,
+        )
+        self._calibration_lock = threading.Lock()
+        self.max_positional_bias = bias_val
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -210,6 +370,8 @@ class LogitGate(BaseGate):
             "preset": self.preset,
             "name": self.name,
         }
+        if self.max_positional_bias is not None:
+            config["max_positional_bias"] = self.max_positional_bias
         # A backend *instance* carries its own model (e.g. OpenAICompatBackend(model=...)), and
         # `infer_backend_spec` can't encode it for every scheme. Without it, replay would
         # silently run against the scheme's default model.
@@ -251,6 +413,8 @@ class LogitGate(BaseGate):
         candidate: Any,
         rubrics: Sequence[str] | None = None,
         rubric_index: int = 0,
+        *,
+        boundary_nonce: str | None = None,
     ) -> tuple[str, str | None]:
         """Returns the (forward, reverse) prompts; reverse is ``None`` without debiasing.
 
@@ -266,6 +430,7 @@ class LogitGate(BaseGate):
                     pass_token=pass_token,
                     fail_token=fail_token,
                     query_first=self.query_first,
+                    boundary_nonce=boundary_nonce,
                 )
             return compile_batch_binary_prompt(
                 rubrics=rubrics,
@@ -274,6 +439,7 @@ class LogitGate(BaseGate):
                 pass_token=pass_token,
                 fail_token=fail_token,
                 query_first=False,
+                boundary_nonce=boundary_nonce,
             )
 
         return build("A", "B"), (build("B", "A") if self.symmetric_debiasing else None)
@@ -339,7 +505,7 @@ class LogitGate(BaseGate):
             self.max_positional_bias is not None
             and pos_bias is not None
             and l2 is not None
-            and (l1 * l2 < 0.0)
+            and ((l1 > 0.0 and l2 < 0.0) or (l1 < 0.0 and l2 > 0.0))
             and pos_bias > self.max_positional_bias
         ):
             status = DecisionStatus.AMBIGUOUS
@@ -387,16 +553,43 @@ class LogitGate(BaseGate):
 
     # -- Public evaluation API --------------------------------------------------------------
 
+    def _ensure_calibrated(self) -> None:
+        if not self._needs_lazy_calibration or not self.model:
+            return
+        with self._calibration_lock:
+            if not self._needs_lazy_calibration:
+                return
+            if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
+                self._needs_lazy_calibration = False
+                return
+            self.logit_temperature = _lazy_calibrate_sync(self.model, self.backend, binary=True)
+            self._needs_lazy_calibration = False
+
+    async def _aensure_calibrated(self) -> None:
+        if not self._needs_lazy_calibration or not self.model:
+            return
+        if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
+            self._needs_lazy_calibration = False
+            return
+        temp = await _lazy_calibrate_async(self.model, self.backend, binary=True)
+        with self._calibration_lock:
+            self.logit_temperature = temp
+            self._needs_lazy_calibration = False
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        self._ensure_calibrated()
         t0 = time.perf_counter()
-        forward, reverse = self._binary_prompts(candidate)
+        nonce = secrets.token_hex(8)
+        forward, reverse = self._binary_prompts(candidate, boundary_nonce=nonce)
         top_fwd = self._query(forward)
         top_rev = self._query(reverse) if reverse is not None else None
         return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        await self._aensure_calibrated()
         t0 = time.perf_counter()
-        top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate))
+        nonce = secrets.token_hex(8)
+        top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate, boundary_nonce=nonce))
         return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
 
     def evaluate_batch(self, candidate: Any, rubrics: Sequence[str]) -> list[Verdict]:
@@ -410,10 +603,14 @@ class LogitGate(BaseGate):
         for r in rubrics:
             if not isinstance(r, str) or not r.strip():
                 raise ConfigurationError("Each rubric in rubrics must be a non-empty string")
+        if not rubrics:
+            return []
+        self._ensure_calibrated()
+        nonce = secrets.token_hex(8)
         results = []
         for idx in range(len(rubrics)):
             t0 = time.perf_counter()
-            forward, reverse = self._binary_prompts(candidate, rubrics, idx)
+            forward, reverse = self._binary_prompts(candidate, rubrics, idx, boundary_nonce=nonce)
             top_fwd = self._query(forward)
             top_rev = self._query(reverse) if reverse is not None else None
             results.append(self._verdict_from_logprobs(top_fwd, top_rev, t0))
@@ -432,13 +629,17 @@ class LogitGate(BaseGate):
                 raise ConfigurationError("Each rubric in rubrics must be a non-empty string")
         if not rubrics:
             return []
+        await self._aensure_calibrated()
+        nonce = secrets.token_hex(8)
 
         sem = asyncio.Semaphore(32)
 
         async def _eval_single(idx: int) -> Verdict:
             async with sem:
                 t0 = time.perf_counter()
-                top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate, rubrics, idx))
+                top_fwd, top_rev = await self._aquery_pair(
+                    *self._binary_prompts(candidate, rubrics, idx, boundary_nonce=nonce)
+                )
                 return self._verdict_from_logprobs(top_fwd, top_rev, t0)
 
         first_verdict = await _eval_single(0)
@@ -495,6 +696,26 @@ class MultiRubricGate(BaseGate):
     def backend(self) -> LogitBackend:
         return self._gate.backend
 
+    @property
+    def model(self) -> str | None:
+        return self._gate.model
+
+    @property
+    def logit_temperature(self) -> float:
+        return self._gate.logit_temperature
+
+    @property
+    def pass_threshold(self) -> float:
+        return self._gate.pass_threshold
+
+    @property
+    def fail_threshold(self) -> float:
+        return self._gate.fail_threshold
+
+    @property
+    def symmetric_debiasing(self) -> bool:
+        return self._gate.symmetric_debiasing
+
     def __repr__(self) -> str:
         return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
 
@@ -546,6 +767,8 @@ class MultiRubricGate(BaseGate):
         return {**config, "gate_type": "MultiRubricGate", "rubrics": list(self.rubrics)}
 
     def _snapshot(self, candidate: Any, verdict: Verdict, kwargs: dict[str, Any]) -> Verdict:
+        if verdict.passed:
+            return verdict
         return persist_failure_snapshot(
             verdict,
             candidate=candidate,
@@ -576,10 +799,14 @@ class ChoiceGate(BaseGate):
         options: Mapping of option tokens (e.g., 'A', 'B', 'C') to their descriptions.
         backend: Backend instance or specifier URI.
         model: Optional model identifier string for the backend.
-        symmetric_debiasing: When True, queries options in forward and reversed orderings
-            and computes the debiased logprob average.
+        symmetric_debiasing: When True, queries options in multiple label permutations
+            and averages logprobs before softmax normalization.
+        permutation_mode: Multi-option debiasing schedule (``"derangement"``,
+            ``"cyclic"``, or ``"reverse"``).
         query_first: When True, compiles prompt with question and candidate first.
-        logit_temperature: Temperature scaling factor for softmax normalization (default: 1.0).
+        logit_temperature: Temperature scaling factor, ``"auto"`` to calibrate via
+            micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
+            unknown BYO models when ``auto_calibrate=True``).
         name: Identifier for this gate instance.
 
     Raises:
@@ -598,7 +825,7 @@ class ChoiceGate(BaseGate):
         logit_temperature: float | Literal["auto"] | None = None,
         name: str = "ChoiceGate",
     ) -> None:
-        if not question or not question.strip():
+        if not isinstance(question, str) or not question.strip():
             raise ConfigurationError("question cannot be empty or whitespace")
         if permutation_mode not in ("derangement", "cyclic", "reverse"):
             raise ConfigurationError(
@@ -627,14 +854,25 @@ class ChoiceGate(BaseGate):
             seen_upper.add(k_upper)
             normalized_options[k_clean] = v
 
+        owns_backend = not isinstance(backend, LogitBackend)
         resolved_backend = resolve_logit_backend(backend, model=model)
-        effective_model = (
-            model
-            or getattr(resolved_backend, "model", None)
-            or getattr(resolved_backend, "model_name", None)
-            or get_default_model()
-        )
-        effective_temp = _resolve_logit_temperature(logit_temperature, effective_model, resolved_backend)
+        try:
+            effective_model = (
+                model
+                or getattr(resolved_backend, "model", None)
+                or getattr(resolved_backend, "model_name", None)
+                or get_default_model()
+            )
+            effective_temp = _resolve_logit_temperature(
+                logit_temperature,
+                effective_model,
+                resolved_backend,
+                binary=False,
+            )
+        except BaseException:
+            if owns_backend:
+                resolved_backend.close()
+            raise
 
         self.question = question.strip()
         self.options = normalized_options
@@ -644,7 +882,37 @@ class ChoiceGate(BaseGate):
         self.permutation_mode = permutation_mode
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
+            logit_temperature,
+            effective_model,
+            resolved_backend,
+            binary=False,
+        )
+        self._calibration_lock = threading.Lock()
         self.name = name
+
+    def replay_config(self) -> dict[str, Any]:
+        from logitgate.backends.base import infer_backend_spec
+
+        config: dict[str, Any] = {
+            "gate_type": "ChoiceGate",
+            "question": self.question,
+            "options": dict(self.options),
+            "backend": infer_backend_spec(self.backend),
+            "symmetric_debiasing": self.symmetric_debiasing,
+            "permutation_mode": self.permutation_mode,
+            "query_first": self.query_first,
+            "logit_temperature": self.logit_temperature,
+            "name": self.name,
+        }
+        model = (
+            self.model
+            or getattr(self.backend, "model", None)
+            or getattr(self.backend, "model_name", None)
+        )
+        if model:
+            config["model"] = model
+        return config
 
     def __repr__(self) -> str:
         q_repr = repr(self.question[:40] + "..." if len(self.question) > 40 else self.question)
@@ -671,7 +939,9 @@ class ChoiceGate(BaseGate):
         shift = max(1, n // 2)
         return [identity, [(i + shift) % n for i in range(n)]]
 
-    def _choice_prompts_list(self, candidate: Any) -> list[str]:
+    def _choice_prompts_list(
+        self, candidate: Any, *, boundary_nonce: str | None = None
+    ) -> list[str]:
         keys = list(self.options.keys())
         values = list(self.options.values())
         n = len(keys)
@@ -688,6 +958,7 @@ class ChoiceGate(BaseGate):
                     candidate=candidate,
                     options=slot_to_desc,
                     query_first=self.query_first,
+                    boundary_nonce=boundary_nonce,
                 )
             )
         return prompts
@@ -742,11 +1013,36 @@ class ChoiceGate(BaseGate):
         top_list = [top_fwd] if top_rev is None else [top_fwd, top_rev]
         return self._verdict_from_logprobs_list(top_list, t0)
 
+    def _ensure_calibrated(self) -> None:
+        if not self._needs_lazy_calibration or not self.model:
+            return
+        with self._calibration_lock:
+            if not self._needs_lazy_calibration:
+                return
+            if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
+                self._needs_lazy_calibration = False
+                return
+            self.logit_temperature = _lazy_calibrate_sync(self.model, self.backend, binary=False)
+            self._needs_lazy_calibration = False
+
+    async def _aensure_calibrated(self) -> None:
+        if not self._needs_lazy_calibration or not self.model:
+            return
+        if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
+            self._needs_lazy_calibration = False
+            return
+        temp = await _lazy_calibrate_async(self.model, self.backend, binary=False)
+        with self._calibration_lock:
+            self.logit_temperature = temp
+            self._needs_lazy_calibration = False
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        self._ensure_calibrated()
         t0 = time.perf_counter()
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
-        prompts = self._choice_prompts_list(candidate)
+        nonce = secrets.token_hex(8)
+        prompts = self._choice_prompts_list(candidate, boundary_nonce=nonce)
         top_list = [
             self.backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
             for p in prompts
@@ -754,10 +1050,12 @@ class ChoiceGate(BaseGate):
         return self._verdict_from_logprobs_list(top_list, t0)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        await self._aensure_calibrated()
         t0 = time.perf_counter()
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
-        prompts = self._choice_prompts_list(candidate)
+        nonce = secrets.token_hex(8)
+        prompts = self._choice_prompts_list(candidate, boundary_nonce=nonce)
         if len(prompts) == 1:
             top_list = [await self.backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)]
         else:
@@ -788,7 +1086,10 @@ class ScoreGate(BaseGate):
         symmetric_debiasing: When True, queries both normal and inverted scale prompts
             and averages logprobs to eliminate scale-end anchoring bias.
         query_first: When True, compiles prompt with rubric and candidate first.
-        logit_temperature: Temperature scaling factor for softmax normalization (default: 1.0).
+        logit_temperature: Temperature scaling factor, ``"auto"`` to calibrate via
+            micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
+            unknown BYO models when ``auto_calibrate=True``).
+        save_on_fail: Override failure snapshot persistence for this gate.
         name: Identifier for this gate instance.
 
     Raises:
@@ -810,7 +1111,7 @@ class ScoreGate(BaseGate):
         save_on_fail: bool | None = None,
         name: str = "ScoreGate",
     ) -> None:
-        if not rubric or not rubric.strip():
+        if not isinstance(rubric, str) or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
         if (
             isinstance(min_score, bool)
@@ -830,31 +1131,50 @@ class ScoreGate(BaseGate):
             )
         if (
             isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
             or not math.isfinite(float(threshold))
-            or not (min_score <= threshold <= max_score)
+            or not (min_score <= float(threshold) <= max_score)
         ):
             raise ConfigurationError(
                 f"threshold ({threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
             )
 
+        owns_backend = not isinstance(backend, LogitBackend)
         resolved_backend = resolve_logit_backend(backend, model=model)
-        effective_model = (
-            model
-            or getattr(resolved_backend, "model", None)
-            or getattr(resolved_backend, "model_name", None)
-            or get_default_model()
-        )
-        effective_temp = _resolve_logit_temperature(logit_temperature, effective_model, resolved_backend)
+        try:
+            effective_model = (
+                model
+                or getattr(resolved_backend, "model", None)
+                or getattr(resolved_backend, "model_name", None)
+                or get_default_model()
+            )
+            effective_temp = _resolve_logit_temperature(
+                logit_temperature,
+                effective_model,
+                resolved_backend,
+                binary=False,
+            )
+        except BaseException:
+            if owns_backend:
+                resolved_backend.close()
+            raise
 
         self.rubric = rubric.strip()
         self.min_score = min_score
         self.max_score = max_score
-        self.threshold = threshold
+        self.threshold = float(threshold)
         self.backend = resolved_backend
         self.model = effective_model
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
+            logit_temperature,
+            effective_model,
+            resolved_backend,
+            binary=False,
+        )
+        self._calibration_lock = threading.Lock()
         self.save_on_fail = save_on_fail
         self.name = name
 
@@ -904,7 +1224,7 @@ class ScoreGate(BaseGate):
             f"backend={self.backend!r})"
         )
 
-    def _score_prompts(self, candidate: Any) -> tuple[str, str | None]:
+    def _score_prompts(self, candidate: Any, *, boundary_nonce: str | None = None) -> tuple[str, str | None]:
         def build(inverted: bool) -> str:
             return compile_score_prompt(
                 rubric=self.rubric,
@@ -913,6 +1233,7 @@ class ScoreGate(BaseGate):
                 max_score=self.max_score,
                 query_first=self.query_first,
                 inverted=inverted,
+                boundary_nonce=boundary_nonce,
             )
 
         return build(False), (build(True) if self.symmetric_debiasing else None)
@@ -958,11 +1279,36 @@ class ScoreGate(BaseGate):
             traces=[trace],
         )
 
+    def _ensure_calibrated(self) -> None:
+        if not self._needs_lazy_calibration or not self.model:
+            return
+        with self._calibration_lock:
+            if not self._needs_lazy_calibration:
+                return
+            if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
+                self._needs_lazy_calibration = False
+                return
+            self.logit_temperature = _lazy_calibrate_sync(self.model, self.backend, binary=False)
+            self._needs_lazy_calibration = False
+
+    async def _aensure_calibrated(self) -> None:
+        if not self._needs_lazy_calibration or not self.model:
+            return
+        if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
+            self._needs_lazy_calibration = False
+            return
+        temp = await _lazy_calibrate_async(self.model, self.backend, binary=False)
+        with self._calibration_lock:
+            self.logit_temperature = temp
+            self._needs_lazy_calibration = False
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        self._ensure_calibrated()
         t0 = time.perf_counter()
         tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
         top_k = max(10, 2 * len(tokens))
-        forward, reverse = self._score_prompts(candidate)
+        nonce = secrets.token_hex(8)
+        forward, reverse = self._score_prompts(candidate, boundary_nonce=nonce)
         top_fwd = self.backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
         top_rev = (
             self.backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
@@ -974,10 +1320,12 @@ class ScoreGate(BaseGate):
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        await self._aensure_calibrated()
         t0 = time.perf_counter()
         tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
         top_k = max(10, 2 * len(tokens))
-        forward, reverse = self._score_prompts(candidate)
+        nonce = secrets.token_hex(8)
+        forward, reverse = self._score_prompts(candidate, boundary_nonce=nonce)
         top_rev: TopLogprobs | None = None
         if reverse is None:
             top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)

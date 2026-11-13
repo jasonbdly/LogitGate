@@ -318,6 +318,7 @@ class ASTGate(BaseGate):
         t0: float,
         metadata: dict[str, Any] | None = None,
         candidate: Any = None,
+        call_kwargs: dict[str, Any] | None = None,
     ) -> Verdict:
         latency = (time.perf_counter() - t0) * 1000.0
         meta = {"failure_code": code}
@@ -342,10 +343,13 @@ class ASTGate(BaseGate):
         )
         from logitgate.snapshot import persist_failure_snapshot
 
+        kw = call_kwargs or {}
         persist_failure_snapshot(
             verdict=verdict,
             candidate=candidate,
-            save_on_fail=self.save_on_fail,
+            save_on_fail=bool(kw.get("save_on_fail", self.save_on_fail)),
+            test_name=kw.get("test_name"),
+            snapshot_dir=kw.get("snapshot_dir"),
             gate_type="ASTGate",
             gate_config={"name": self.name, "failure_code": code},
         )
@@ -500,7 +504,7 @@ class ASTGate(BaseGate):
                     f"Normalizer raised exception: {ex}",
                     ASTFailureCode.CUSTOM_VALIDATOR_FAILED,
                     t0,
-                    candidate=orig_candidate,
+                    candidate=orig_candidate, call_kwargs=kwargs,
                 )
         elif self.normalize:
             candidate = normalize_candidate(candidate)
@@ -516,7 +520,7 @@ class ASTGate(BaseGate):
                 ASTFailureCode.MIN_LENGTH_VIOLATION,
                 t0,
                 {"actual_length": len(candidate_str), "min_length": self.min_length},
-                candidate=orig_candidate,
+                candidate=orig_candidate, call_kwargs=kwargs,
             )
 
         if self.max_length is not None and len(candidate_str) > self.max_length:
@@ -526,7 +530,7 @@ class ASTGate(BaseGate):
                 ASTFailureCode.MAX_LENGTH_VIOLATION,
                 t0,
                 {"actual_length": len(candidate_str), "max_length": self.max_length},
-                candidate=orig_candidate,
+                candidate=orig_candidate, call_kwargs=kwargs,
             )
 
         # 0b. JSON Schema Check
@@ -559,18 +563,18 @@ class ASTGate(BaseGate):
                 except (json.JSONDecodeError, RecursionError) as e:
                     if isinstance(e, RecursionError):
                         err = "Invalid JSON syntax: Maximum JSON nesting depth exceeded"
-                        return self._fail(err, ASTFailureCode.JSON_SYNTAX_ERROR, t0, candidate=orig_candidate)
+                        return self._fail(err, ASTFailureCode.JSON_SYNTAX_ERROR, t0, candidate=orig_candidate, call_kwargs=kwargs)
                     err = f"Invalid JSON syntax: {e}"
                     return self._fail(
                         err,
                         ASTFailureCode.JSON_SYNTAX_ERROR,
                         t0,
                         {"lineno": e.lineno, "colno": e.colno},
-                        candidate=orig_candidate,
+                        candidate=orig_candidate, call_kwargs=kwargs,
                     )
             else:
                 err = f"Expected JSON string, dict, or list; got {type(candidate).__name__}"
-                return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0, candidate=orig_candidate)
+                return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0, candidate=orig_candidate, call_kwargs=kwargs)
 
             if isinstance(self.json_schema, type) and issubclass(self.json_schema, BaseModel):
                 try:
@@ -582,7 +586,7 @@ class ASTGate(BaseGate):
                         ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                         t0,
                         {"schema": self.json_schema.__name__},
-                        candidate=orig_candidate,
+                        candidate=orig_candidate, call_kwargs=kwargs,
                     )
             elif isinstance(self.json_schema, dict):
                 type_map: dict[str, type | tuple[type, ...]] = {
@@ -618,7 +622,7 @@ class ASTGate(BaseGate):
                     top_type = self.json_schema["type"]
                     if not _matches_json_type(parsed_json, top_type):
                         err = f"Expected JSON {top_type} for schema validation, got {type(parsed_json).__name__}"
-                        return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0, candidate=orig_candidate)
+                        return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0, candidate=orig_candidate, call_kwargs=kwargs)
                     if top_type == "array" and isinstance(parsed_json, list):
                         items_spec = self.json_schema.get("items")
                         if isinstance(items_spec, dict) and "type" in items_spec:
@@ -631,11 +635,11 @@ class ASTGate(BaseGate):
                                         ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                                         t0,
                                         {"index": idx_item, "expected_type": item_type},
-                                        candidate=orig_candidate,
+                                        candidate=orig_candidate, call_kwargs=kwargs,
                                     )
                 elif not isinstance(parsed_json, dict):
                     err = f"Expected JSON object (dict) for schema validation, got {type(parsed_json).__name__}"
-                    return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0, candidate=orig_candidate)
+                    return self._fail(err, ASTFailureCode.JSON_TYPE_ERROR, t0, candidate=orig_candidate, call_kwargs=kwargs)
 
                 if isinstance(parsed_json, dict):
                     required_keys = self.json_schema.get("required")
@@ -648,7 +652,7 @@ class ASTGate(BaseGate):
                                     ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                                     t0,
                                     {"missing_key": req_key},
-                                    candidate=orig_candidate,
+                                    candidate=orig_candidate, call_kwargs=kwargs,
                                 )
 
                     props = self.json_schema.get("properties")
@@ -664,7 +668,7 @@ class ASTGate(BaseGate):
                                         ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                                         t0,
                                         {"property": prop_name, "expected_type": expected_type_str},
-                                        candidate=orig_candidate,
+                                        candidate=orig_candidate, call_kwargs=kwargs,
                                     )
                     elif not is_standard_json_schema:
                         for key, expected in self.json_schema.items():
@@ -675,7 +679,7 @@ class ASTGate(BaseGate):
                                     ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                                     t0,
                                     {"missing_key": key},
-                                    candidate=orig_candidate,
+                                    candidate=orig_candidate, call_kwargs=kwargs,
                                 )
                             val = parsed_json[key]
                             if isinstance(expected, str) and expected in type_map:
@@ -688,7 +692,7 @@ class ASTGate(BaseGate):
                                         ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                                         t0,
                                         {"property": key, "expected_type": expected},
-                                        candidate=orig_candidate,
+                                        candidate=orig_candidate, call_kwargs=kwargs,
                                     )
                             elif isinstance(expected, type) and (
                                 not isinstance(val, expected)
@@ -700,7 +704,7 @@ class ASTGate(BaseGate):
                                     ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR,
                                     t0,
                                     {"property": key, "expected_type": expected.__name__},
-                                    candidate=orig_candidate,
+                                    candidate=orig_candidate, call_kwargs=kwargs,
                                 )
 
         # 1. Syntax Check
@@ -716,7 +720,7 @@ class ASTGate(BaseGate):
                         ASTFailureCode.SYNTAX_ERROR,
                         t0,
                         {"lineno": e.lineno, "offset": e.offset, "msg": e.msg},
-                        candidate=orig_candidate,
+                        candidate=orig_candidate, call_kwargs=kwargs,
                     )
             except (ValueError, RecursionError, MemoryError) as e:
                 if self.syntax:
@@ -726,7 +730,7 @@ class ASTGate(BaseGate):
                         ASTFailureCode.SYNTAX_ERROR,
                         t0,
                         {"msg": str(e)},
-                        candidate=orig_candidate,
+                        candidate=orig_candidate, call_kwargs=kwargs,
                     )
 
         # 2. Forbidden Imports
@@ -747,7 +751,7 @@ class ASTGate(BaseGate):
                             ASTFailureCode.FORBIDDEN_IMPORT,
                             t0,
                             {"forbidden_import": imp},
-                            candidate=orig_candidate,
+                            candidate=orig_candidate, call_kwargs=kwargs,
                         )
 
         # 3. Forbidden Patterns
@@ -765,7 +769,7 @@ class ASTGate(BaseGate):
                     ASTFailureCode.FORBIDDEN_PATTERN,
                     t0,
                     {"pattern": pattern},
-                    candidate=orig_candidate,
+                    candidate=orig_candidate, call_kwargs=kwargs,
                 )
 
         # 4. Required Sections (literal match first: headers like "## Security (v2)" are not
@@ -784,7 +788,7 @@ class ASTGate(BaseGate):
                     ASTFailureCode.MISSING_SECTION,
                     t0,
                     {"missing_section": section},
-                    candidate=orig_candidate,
+                    candidate=orig_candidate, call_kwargs=kwargs,
                 )
 
         # 5. Acyclic DAG Check
@@ -814,7 +818,7 @@ class ASTGate(BaseGate):
                     "Candidate does not contain a valid task list ('tasks' or 'nodes') for DAG verification",
                     ASTFailureCode.DAG_CYCLE_DETECTED,
                     t0,
-                    candidate=orig_candidate,
+                    candidate=orig_candidate, call_kwargs=kwargs,
                 )
             dag_err = _detect_dag_cycle(tasks_data)
             if dag_err:
@@ -822,7 +826,7 @@ class ASTGate(BaseGate):
                     dag_err,
                     ASTFailureCode.DAG_CYCLE_DETECTED,
                     t0,
-                    candidate=orig_candidate,
+                    candidate=orig_candidate, call_kwargs=kwargs,
                 )
 
         # 6. Custom / BYO Validators
@@ -838,7 +842,7 @@ class ASTGate(BaseGate):
                         val_msg,
                         ASTFailureCode.CUSTOM_VALIDATOR_FAILED,
                         t0,
-                        candidate=orig_candidate,
+                        candidate=orig_candidate, call_kwargs=kwargs,
                     )
 
         if isinstance(norm_out := kwargs.get("_normalized_out"), list):

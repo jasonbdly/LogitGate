@@ -16,11 +16,13 @@ from logitgate import (
     ASTGate,
     BackendError,
     DecisionStatus,
+    GenerativeBackend,
     JudgeGate,
     LayerTrace,
     LogitGate,
     OllamaBackend,
     OpenAICompatBackend,
+    ScoreGate,
     StubBackend,
     Verdict,
     VerdictSnapshot,
@@ -293,6 +295,108 @@ def test_cli_benchmark_json_is_reproducible_metadata(capsys: pytest.CaptureFixtu
 def test_cli_benchmark_rejects_unknown_mode(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["benchmark", "--backend", "stub://", "--modes", "judge,vibes"]) == 1
     assert "vibes" in capsys.readouterr().err
+
+
+class _PureGenerativeJudgeBackend(GenerativeBackend):
+    """Implements GenerativeBackend without LogitBackend to verify heterogeneous metering."""
+
+    def __init__(self, verdict_text: str = "[VERDICT: PASS] verified", tokens: int = 45) -> None:
+        self.verdict_text = verdict_text
+        self.tokens = tokens
+        self.model = "remote-judge-70b"
+        self.calls = 0
+
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+        del prompt, max_tokens, kwargs
+        self.calls += 1
+        return self.verdict_text, self.tokens
+
+    def close(self) -> None:
+        return None
+
+
+def test_benchmark_heterogeneous_judge_and_cli_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    from logitgate.backends.base import LogitBackend
+    from logitgate.benchmark import BUILTIN_CASES, format_report, run_benchmark
+
+    l1_backend = StubBackend(default_prob=0.50)
+    l2_backend = _PureGenerativeJudgeBackend(verdict_text="[VERDICT: PASS] remote ok", tokens=50)
+    assert isinstance(l2_backend, GenerativeBackend)
+    assert not isinstance(l2_backend, LogitBackend)
+
+    report = run_benchmark(
+        BUILTIN_CASES[:2],
+        backend=l1_backend,
+        model="llama3.2:1b",
+        judge_backend=l2_backend,
+        judge_model="remote-judge-70b",
+        modes=["cascade"],
+        warmup=0,
+    )
+    row = report.modes["cascade"].summary()
+    assert l2_backend.calls == 2
+    assert row["fast_path_rate"] == 0.0
+    # 2 L1 logit calls + 1 pure generative judge call (0 CoT logit calls on non-LogitBackend) = 3.0
+    assert row["llm_calls_per_case"] == 3.0
+    assert row["generated_tokens_per_case"] == 50.0
+    assert report.metadata["model"] == "llama3.2:1b"
+    assert report.metadata["judge_model"] == "remote-judge-70b"
+    assert "judge_model=remote-judge-70b" in format_report(report)
+
+    code = main([
+        "benchmark",
+        "--backend",
+        "stub://",
+        "--model",
+        "llama3.2:1b",
+        "--judge-backend",
+        "stub://",
+        "--judge-model",
+        "gemma4:e4b",
+        "--limit",
+        "2",
+        "--json",
+    ])
+    data = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert data["metadata"]["model"] == "llama3.2:1b"
+    assert data["metadata"]["judge_model"] == "gemma4:e4b"
+
+
+def test_binary_vs_non_binary_model_temperatures_and_sub_tenth_calibration() -> None:
+    from logitgate.debiasing.permutation import fit_calibration
+    from logitgate.gates.logit_gate import ChoiceGate
+
+    stub = StubBackend(default_prob=0.9)
+    lg_15b = LogitGate("Binary check?", backend=stub, model="qwen2.5-coder:1.5b")
+    sg_15b = ScoreGate("Score check?", backend=stub, model="qwen2.5-coder:1.5b")
+    cg_15b = ChoiceGate("Choice check?", options={"A": "Opt 1", "B": "Opt 2"}, backend=stub, model="qwen2.5-coder:1.5b")
+    jg_15b = JudgeGate("Judge check?", backend=stub, model="qwen2.5-coder:1.5b")
+    lg_3b = LogitGate("Binary check?", backend=stub, model="qwen2.5-coder:3b")
+    sg_3b = ScoreGate("Score check?", backend=stub, model="qwen2.5-coder:3b")
+    lg_1b = LogitGate("Binary check?", backend=stub, model="llama3.2:1b")
+
+    assert lg_15b.logit_temperature == pytest.approx(0.06)
+    assert sg_15b.logit_temperature == pytest.approx(0.85)
+    assert cg_15b.logit_temperature == pytest.approx(0.85)
+    assert jg_15b.logit_temperature == pytest.approx(0.85)
+    assert lg_3b.logit_temperature == pytest.approx(0.40)
+    assert sg_3b.logit_temperature == pytest.approx(0.75)
+    assert lg_1b.logit_temperature == pytest.approx(1.40)
+
+    # Attenuated compact-model binary log-odds (~0.10 magnitude, 87.5% separable) fit T < 0.10
+    attenuated_samples = [
+        (0.12, 0.10, 1),
+        (0.14, 0.08, 1),
+        (0.11, 0.09, 1),
+        (0.05, 0.03, 0),
+        (-0.12, -0.10, 0),
+        (-0.14, -0.08, 0),
+        (-0.11, -0.09, 0),
+        (-0.04, -0.02, 1),
+    ] * 3
+    cal_att = fit_calibration(attenuated_samples)
+    assert 0.04 <= cal_att.optimal_temperature < 0.15
 
 
 # ----------------------------------------------------------------------------------------------
@@ -819,4 +923,194 @@ def test_pass_4_adversarial_security_and_ml_science_fixes(tmp_path: Path) -> Non
 
     assert _produce_wrapped() == 'Here is JSON: {"id": "ok"}'
 
+
+def test_dynamic_fit_calibration_regimes_and_structured_cache(tmp_path: Path) -> None:
+    from logitgate.debiasing.permutation import (
+        fit_calibration,
+        get_model_temperature,
+        has_known_or_cached_temperature,
+    )
+
+    # 1. Attenuated high-AUROC regime -> sharpens into sub-0.15 range
+    attenuated = [
+        (0.09, 0.07, 1),
+        (0.11, 0.08, 1),
+        (0.08, 0.08, 1),
+        (0.10, 0.06, 1),
+        (-0.09, -0.07, 0),
+        (-0.11, -0.08, 0),
+        (-0.08, -0.06, 0),
+        (0.02, 0.01, 0),
+    ]
+    cal_att = fit_calibration(attenuated)
+    assert cal_att.probe_auroc is not None and cal_att.probe_auroc >= 0.90
+    assert 0.04 <= cal_att.optimal_temperature < 0.15
+
+    # 2. Noisy low-AUROC regime (< 0.70) -> clamps >= 1.0 so uncertain items escalate
+    noisy = [
+        (0.60, 0.40, 1),
+        (-0.50, -0.30, 1),
+        (0.45, 0.35, 1),
+        (-0.40, -0.20, 1),
+        (0.55, 0.35, 0),
+        (-0.60, -0.40, 0),
+        (0.30, 0.20, 0),
+        (-0.50, -0.30, 0),
+    ]
+    cal_noisy = fit_calibration(noisy)
+    assert cal_noisy.probe_auroc is not None and cal_noisy.probe_auroc < 0.70
+    assert cal_noisy.optimal_temperature >= 1.0
+
+    # 3. High-magnitude separable regime (~12 logits, e.g. Gemma 4) -> dampens > 3.0
+    high_mag = [(12.0, 11.8, 1)] * 4 + [(-12.0, -11.8, 0)] * 4
+    cal_high = fit_calibration(high_mag)
+    assert cal_high.probe_auroc == pytest.approx(1.0)
+    assert cal_high.optimal_temperature > 3.0
+
+    # 4. Structured task-separated cache profile + legacy float backward compatibility
+    cache_file = tmp_path / "calibration.json"
+    cache_file.write_text(
+        json.dumps(
+            {
+                "legacy-float-model:7b": 1.35,
+                "structured-byo:2b": {
+                    "optimal_temperature": 0.09,
+                    "binary_temperature": 0.09,
+                    "multiclass_temperature": 0.88,
+                    "probe_auroc": 0.9375,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert has_known_or_cached_temperature("structured-byo:2b", cache_path=cache_file, binary=True)
+    assert not has_known_or_cached_temperature("truly-unknown-byo:9b", cache_path=cache_file, binary=True)
+    assert get_model_temperature("structured-byo:2b", cache_path=cache_file, binary=True) == pytest.approx(0.09)
+    assert get_model_temperature("structured-byo:2b", cache_path=cache_file, binary=False) == pytest.approx(0.88)
+    assert get_model_temperature("structured-byo:2b", cache_path=cache_file) == pytest.approx(0.09)
+    assert get_model_temperature("legacy-float-model:7b", cache_path=cache_file, binary=True) == pytest.approx(1.35)
+    assert get_model_temperature("legacy-float-model:7b", cache_path=cache_file, binary=False) == pytest.approx(1.35)
+
+
+async def test_lazy_byo_auto_calibration_sync_and_async(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import math
+
+    from logitgate import configure, reset_config
+    from logitgate.backends.base import GenerativeBackend, LogitBackend
+    from logitgate.gates.logit_gate import ChoiceGate
+
+    monkeypatch.setenv("LOGITGATE_CACHE_DIR", str(tmp_path))
+    reset_config()
+
+    def _ab_lps(lo_a_minus_b: float) -> list[dict[str, Any]]:
+        pa = 1.0 / (1.0 + math.exp(-lo_a_minus_b))
+        return [
+            {"token": "A", "logprob": math.log(pa)},
+            {"token": "B", "logprob": math.log(1.0 - pa)},
+        ]
+
+    class _BYOAttenuatedBackend(LogitBackend, GenerativeBackend):
+        def __init__(self, model: str) -> None:
+            self.model = model
+            self.logprob_calls = 0
+            self.gen_calls = 0
+
+        def query_top_logprobs(
+            self,
+            prompt: str,
+            top_k: int = 10,
+            allowed_tokens: list[str] | None = None,
+            **kwargs: Any,
+        ) -> list[dict[str, Any]]:
+            self.logprob_calls += 1
+            tokens = allowed_tokens or ["A", "B"]
+            if len(tokens) == 3:
+                # Identify which letter holds the true option description in this prompt
+                true_phrases = (
+                    "Parameterized SQL database query",
+                    "Critical command injection vulnerability",
+                    "Direct factual contradiction",
+                    "Clean, typed, documented implementation",
+                )
+                winner = "A"
+                for line in prompt.splitlines():
+                    stripped = line.strip()
+                    if (
+                        len(stripped) > 3
+                        and stripped[0] in ("A", "B", "C")
+                        and stripped[1] == ":"
+                        and any(tp in stripped for tp in true_phrases)
+                    ):
+                        winner = stripped[0]
+                        break
+                return [
+                    {"token": k, "logprob": -0.10 if k == winner else -3.20}
+                    for k in ("A", "B", "C")
+                ]
+
+            is_neg_candidate = any(
+                bad in prompt
+                for bad in ("all US and EU clusters", "WHERE org =", "items.pop(0)", "3-digit CVV")
+            )
+            a_means_pass = "A: The candidate artifact complies" in prompt
+            sign = -1.0 if is_neg_candidate else 1.0
+            raw_lo = 0.10 * sign if a_means_pass else -0.10 * sign
+            return _ab_lps(raw_lo)
+
+        def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+            self.gen_calls += 1
+            return "- Verified all requirements hold.\n[VERDICT: PASS]", 8
+
+    try:
+        byo = _BYOAttenuatedBackend(model="acme-byo-compact:2b")
+
+        # 1. Zero backend I/O in __init__
+        gate_disabled = LogitGate("Does it comply?", backend=byo, model="acme-byo-compact:2b")
+        assert byo.logprob_calls == 0
+
+        # 2. Disabling auto_calibrate skips lazy calibration cleanly
+        configure(auto_calibrate=False)
+        v_uncal = gate_disabled.evaluate("Safe compliant candidate")
+        assert byo.logprob_calls == 2
+        assert gate_disabled.logit_temperature == pytest.approx(1.0)
+        assert v_uncal.status == DecisionStatus.AMBIGUOUS  # 0.10 log-odds at T=1.0 -> P=0.525
+        assert not (tmp_path / "calibration.json").exists()
+
+        # 3. With auto_calibrate=True (default), first evaluate() calibrates once & caches profile
+        reset_config()
+        byo.logprob_calls = 0
+        gate_sync = LogitGate("Does it comply?", backend=byo, model="acme-byo-compact:2b")
+        assert byo.logprob_calls == 0  # Still lazy before evaluate()!
+        v_cal = gate_sync.evaluate("Safe compliant candidate")
+        assert byo.logprob_calls == 16 + 8 + 2  # 8 binary pairs + 4 multiclass pairs + 1 eval pair
+        assert 0.04 <= gate_sync.logit_temperature < 0.18
+        assert v_cal.probability is not None and v_cal.probability > 0.65
+        assert (tmp_path / "calibration.json").exists()
+
+        # Second evaluate() on a brand-new LogitGate, ScoreGate, ChoiceGate, and JudgeGate hits cache (zero calibration calls!)
+        byo.logprob_calls = 0
+        gate_sync_2 = LogitGate("Does it comply?", backend=byo, model="acme-byo-compact:2b")
+        sg_byo = ScoreGate("Rate quality", backend=byo, model="acme-byo-compact:2b")
+        cg_byo = ChoiceGate("Pick one", options={"A": "One", "B": "Two", "C": "Three"}, backend=byo, model="acme-byo-compact:2b")
+        jg_byo = JudgeGate("Check", backend=byo, model="acme-byo-compact:2b")
+        assert gate_sync_2.logit_temperature == pytest.approx(gate_sync.logit_temperature)
+        assert sg_byo.logit_temperature >= 0.65
+        assert cg_byo.logit_temperature == pytest.approx(sg_byo.logit_temperature)
+        assert jg_byo.logit_temperature == pytest.approx(sg_byo.logit_temperature)
+        gate_sync_2.evaluate("Safe compliant candidate")
+        assert byo.logprob_calls == 2  # Only the 2 evaluation passes!
+
+        # 4. Async first-use lazy calibration via aevaluate()
+        byo_async = _BYOAttenuatedBackend(model="acme-async-byo:3b")
+        gate_async = LogitGate("Does it comply?", backend=byo_async, model="acme-async-byo:3b")
+        assert byo_async.logprob_calls == 0
+        v_async = await gate_async.aevaluate("Safe compliant candidate")
+        assert byo_async.logprob_calls == 16 + 8 + 2
+        assert 0.04 <= gate_async.logit_temperature < 0.18
+        assert v_async.probability is not None and v_async.probability > 0.65
+    finally:
+        reset_config()
 

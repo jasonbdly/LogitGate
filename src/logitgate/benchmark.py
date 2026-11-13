@@ -37,6 +37,7 @@ from logitgate.backends.base import (
     LogitBackend,
     StubBackend,
     infer_backend_spec,
+    resolve_generative_backend,
     resolve_logit_backend,
 )
 from logitgate.gates.base import BaseGate, EscalationPolicy
@@ -182,8 +183,50 @@ class _MeteredBackend(LogitBackend, GenerativeBackend):
         self.generate_calls += 1
         return self.inner.generate(prompt, max_tokens=max_tokens, **kwargs)
 
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+        if not isinstance(self.inner, GenerativeBackend):
+            raise TypeError(f"Benchmarking the judge requires a generative backend, got {self.inner!r}")
+        self.generate_calls += 1
+        return await self.inner.agenerate(prompt, max_tokens=max_tokens, **kwargs)
+
     def close(self) -> None:
         self.inner.close()
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
+
+
+class _MeteredGenerativeBackend(GenerativeBackend):
+    """Meters generation calls on pure GenerativeBackend instances without exposing LogitBackend."""
+
+    def __init__(self, inner: GenerativeBackend) -> None:
+        if not isinstance(inner, GenerativeBackend):
+            raise TypeError(f"Benchmarking the judge requires a generative backend, got {inner!r}")
+        self.inner = inner
+        self.logit_calls = 0
+        self.generate_calls = 0
+
+    def __getattr__(self, item: str) -> Any:
+        if item == "inner":
+            raise AttributeError(item)
+        return getattr(self.inner, item)
+
+    def __repr__(self) -> str:
+        return repr(self.inner)
+
+    def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+        self.generate_calls += 1
+        return self.inner.generate(prompt, max_tokens=max_tokens, **kwargs)
+
+    async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
+        self.generate_calls += 1
+        return await self.inner.agenerate(prompt, max_tokens=max_tokens, **kwargs)
+
+    def close(self) -> None:
+        self.inner.close()
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
 
 
 def _percentile(values: Sequence[float], pct: float) -> float:
@@ -229,11 +272,39 @@ class BenchmarkReport:
         return {"metadata": self.metadata, "modes": {m: s.summary() for m, s in self.modes.items()}}
 
 
+def _extract_backend_clone_kwargs(resolved: Any) -> dict[str, Any]:
+    """Extracts transport/runtime options to preserve when cloning a backend for a judge model."""
+    from logitgate.backends.ollama import OllamaBackend
+
+    extra: dict[str, Any] = {}
+    if getattr(resolved, "timeout", None) is not None:
+        extra["timeout"] = resolved.timeout
+    if getattr(resolved, "api_key", None):
+        extra["api_key"] = resolved.api_key
+    if isinstance(resolved, OllamaBackend):
+        if getattr(resolved, "num_ctx", None) is not None:
+            extra["num_ctx"] = resolved.num_ctx
+        if getattr(resolved, "options", None):
+            extra["options"] = dict(resolved.options)
+    return extra
+
+
+def _prewarm_calibration_if_needed(target_backend: Any, model_name: str | None) -> None:
+    """Runs one-time BYO micro-probe calibration before metered measurement begins."""
+    from logitgate.debiasing.permutation import auto_calibrate_backend
+    from logitgate.gates.logit_gate import _should_lazy_auto_calibrate
+
+    if model_name and _should_lazy_auto_calibrate(None, model_name, target_backend, binary=True):
+        auto_calibrate_backend(target_backend, model_key=model_name, save_cache=True)
+
+
 def run_benchmark(
     cases: Sequence[BenchmarkCase],
     *,
     backend: str | LogitBackend | None = None,
     model: str | None = None,
+    judge_backend: str | GenerativeBackend | None = None,
+    judge_model: str | None = None,
     modes: Sequence[str] = MODES,
     repeat: int = 1,
     warmup: int = 1,
@@ -243,7 +314,27 @@ def run_benchmark(
     dataset_label: str = "builtin",
     progress: Callable[[str], None] | None = None,
 ) -> BenchmarkReport:
-    """Runs each mode over every case ``repeat`` times and collects per-call measurements."""
+    """Runs each mode over every case ``repeat`` times and collects per-call measurements.
+
+    Args:
+        cases: Sequence of labeled benchmark cases to evaluate.
+        backend: Tier-1 backend instance or URI specifier.
+        model: Model override for Tier-1 logit gates.
+        judge_backend: Optional separate Tier-2 backend instance or URI specifier.
+        judge_model: Optional separate Tier-2 model override.
+        modes: Subset of ``("judge", "logit", "cascade")`` to run.
+        repeat: Number of measured passes per mode (>= 1).
+        warmup: Number of untimed warmup evaluations before each mode (>= 0).
+        judge_max_tokens: Optional generation token limit for ``JudgeGate`` (>= 1).
+        judge_think: Whether to enable reasoning tokens on Ollama judges.
+        cascade_trigger: Escalation policy for the ``cascade`` mode.
+        dataset_label: Human-readable label recorded in report metadata.
+        progress: Optional callback invoked after each timed case evaluation.
+
+    Raises:
+        ValueError: If parameters are out of valid bounds.
+        TypeError: If a requested generative mode lacks a ``GenerativeBackend``.
+    """
     if not cases:
         raise ValueError("Benchmark needs at least one case")
     if not modes:
@@ -251,26 +342,111 @@ def run_benchmark(
     unknown = [m for m in modes if m not in MODES]
     if unknown:
         raise ValueError(f"Unknown benchmark modes {unknown}; choose from {list(MODES)}")
-    if repeat < 1 or warmup < 0:
+    if isinstance(repeat, bool) or repeat < 1 or isinstance(warmup, bool) or warmup < 0:
         raise ValueError("repeat must be >= 1 and warmup >= 0")
+    if judge_max_tokens is not None and (isinstance(judge_max_tokens, bool) or judge_max_tokens < 1):
+        raise ValueError(f"judge_max_tokens must be >= 1, got {judge_max_tokens!r}")
 
-    owns_backend = not isinstance(backend, LogitBackend)
-    resolved = resolve_logit_backend(backend, model=model)
+    needs_logit = any(m in ("logit", "cascade") for m in modes)
+    needs_generative = any(m in ("judge", "cascade") for m in modes)
+
+    owns_backend = False
+    resolved: Any = None
+    owns_judge_backend = False
+    resolved_judge: Any = None
     try:
-        effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
-        needs_generative = any(m in ("judge", "cascade") for m in modes)
-        metered = _MeteredBackend(resolved, require_generative=needs_generative)
+        if needs_logit:
+            owns_backend = not isinstance(backend, LogitBackend)
+            resolved = resolve_logit_backend(backend, model=model)
+            effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
+            _prewarm_calibration_if_needed(resolved, effective_model)
+            metered: _MeteredBackend | None = _MeteredBackend(resolved, require_generative=False)
+        else:
+            effective_model = model
+            metered = None
+
+        if needs_generative:
+            heterogeneous_judge = judge_backend is not None or judge_model is not None
+            if not needs_logit:
+                if judge_backend is not None:
+                    owns_judge_backend = not isinstance(judge_backend, GenerativeBackend)
+                    resolved_judge = resolve_generative_backend(judge_backend, model=judge_model)
+                elif isinstance(backend, GenerativeBackend):
+                    owns_judge_backend = False
+                    resolved_judge = backend
+                elif isinstance(backend, LogitBackend):
+                    owns_judge_backend = True
+                    resolved_judge = resolve_generative_backend(
+                        infer_backend_spec(backend),
+                        model=judge_model or model,
+                        **_extract_backend_clone_kwargs(backend),
+                    )
+                else:
+                    owns_judge_backend = True
+                    resolved_judge = resolve_generative_backend(backend, model=judge_model or model)
+            elif heterogeneous_judge:
+                if judge_backend is not None:
+                    owns_judge_backend = not isinstance(judge_backend, GenerativeBackend)
+                    resolved_judge = resolve_generative_backend(judge_backend, model=judge_model)
+                elif not isinstance(backend, LogitBackend):
+                    owns_judge_backend = True
+                    resolved_judge = resolve_generative_backend(backend, model=judge_model)
+                elif isinstance(resolved, StubBackend):
+                    resolved_judge = resolved
+                else:
+                    owns_judge_backend = True
+                    resolved_judge = resolve_generative_backend(
+                        infer_backend_spec(resolved),
+                        model=judge_model,
+                        **_extract_backend_clone_kwargs(resolved),
+                    )
+            else:
+                resolved_judge = resolved
+
+            if not isinstance(resolved_judge, GenerativeBackend):
+                raise TypeError(f"Benchmarking the judge requires a generative backend, got {resolved_judge!r}")
+            effective_judge_model = (
+                judge_model
+                or getattr(resolved_judge, "model", None)
+                or getattr(resolved_judge, "model_name", None)
+                or effective_model
+            )
+            if resolved_judge is resolved and metered is not None:
+                metered_judge: _MeteredBackend | _MeteredGenerativeBackend | None = metered
+            else:
+                _prewarm_calibration_if_needed(resolved_judge, effective_judge_model)
+                metered_judge = (
+                    _MeteredBackend(resolved_judge, require_generative=True)
+                    if isinstance(resolved_judge, LogitBackend)
+                    else _MeteredGenerativeBackend(resolved_judge)
+                )
+        else:
+            resolved_judge = resolved
+            effective_judge_model = effective_model
+            metered_judge = metered
+
+        if effective_model is None and resolved_judge is not None and not needs_logit:
+            effective_model = effective_judge_model
+
         # Only Ollama understands `think`; OpenAI-compatible servers may reject unknown fields.
         from logitgate.backends.ollama import OllamaBackend
 
-        effective_think = judge_think if isinstance(resolved, (OllamaBackend, StubBackend)) else None
+        effective_think = judge_think if isinstance(resolved_judge, (OllamaBackend, StubBackend)) else None
+
+        def _counts() -> tuple[int, int]:
+            l_calls = metered.logit_calls if metered is not None else 0
+            g_calls = metered.generate_calls if metered is not None else 0
+            if metered_judge is not None and metered_judge is not metered:
+                l_calls += metered_judge.logit_calls
+                g_calls += metered_judge.generate_calls
+            return l_calls, g_calls
 
         def build(mode: str, rubric: str) -> BaseGate:
             if mode == "judge":
                 return JudgeGate(
                     rubric=rubric,
-                    backend=metered,
-                    model=effective_model,
+                    backend=metered_judge,
+                    model=effective_judge_model,
                     trigger="always",
                     max_tokens=judge_max_tokens,
                     think=effective_think,
@@ -280,8 +456,8 @@ def run_benchmark(
                 return logit
             judge = JudgeGate(
                 rubric=None,
-                backend=metered,
-                model=effective_model,
+                backend=metered_judge,
+                model=effective_judge_model,
                 trigger=cascade_trigger,
                 max_tokens=judge_max_tokens,
                 think=effective_think,
@@ -297,37 +473,46 @@ def run_benchmark(
             for rep in range(repeat):
                 for idx, case in enumerate(cases):
                     gate = build(mode, case.rubric)
-                    logit_before, gen_before = metered.logit_calls, metered.generate_calls
+                    logit_before, gen_before = _counts()
                     t0 = time.perf_counter()
                     verdict = gate.evaluate(case.candidate, save_on_fail=False)
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                    generate_calls = metered.generate_calls - gen_before
+                    logit_after, gen_after = _counts()
+                    generate_calls = gen_after - gen_before
 
                     s = stats[mode]
                     s.latencies_ms.append(elapsed_ms)
                     s.generated_tokens.append(verdict.total_tokens_generated)
-                    s.llm_calls.append(metered.logit_calls - logit_before + generate_calls)
+                    s.llm_calls.append((logit_after - logit_before) + generate_calls)
                     s.correct.append(verdict.passed == case.expected)
                     s.ambiguous.append(verdict.status == DecisionStatus.AMBIGUOUS)
                     s.judge_skipped.append(generate_calls == 0)
                     if progress is not None:
                         progress(f"{mode:<8} rep {rep + 1}/{repeat} case {idx + 1}/{len(cases)} {elapsed_ms:9.1f} ms")
     finally:
-        if owns_backend:
+        if owns_judge_backend and resolved_judge is not None and resolved_judge is not resolved:
+            resolved_judge.close()
+        if owns_backend and resolved is not None:
             resolved.close()
 
     from logitgate import __version__
 
+    primary_backend = resolved if resolved is not None else resolved_judge
     digest = hashlib.sha256(
         json.dumps([(c.rubric, c.candidate, c.expected) for c in cases]).encode()
     ).hexdigest()[:12]
+    backend_spec = infer_backend_spec(primary_backend)
+    judge_backend_spec = infer_backend_spec(resolved_judge if resolved_judge is not None else primary_backend)
     metadata = {
         "logitgate_version": __version__,
         "python": platform.python_version(),
         "platform": platform.platform(),
-        "backend": infer_backend_spec(resolved),
+        "backend": backend_spec,
         "model": effective_model,
-        "is_stub": isinstance(resolved, StubBackend),
+        "judge_backend": judge_backend_spec,
+        "judge_model": effective_judge_model,
+        "is_stub": (resolved is None or isinstance(resolved, StubBackend))
+        and (resolved_judge is None or isinstance(resolved_judge, StubBackend)),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset": {"source": dataset_label, "cases": len(cases), "sha256_12": digest},
         "repeat": repeat,
@@ -341,12 +526,27 @@ def run_benchmark(
 
 def format_report(report: BenchmarkReport) -> str:
     """Renders a fixed-width table that pastes cleanly into issues and PR descriptions."""
+    from logitgate.cli import sanitize_terminal_text
+
     meta = report.metadata
     rows = [s.summary() for s in report.modes.values()]
+    safe_backend = sanitize_terminal_text(str(meta.get("backend") or ""))
+    safe_model = sanitize_terminal_text(str(meta.get("model") or ""))
+    judge_backend_meta = meta.get("judge_backend")
+    judge_model_meta = meta.get("judge_model")
+    judge_suffix = ""
+    if (
+        (judge_backend_meta is not None and judge_backend_meta != meta["backend"])
+        or (judge_model_meta is not None and judge_model_meta != meta["model"])
+    ):
+        safe_jb = sanitize_terminal_text(str(judge_backend_meta))
+        safe_jm = sanitize_terminal_text(str(judge_model_meta))
+        judge_suffix = f" | judge_backend={safe_jb} judge_model={safe_jm}"
+    safe_source = sanitize_terminal_text(str(meta["dataset"]["source"]))
     lines = [
-        f"LogitGate {meta['logitgate_version']} benchmark | backend={meta['backend']} model={meta['model']}",
+        f"LogitGate {meta['logitgate_version']} benchmark | backend={safe_backend} model={safe_model}{judge_suffix}",
         (
-            f"dataset={meta['dataset']['source']} ({meta['dataset']['cases']} cases, "
+            f"dataset={safe_source} ({meta['dataset']['cases']} cases, "
             f"sha256:{meta['dataset']['sha256_12']}) repeat={meta['repeat']} warmup={meta['warmup']} "
             f"judge_think={meta['judge_think']} cascade_trigger={meta['cascade_trigger']}"
         ),

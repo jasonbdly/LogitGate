@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
 import textwrap
 from collections.abc import Sequence
@@ -192,6 +193,18 @@ def create_parser() -> argparse.ArgumentParser:
     bench_parser.add_argument("--backend", type=str, default=None, help="Backend specifier, e.g. ollama://localhost:11434")
     bench_parser.add_argument("--model", type=str, default=None, help="Model name for the backend")
     bench_parser.add_argument(
+        "--judge-backend",
+        type=str,
+        default=None,
+        help="Optional separate backend specifier for JudgeGate (heterogeneous cascade)",
+    )
+    bench_parser.add_argument(
+        "--judge-model",
+        type=str,
+        default=None,
+        help="Optional separate model name for JudgeGate (defaults to --model)",
+    )
+    bench_parser.add_argument(
         "--dataset",
         type=str,
         default=None,
@@ -219,7 +232,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     bench_parser.add_argument(
         "--cascade-trigger",
-        choices=("on_ambiguous_only", "on_ambiguous_or_fail", "always"),
+        choices=("on_ambiguous_only", "on_ambiguous_or_fail", "adjudicate", "always"),
         default="on_ambiguous_only",
         help="JudgeGate escalation policy inside the cascade (default: on_ambiguous_only)",
     )
@@ -235,13 +248,29 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 _ANSI_CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33", "cyan": "36"}
+_TERMINAL_ESCAPE_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?"
+    r"|\x1b[@-Z\\-_]"
+)
+_BIDI_CONTROLS = frozenset(
+    "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
+
+
+def sanitize_terminal_text(text: str) -> str:
+    """Strips ANSI escape sequences, C0/C1 controls, and BiDi overrides from untrusted text."""
+    stripped = _TERMINAL_ESCAPE_RE.sub("", text)
+    return "".join(
+        ch
+        for ch in stripped
+        if ch not in _BIDI_CONTROLS
+        and (ch in ("\n", "\t") or (ord(ch) >= 32 and not (127 <= ord(ch) <= 159)))
+    )
 
 
 def _sanitize_terminal_text(text: str) -> str:
-    """Strips raw terminal control/escape sequences from untrusted candidate or critique text."""
-    return "".join(
-        ch for ch in text if ch in ("\n", "\t") or (ord(ch) >= 32 and not (127 <= ord(ch) <= 159))
-    )
+    return sanitize_terminal_text(text)
 
 
 class _Style:
@@ -516,6 +545,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
 
             calibrated_probs: list[float] = []
             ground_truth_labels: list[bool] = []
+            log_odds_samples: list[tuple[float, float, int]] = []
 
             for sample_rubric, sample_candidate, sample_y in samples:
                 gate = LogitGate(rubric=sample_rubric, backend=backend, model=args.model, save_on_fail=False)
@@ -523,6 +553,12 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
                 prob = v.probability if v.probability is not None else (1.0 if v.passed else 0.0)
                 calibrated_probs.append(prob)
                 ground_truth_labels.append(bool(sample_y))
+                tr = v.traces[-1] if v.traces else None
+                if tr is not None and tr.log_odds_pass is not None:
+                    f_lo = tr.forward_log_odds if tr.forward_log_odds is not None else tr.log_odds_pass
+                    r_lo = tr.reverse_log_odds if tr.reverse_log_odds is not None else f_lo
+                    if math.isfinite(f_lo) and math.isfinite(r_lo):
+                        log_odds_samples.append((f_lo, r_lo, 1 if sample_y else 0))
 
             try:
                 thresholds = calibrate_cascade_thresholds(
@@ -531,8 +567,27 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
                     target_risk_alpha=args.alpha,
                 )
             except ValueError as e:
-                sys.stderr.write(f"Error: {e}\n")
+                sys.stderr.write(f"Error: {sanitize_terminal_text(str(e))}\n")
                 return EXIT_FAILED
+
+            if args.cache_path and log_odds_samples:
+                from logitgate.debiasing.permutation import (
+                    _persist_calibration_profile,
+                    fit_calibration,
+                )
+
+                try:
+                    temp_result = fit_calibration(log_odds_samples)
+                    _persist_calibration_profile(
+                        effective_model,
+                        temp_result,
+                        cache_path=Path(args.cache_path),
+                    )
+                except (OSError, ValueError, CalibrationError) as e:
+                    sys.stderr.write(
+                        f"Warning: could not persist temperature calibration cache to "
+                        f"'{sanitize_terminal_text(str(args.cache_path))}': {sanitize_terminal_text(str(e))}\n"
+                    )
 
             if args.json:
                 print(json.dumps(asdict(thresholds), indent=2))
@@ -540,7 +595,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
                 print("=" * 60)
                 print("LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION")
                 print("=" * 60)
-                print(f"Dataset:                   {args.dataset}")
+                print(f"Dataset:                   {sanitize_terminal_text(str(args.dataset))}")
                 print(f"Calibration Samples:       {thresholds.calibration_set_size}")
                 print(f"Target Risk (Alpha):       {thresholds.target_risk_alpha:.4f}")
                 print("-" * 60)
@@ -569,7 +624,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
         cache_path = Path(args.cache_path) if args.cache_path else None
 
         if not args.json:
-            print(f"Calibrating model '{effective_model}' on backend {backend.__class__.__name__}...")
+            print(f"Calibrating model '{sanitize_terminal_text(effective_model)}' on backend {backend.__class__.__name__}...")
         try:
             result = auto_calibrate_backend(
                 backend,
@@ -578,12 +633,16 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
                 cache_path=cache_path,
             )
         except (OSError, ValueError) as e:
-            sys.stderr.write(f"Error saving calibration cache: {e}\n")
+            sys.stderr.write(f"Error saving calibration cache: {sanitize_terminal_text(str(e))}\n")
             return EXIT_FAILED
         if args.json:
             print(result.model_dump_json(indent=2))
         else:
             print(f"Optimal Temperature: {result.optimal_temperature:.4f}")
+            if result.multiclass_temperature is not None:
+                print(f"Multiclass Temperature: {result.multiclass_temperature:.4f}")
+            if result.probe_auroc is not None:
+                print(f"Probe AUROC: {result.probe_auroc:.4f}")
             print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
             print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
             print("Calibration successfully saved to cache.")
@@ -595,10 +654,14 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
 def _cmd_explain(args: argparse.Namespace) -> int:
     from logitgate.snapshot import VerdictSnapshot
 
+    if args.max_tokens is not None and args.max_tokens < 1:
+        sys.stderr.write("Error: --max-tokens must be >= 1\n")
+        return EXIT_FAILED
+
     try:
         snapshot = VerdictSnapshot.load(args.snapshot_path)
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        sys.stderr.write(f"Error loading snapshot from '{args.snapshot_path}': {e}\n")
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as e:
+        sys.stderr.write(f"Error loading snapshot from '{args.snapshot_path}': {sanitize_terminal_text(str(e))}\n")
         return EXIT_FAILED
 
     style = _Style(_use_color(args.color, sys.stdout), sys.stdout)
@@ -620,10 +683,10 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     except BackendError as exc:
         if not args.json:
             print(render_snapshot_report(snapshot, style, replay_note="Replay failed; see error below."))
-        sys.stderr.write(f"error: {exc}\nTip: `logitgate explain --offline {args.snapshot_path}` shows diagnostics without a model.\n")
+        sys.stderr.write(f"error: {sanitize_terminal_text(str(exc))}\nTip: `logitgate explain --offline {args.snapshot_path}` shows diagnostics without a model.\n")
         return EXIT_BACKEND_ERROR
     except TypeError as exc:
-        sys.stderr.write(f"error: {exc}\n")
+        sys.stderr.write(f"error: {sanitize_terminal_text(str(exc))}\n")
         return EXIT_FAILED
 
     if args.json:
@@ -636,10 +699,17 @@ def _cmd_explain(args: argparse.Namespace) -> int:
 def _cmd_benchmark(args: argparse.Namespace) -> int:
     from logitgate.benchmark import format_report, load_cases, run_benchmark, write_json
 
+    if args.judge_max_tokens is not None and args.judge_max_tokens < 1:
+        sys.stderr.write("Error: --judge-max-tokens must be >= 1\n")
+        return EXIT_FAILED
+    if args.repeat < 1 or args.warmup < 0:
+        sys.stderr.write("Error: --repeat must be >= 1 and --warmup must be >= 0\n")
+        return EXIT_FAILED
+
     try:
         cases, label = load_cases(args.dataset)
     except (OSError, ValueError) as e:
-        sys.stderr.write(f"Error loading dataset '{args.dataset}': {e}\n")
+        sys.stderr.write(f"Error loading dataset '{args.dataset}': {sanitize_terminal_text(str(e))}\n")
         return EXIT_FAILED
     if args.limit is not None:
         if args.limit < 1:
@@ -656,6 +726,8 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             cases,
             backend=args.backend,
             model=args.model,
+            judge_backend=args.judge_backend,
+            judge_model=args.judge_model,
             modes=modes,
             repeat=args.repeat,
             warmup=args.warmup,
@@ -666,7 +738,7 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             progress=None if (args.quiet or args.json) else progress,
         )
     except (ValueError, TypeError) as e:
-        sys.stderr.write(f"Error: {e}\n")
+        sys.stderr.write(f"Error: {sanitize_terminal_text(str(e))}\n")
         return EXIT_FAILED
 
     if args.json:
@@ -726,10 +798,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         print(f"Verdict: {verdict_str} (status: {verdict.status.value})")
         if verdict.probability is not None:
             print(f"Confidence: {verdict.probability:.4f}")
-        print(f"Triggered Layer: {verdict.triggered_layer}")
+        print(f"Triggered Layer: {sanitize_terminal_text(verdict.triggered_layer or '')}")
         print(f"Total Latency: {verdict.total_latency_ms:.2f}ms")
         if verdict.reason:
-            print(f"Reason: {verdict.reason}")
+            print(f"Reason: {sanitize_terminal_text(verdict.reason)}")
 
     return EXIT_OK if verdict.passed else EXIT_FAILED
 
@@ -755,10 +827,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         result: int = command(args)
     except BackendError as exc:
         # Backends already phrase these as "what went wrong + what to do"; a traceback adds nothing.
-        sys.stderr.write(f"error: {exc}\n")
+        sys.stderr.write(f"error: {sanitize_terminal_text(str(exc))}\n")
         return EXIT_BACKEND_ERROR
     except (ConfigurationError, CalibrationError) as exc:
-        sys.stderr.write(f"error: {exc}\n")
+        sys.stderr.write(f"error: {sanitize_terminal_text(str(exc))}\n")
         return EXIT_FAILED
     return result
 

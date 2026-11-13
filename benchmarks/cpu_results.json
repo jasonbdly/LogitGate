@@ -3,21 +3,22 @@
     "latencies": {
       "ram_gb": 1.45,
       "vram_gb": 0.0,
-      "single_pass_ms": "44.0 \u00b1 0.9 ms",
-      "single_pass_mean_ms": 44.0,
-      "two_pass_ms": "394.5 \u00b1 67.5 ms",
-      "two_pass_mean_ms": 394.5,
-      "four_rubric_batch_total_ms": "2087.2 \u00b1 106.4 ms",
-      "per_rubric_batch_ms": "521.8 \u00b1 26.6 ms"
+      "single_pass_ms": "47.0 \u00b1 1.0 ms",
+      "single_pass_mean_ms": 47.0,
+      "two_pass_ms": "392.3 \u00b1 52.0 ms",
+      "two_pass_mean_ms": 392.3,
+      "four_rubric_batch_total_ms": "2153.1 \u00b1 29.9 ms",
+      "four_rubric_batch_mean_ms": 2153.1,
+      "per_rubric_batch_ms": "538.3 \u00b1 7.5 ms"
     },
     "suite_1_multi_domain_24": {
-      "baseline_accuracy": "15/24 (62.5%)",
-      "baseline_time_ms": 187981.3,
-      "baseline_tokens": 3107,
-      "cascade_accuracy": "16/24 (66.7%)",
-      "cascade_time_ms": 142479.5,
-      "cascade_tokens": 2899,
-      "speedup_factor": 1.3,
+      "baseline_accuracy": "16/24 (66.7%)",
+      "baseline_time_ms": 192218.4,
+      "baseline_tokens": 3466,
+      "cascade_accuracy": "15/24 (62.5%)",
+      "cascade_time_ms": 153067.0,
+      "cascade_tokens": 3258,
+      "speedup_factor": 1.26,
       "tokens_saved": 208,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
@@ -45,22 +46,23 @@
     "latencies": {
       "ram_gb": 2.34,
       "vram_gb": 0.0,
-      "single_pass_ms": "66.1 \u00b1 1.7 ms",
-      "single_pass_mean_ms": 66.1,
-      "two_pass_ms": "551.1 \u00b1 89.8 ms",
-      "two_pass_mean_ms": 551.1,
-      "four_rubric_batch_total_ms": "3194.4 \u00b1 141.0 ms",
-      "per_rubric_batch_ms": "798.6 \u00b1 35.2 ms"
+      "single_pass_ms": "69.0 \u00b1 4.8 ms",
+      "single_pass_mean_ms": 69.0,
+      "two_pass_ms": "587.1 \u00b1 93.4 ms",
+      "two_pass_mean_ms": 587.1,
+      "four_rubric_batch_total_ms": "3307.9 \u00b1 123.6 ms",
+      "four_rubric_batch_mean_ms": 3307.9,
+      "per_rubric_batch_ms": "827.0 \u00b1 30.9 ms"
     },
     "suite_1_multi_domain_24": {
-      "baseline_accuracy": "19/24 (79.2%)",
-      "baseline_time_ms": 286166.0,
-      "baseline_tokens": 3225,
-      "cascade_accuracy": "21/24 (87.5%)",
-      "cascade_time_ms": 115683.6,
-      "cascade_tokens": 1457,
+      "baseline_accuracy": "18/24 (75.0%)",
+      "baseline_time_ms": 308723.9,
+      "baseline_tokens": 3348,
+      "cascade_accuracy": "22/24 (91.7%)",
+      "cascade_time_ms": 123454.6,
+      "cascade_tokens": 1515,
       "speedup_factor": 2.5,
-      "tokens_saved": 1768,
+      "tokens_saved": 1833,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
         "l1_decisive": "12/24 (50.0%)",
@@ -87,26 +89,27 @@
     "latencies": {
       "ram_gb": 1.11,
       "vram_gb": 0.0,
-      "single_pass_ms": "40.8 \u00b1 2.6 ms",
-      "single_pass_mean_ms": 40.8,
-      "two_pass_ms": "292.2 \u00b1 47.2 ms",
-      "two_pass_mean_ms": 292.2,
-      "four_rubric_batch_total_ms": "1629.1 \u00b1 41.7 ms",
-      "per_rubric_batch_ms": "407.3 \u00b1 10.4 ms"
+      "single_pass_ms": "41.7 \u00b1 1.8 ms",
+      "single_pass_mean_ms": 41.7,
+      "two_pass_ms": "304.0 \u00b1 52.1 ms",
+      "two_pass_mean_ms": 304.0,
+      "four_rubric_batch_total_ms": "1694.1 \u00b1 89.6 ms",
+      "four_rubric_batch_mean_ms": 1694.1,
+      "per_rubric_batch_ms": "423.5 \u00b1 22.4 ms"
     },
     "suite_1_multi_domain_24": {
-      "baseline_accuracy": "14/24 (58.3%)",
-      "baseline_time_ms": 126654.4,
-      "baseline_tokens": 2735,
-      "cascade_accuracy": "15/24 (62.5%)",
-      "cascade_time_ms": 95247.2,
-      "cascade_tokens": 2516,
-      "speedup_factor": 1.3,
-      "tokens_saved": 219,
+      "baseline_accuracy": "15/24 (62.5%)",
+      "baseline_time_ms": 140101.9,
+      "baseline_tokens": 2974,
+      "cascade_accuracy": "18/24 (75.0%)",
+      "cascade_time_ms": 95787.5,
+      "cascade_tokens": 2508,
+      "speedup_factor": 1.46,
+      "tokens_saved": 466,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
-        "l1_decisive": "0/24 (0.0%)",
-        "l2_escalated": "22/24 (91.7%)"
+        "l1_decisive": "5/24 (20.8%)",
+        "l2_escalated": "17/24 (70.8%)"
       }
     },
     "suite_2_reasoning_depth_32": {
@@ -129,26 +132,27 @@
     "latencies": {
       "ram_gb": 2.09,
       "vram_gb": 0.0,
-      "single_pass_ms": "60.3 \u00b1 2.1 ms",
-      "single_pass_mean_ms": 60.3,
-      "two_pass_ms": "543.7 \u00b1 91.0 ms",
-      "two_pass_mean_ms": 543.7,
-      "four_rubric_batch_total_ms": "3122.2 \u00b1 126.0 ms",
-      "per_rubric_batch_ms": "780.5 \u00b1 31.5 ms"
+      "single_pass_ms": "64.4 \u00b1 1.0 ms",
+      "single_pass_mean_ms": 64.4,
+      "two_pass_ms": "566.8 \u00b1 96.1 ms",
+      "two_pass_mean_ms": 566.8,
+      "four_rubric_batch_total_ms": "3209.9 \u00b1 134.7 ms",
+      "four_rubric_batch_mean_ms": 3209.9,
+      "per_rubric_batch_ms": "802.5 \u00b1 33.7 ms"
     },
     "suite_1_multi_domain_24": {
       "baseline_accuracy": "17/24 (70.8%)",
-      "baseline_time_ms": 245513.4,
-      "baseline_tokens": 2760,
-      "cascade_accuracy": "19/24 (79.2%)",
-      "cascade_time_ms": 125241.5,
-      "cascade_tokens": 1644,
-      "speedup_factor": 2.0,
-      "tokens_saved": 1116,
+      "baseline_time_ms": 280087.4,
+      "baseline_tokens": 3080,
+      "cascade_accuracy": "22/24 (91.7%)",
+      "cascade_time_ms": 70928.0,
+      "cascade_tokens": 764,
+      "speedup_factor": 3.95,
+      "tokens_saved": 2316,
       "layer_resolution": {
         "l0_ast": "2/24 (8.3%)",
-        "l1_decisive": "8/24 (33.3%)",
-        "l2_escalated": "14/24 (58.3%)"
+        "l1_decisive": "17/24 (70.8%)",
+        "l2_escalated": "5/24 (20.8%)"
       }
     },
     "suite_2_reasoning_depth_32": {

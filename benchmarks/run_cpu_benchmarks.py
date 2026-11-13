@@ -51,7 +51,6 @@ from dataset import (
 
 from logitgate import ASTGate, ChoiceGate, JudgeGate, LogitGate, ScoreGate
 from logitgate.backends.ollama import OllamaBackend
-from logitgate.models import DecisionStatus
 
 
 def unload_model(base_url: str, model_name: str) -> None:
@@ -180,32 +179,23 @@ def eval_multi_domain_24_cpu(backend: OllamaBackend, model_name: str) -> dict[st
     for item in MULTI_DOMAIN_24_ITEMS:
         ast_gate = ASTGate(**item.get("ast_config", {}))
         logit_gate = LogitGate(rubric=item["rubric"], backend=backend, model=model_name, preset="balanced")
-
-        v_l0 = ast_gate.evaluate(item["candidate"])
-        if not v_l0.passed:
+        judge_gate = JudgeGate(
+            backend=backend,
+            model=model_name,
+            trigger="on_ambiguous_only",
+            max_tokens=max_tok,
+            think=False,
+        )
+        v_c = (ast_gate >> logit_gate >> judge_gate).evaluate(item["candidate"], save_on_fail=False)
+        casc_tokens += v_c.total_tokens_generated
+        if v_c.triggered_layer == ast_gate.name:
             l0_count += 1
-            if not item["expected"]:
-                casc_correct += 1
-            continue
-
-        v_l1 = logit_gate.evaluate(item["candidate"])
-        if v_l1.status == DecisionStatus.PASSED:
-            l1_decisive_count += 1
-            if item["expected"]:
-                casc_correct += 1
-        elif v_l1.status == DecisionStatus.FAILED:
-            l1_decisive_count += 1
-            # on_ambiguous_only fast-fails here without generating tokens
-            if not item["expected"]:
-                casc_correct += 1
-        else:
-            # Ambiguous -> escalate to Layer 2 JudgeGate
+        elif any(t.layer_name == judge_gate.name for t in v_c.traces):
             l2_escalated_count += 1
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=False)
-            v_j = jg.evaluate(item["candidate"])
-            casc_tokens += v_j.total_tokens_generated
-            if v_j.passed == item["expected"]:
-                casc_correct += 1
+        else:
+            l1_decisive_count += 1
+        if v_c.passed == item["expected"]:
+            casc_correct += 1
 
     casc_time_ms = (time.perf_counter() - t_casc_start) * 1000.0
     n = len(MULTI_DOMAIN_24_ITEMS)
@@ -239,21 +229,23 @@ def eval_reasoning_tiers_cpu(backend: OllamaBackend, model_name: str) -> dict[st
         for it in items:
             rubric = rubric_override or it["rubric"]
             gate = LogitGate(rubric=rubric, backend=backend, model=model_name, preset="balanced")
-            v_l1 = gate.evaluate(it["candidate"])
-            p = v_l1.probability if v_l1.probability is not None else 0.5
+            jg = JudgeGate(
+                backend=backend,
+                model=model_name,
+                trigger="on_ambiguous_only",
+                max_tokens=200,
+                think=False,
+            )
+            v_casc = (gate >> jg).evaluate(it["candidate"], save_on_fail=False)
+            p = (
+                v_casc.traces[0].calibrated_prob
+                if (v_casc.traces and v_casc.traces[0].calibrated_prob is not None)
+                else 0.5
+            )
             l1_pass = p >= 0.5
             if l1_pass == it["expected"]:
                 l1_ok += 1
-
-            if v_l1.status == DecisionStatus.PASSED:
-                casc_pass = True
-            elif v_l1.status == DecisionStatus.FAILED:
-                casc_pass = False
-            else:
-                jg = JudgeGate(rubric=rubric, backend=backend, model=model_name, max_tokens=200, think=False)
-                casc_pass = jg.evaluate(it["candidate"]).passed
-
-            if casc_pass == it["expected"]:
+            if v_casc.passed == it["expected"]:
                 casc_ok += 1
         return l1_ok, casc_ok
 

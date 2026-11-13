@@ -327,3 +327,125 @@ def test_cascade_writes_single_snapshot_with_full_trace_and_replay_config(tmp_pa
     assert snap.gate_config["rubric"] == "Must cite sources"
     assert snap.gate_config["cascade_gates"] == ["LogitGate", "JudgeGate"]
     assert verdict.traces[-1].metadata["snapshot_path"].endswith(files[0])
+
+
+def _ab_top(lo_a_minus_b: float) -> list[dict[str, float | str]]:
+    import math
+
+    p_a = 1.0 / (1.0 + math.exp(-lo_a_minus_b))
+    return [{"token": "A", "logprob": math.log(p_a)}, {"token": "B", "logprob": math.log(1.0 - p_a)}]
+
+
+def test_cascade_prior_fusion_breaks_split_judge_tie_and_sync_async_parity() -> None:
+    from logitgate.exceptions import ConfigurationError
+
+    # Layer 1: forward A>B (+1.40), reverse B>A -> A-B = -1.00 => r_lo = +1.00.
+    # Both passes agree on PASS (f1 * r1 > 0), z1 = +1.20 => P = 0.7685 (AMBIGUOUS < 0.85).
+    l1_stub = StubBackend(
+        forward_top_logprobs=_ab_top(1.40),
+        reverse_top_logprobs=_ab_top(-1.00),
+    )
+    # Layer 2 CoT read: forward A>B (+0.50), reverse A>B (+0.80 => r_lo = -0.80).
+    # Permutation-split (f2 * r2 < 0) with slight negative average z2 = -0.15.
+    l2_stub = StubBackend(
+        diagnostic_text="- Quoted signature and checked every condition.\n[VERDICT: PASS]",
+        tokens_generated=28,
+        forward_top_logprobs=_ab_top(0.50),
+        reverse_top_logprobs=_ab_top(0.80),
+    )
+
+    fused_cascade = Cascade(
+        [
+            LogitGate("Check compliance", backend=l1_stub, logit_temperature=1.0),
+            JudgeGate(backend=l2_stub, logit_temperature=1.0),
+        ],
+        fuse_logits=True,
+        prior_weight=0.30,
+    )
+    v_sync = fused_cascade.evaluate("candidate")
+    v_async = asyncio.run(fused_cascade.aevaluate("candidate"))
+    assert v_sync.passed is True
+    assert v_async.passed is True
+    assert v_sync.probability == v_async.probability
+    assert v_sync.traces[-1].metadata["fused_log_odds"] == pytest.approx(0.255, abs=1e-3)
+
+    unfused_cascade = Cascade(
+        [
+            LogitGate("Check compliance", backend=l1_stub, logit_temperature=1.0),
+            JudgeGate(backend=l2_stub, logit_temperature=1.0),
+        ],
+        fuse_logits=False,
+    )
+    assert unfused_cascade.evaluate("candidate").passed is False
+
+    # When JudgeGate's two passes agree on FAIL (f2=-0.20, r2=-0.10 => f2 * r2 > 0),
+    # even a strong prior_weight never overrides JudgeGate's consistent critique.
+    l2_consistent_fail = StubBackend(
+        diagnostic_text="- Explicit violation found in query.\n[VERDICT: FAIL]",
+        tokens_generated=24,
+        forward_top_logprobs=_ab_top(-0.20),
+        reverse_top_logprobs=_ab_top(0.10),
+    )
+    consistent_cascade = Cascade(
+        [
+            LogitGate("Check compliance", backend=l1_stub, logit_temperature=1.0),
+            JudgeGate(backend=l2_consistent_fail, logit_temperature=1.0),
+        ],
+        prior_weight=0.90,
+    )
+    v_cons = consistent_cascade.evaluate("candidate")
+    assert v_cons.passed is False
+    assert "fused_log_odds" not in v_cons.traces[-1].metadata
+
+    # Weak Layer-1 priors near 50/50 (|z1| < 1.0) never override JudgeGate's reasoned verdict.
+    l1_weak_neg = StubBackend(
+        forward_top_logprobs=_ab_top(-0.50),
+        reverse_top_logprobs=_ab_top(0.70),  # r_lo = -0.70 => z1 = -0.60 (|z1| < 1.0)
+    )
+    l2_split_pass = StubBackend(
+        diagnostic_text="- All requirements satisfied.\n[VERDICT: PASS]",
+        tokens_generated=22,
+        forward_top_logprobs=_ab_top(0.80),
+        reverse_top_logprobs=_ab_top(0.50),  # r_lo = -0.50 => z2 = +0.15 (PASSED)
+    )
+    weak_prior_cascade = Cascade(
+        [
+            LogitGate("Check compliance", backend=l1_weak_neg, logit_temperature=1.0),
+            JudgeGate(backend=l2_split_pass, logit_temperature=1.0),
+        ],
+        prior_weight=0.30,
+    )
+    assert weak_prior_cascade.evaluate("candidate").passed is True
+
+    with pytest.raises(ConfigurationError):
+        Cascade([LogitGate("Check", backend=l1_stub)], prior_weight=1.5)
+    with pytest.raises(ConfigurationError):
+        Cascade([LogitGate("Check", backend=l1_stub)], prior_weight=True)
+
+
+def test_judge_gate_logit_temperature_and_snapshot_replay(tmp_path: Any) -> None:
+    from logitgate.snapshot import VerdictSnapshot
+
+    l2_stub = StubBackend(
+        diagnostic_text="- Checked facts and found defect.\n[VERDICT: FAIL]",
+        tokens_generated=20,
+        forward_top_logprobs=_ab_top(-2.0),
+        reverse_top_logprobs=_ab_top(2.0),
+    )
+    jg = JudgeGate(
+        rubric="Must satisfy rubric",
+        backend=l2_stub,
+        model="gemma4:e4b",
+        logit_temperature=4.0,
+        save_on_fail=True,
+    )
+    v = jg.evaluate("bad candidate", snapshot_dir=str(tmp_path))
+    assert v.passed is False
+    assert v.traces[-1].log_odds_pass == pytest.approx(-0.5, abs=1e-3)
+
+    snap = VerdictSnapshot.load(tmp_path)
+    assert snap.gate_config["logit_temperature"] == 4.0
+    v_replay = snap.replay(backend=l2_stub)
+    v_areplay = asyncio.run(snap.areplay(backend=l2_stub))
+    assert v_replay.traces[-1].log_odds_pass == pytest.approx(-0.5, abs=1e-3)
+    assert v_areplay.traces[-1].log_odds_pass == pytest.approx(-0.5, abs=1e-3)

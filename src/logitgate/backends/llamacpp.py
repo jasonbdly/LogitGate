@@ -292,6 +292,24 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         resp.raise_for_status()
         return self._extract_completion_logprobs(resp.json())
 
+    def _sync_in_process_logprobs(
+        self,
+        prompt: str,
+        top_k: int = 10,
+        allowed_tokens: list[str] | None = None,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        self._ensure_in_process_llm()
+        return self._in_process_query_top_logprobs(
+            prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
+        )
+
+    def _sync_in_process_generate(
+        self, prompt: str, max_tokens: int | None = None, **kwargs: Any
+    ) -> tuple[str, int]:
+        self._ensure_in_process_llm()
+        return self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs)
+
     @translate_transport_errors
     async def aquery_top_logprobs(
         self,
@@ -300,11 +318,11 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        if self._ensure_in_process_llm():
+        if self.llm is not None or not self.base_url:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None,
-                lambda: self._in_process_query_top_logprobs(
+                lambda: self._sync_in_process_logprobs(
                     prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
                 ),
             )
@@ -365,9 +383,11 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
 
     @translate_transport_errors
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
-        if self._ensure_in_process_llm():
+        if self.llm is not None or not self.base_url:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, lambda: self._in_process_generate(prompt, max_tokens=max_tokens, **kwargs))
+            return await loop.run_in_executor(
+                None, lambda: self._sync_in_process_generate(prompt, max_tokens=max_tokens, **kwargs)
+            )
 
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
         if not self._use_completion_fallback:

@@ -150,9 +150,9 @@ next_node = {"A": "db_node", "B": "auth_node", "C": "qa_node"}[verdict.choice]
 ---
 
 ### 4. QA & Evaluation Engineers (Pytest & Multi-Criteria Rubrics)
-Auto-calibrate model temperatures and execute multi-criteria rubrics with shared KV-cache:
+Unrecognized Bring-Your-Own (BYO) models automatically run lazy task-separated calibration on their first live `.evaluate()` / `.aevaluate()` call (`LOGITGATE_AUTO_CALIBRATE=1`), while `logitgate calibrate` pre-computes or custom-fits profiles ahead of time for CI warm starts:
 ```bash
-# Calibrate your model's temperature on an 8-item micro-dataset
+# Pre-calibrate and cache your model's binary + multiclass temperatures offline
 logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b"
 ```
 
