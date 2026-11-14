@@ -103,7 +103,25 @@ Where $P(s_k)$ is the normalized softmax probability of token $s_k$. With symmet
 
 ---
 
-## 6. Foundational Literature Credited
+## 6. Joint Post-Temperature Split-Conformal Calibration & Rank Invariance
+
+Setting static Layer-1 cutoffs independently of softmax temperature creates a scale mismatch: conformal cutoffs $(\tau_{\text{reject}}, \tau_{\text{accept}})$ fitted under $T_{\text{old}} = 1.0$ lose their finite-sample error bound once a temperature $T^* \neq 1.0$ stretches or compresses logits at runtime. Conversely, splitting an already modest $N$-item calibration set across separate temperature and conformal folds weakens both estimators.
+
+**Single-Sweep Post-Temperature Invariance (`fit_calibration_profile`)**:
+For any positive fitted temperature $\hat{T} > 0$, the transformation $z \mapsto \operatorname{round}(\sigma(z / \hat{T}), 4)$ applied on LogitGate's binary `Verdict` scale is monotonically non-decreasing in the symmetric log-odds $z = \frac{1}{2}(L_1 + L_2)$. `fit_calibration_profile()` fits $\hat{T}$ first on the $2N$-pass log-odds sweep and then evaluates two-sided split-conformal cutoffs directly on $p_i(\hat{T}) = \operatorname{round}(\sigma(z_i / \hat{T}), 4)$:
+
+$$\tau_{\text{accept}} = \operatorname{strictly\_above}_4\!\left(Q_{1 - \alpha/2}\!\left(\{p_i(\hat{T}) : y_i = 0\}\right)\right), \qquad \tau_{\text{reject}} = \operatorname{strictly\_below}_4\!\left(Q_{1 - \alpha/2}\!\left(\{1 - p_i(\hat{T}) : y_i = 1\}\right)\right)$$
+
+where empirical quantiles at level $(1 - \alpha/2)$ take order statistic $k = \lceil (m + 1)(1 - \alpha/2) \rceil$ within each class (guaranteeing finite-sample marginal Layer-1 miscoverage $\le \alpha$ whenever $\min(m_+, m_-) \ge \lceil (1 - \alpha/2) / (\alpha/2) \rceil$, i.e. $19$ per class at $\alpha = 0.10$ or $39$ at $\alpha = 0.05$). Because strict rank order is invariant under positive temperature scaling and step-grid strict inequality moves boundaries by $+0.0001$ outside tied quantiles, fitting cutoffs post-temperature guarantees zero scale drift while preserving full $2N$ sample efficiency.
+
+The same `CalibrationProfile` ecosystem extends distribution-free selective risk control to multi-way and continuous gates (using `effective_multiclass_temperature = max(0.65, binary_temperature)` when no dedicated multiclass temperature was fitted):
+
+- **`ChoiceGate` (`calibrate_choice_thresholds`)**: Uses one-sided nonconformity scores $e_i = 0$ on correct top-1 predictions and $e_i = \operatorname{round}(\max_k P_i(k), 4)$ on errors, setting `choice_min_confidence` strictly above $\max(Q_{1-\alpha}(e), 1/K)$ (with optional `choice_min_margin` over top-2 probability margin).
+- **`ScoreGate` (`calibrate_score_thresholds`)**: Applies two-sided conformal order statistics over expected scores $\mathbb{E}[S_i] \in [s_{\min}, s_{\max}]$ to produce conservative `(score_fail_threshold, score_threshold)` cutoffs bounding `[AMBIGUOUS]` Layer-2 escalations.
+
+---
+
+## 7. Foundational Literature Credited
 
 1. **Pretraining Token Prior Bias & Calibration**:
    - Zhao, T. Z., Wallace, E., Feng, S., Klein, D., & Singh, S. (2021). *"Calibrate Before Use: Improving Few-Shot Performance of Language Models"*. **ICML 2021**. [arXiv:2102.09690](https://arxiv.org/abs/2102.09690).
@@ -113,7 +131,9 @@ Where $P(s_k)$ is the normalized softmax probability of token $s_k$. With symmet
    - Liu, Y., Iter, D., Xu, Y., Wang, S., Xu, R., & Zhu, C. (2023). *"G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment"*. **EMNLP 2023**. [arXiv:2303.16634](https://arxiv.org/abs/2303.16634).
 4. **Post-Hoc Temperature Scaling & Expected Calibration Error (ECE)**:
    - Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017). *"On Calibration of Modern Neural Networks"*. **ICML 2017**. [arXiv:1706.04599](https://arxiv.org/abs/1706.04599).
-5. **System-1 Single-Token Decision Benchmarking**:
+5. **Split-Conformal Selective Classification & Distribution-Free Uncertainty Quantification**:
+   - Angelopoulos, A. N., & Bates, S. (2021). *"A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification"*. [arXiv:2107.07511](https://arxiv.org/abs/2107.07511).
+6. **System-1 Single-Token Decision Benchmarking**:
    - Deußer, T., Sparrenberg, L., & Sifa, R. (2026). *"Evaluating and Benchmarking the System One Model Jev"*. [arXiv:2609.37647](https://arxiv.org/abs/2609.37647).
-6. **Recurrent Depth & Universal Transformers**:
+7. **Recurrent Depth & Universal Transformers**:
    - Dehghani, M., Gouws, S., Vinyals, O., Uszkoreit, J., & Kaiser, Ł. (2019). *"Universal Transformers"*. **ICLR 2019**. [arXiv:1807.03819](https://arxiv.org/abs/1807.03819).

@@ -8,7 +8,8 @@ import secrets
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
@@ -43,10 +44,13 @@ from logitgate.gates.logit_gate import (
     LogitGate,
     _lazy_calibrate_async,
     _lazy_calibrate_sync,
-    _resolve_logit_temperature,
-    _should_lazy_auto_calibrate,
+    _resolve_gate_temperature,
+    _warn_if_profile_model_mismatch,
 )
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
+
+if TYPE_CHECKING:
+    from logitgate.calibration.profile import CalibrationProfile
 
 TriggerMode = EscalationPolicy  # Public alias kept for backward compatibility.
 
@@ -278,6 +282,8 @@ class JudgeGate(BaseGate):
         allow_fail_override: When True (or when trigger='adjudicate'), allows JudgeGate to
             overturn a Tier-1 FAILED verdict with PASSED.
         name: Identifier for this gate instance.
+        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
+            temperature for post-critique logit probes; explicit ``logit_temperature`` wins.
 
     Raises:
         ConfigurationError: If trigger is invalid, rubric is empty whitespace, max_tokens < 1,
@@ -300,7 +306,12 @@ class JudgeGate(BaseGate):
         save_on_fail: bool | None = None,
         allow_fail_override: bool = False,
         name: str = "JudgeGate",
+        *,
+        profile: CalibrationProfile | str | Path | None = None,
     ) -> None:
+        from logitgate.calibration.profile import resolve_calibration_profile
+
+        loaded_profile = resolve_calibration_profile(profile)
         try:
             trigger_valid = trigger in _VALID_TRIGGERS
         except TypeError:
@@ -326,10 +337,11 @@ class JudgeGate(BaseGate):
                 raise ConfigurationError(
                     "JudgeGate logit_temperature='auto' requires a LogitBackend supporting token log-probabilities"
                 )
-            effective_temp = _resolve_logit_temperature(
+            effective_temp, needs_lazy = _resolve_gate_temperature(
                 logit_temperature,
                 effective_model,
                 resolved_backend,
+                loaded_profile,
                 binary=False,
             )
         except BaseException:
@@ -337,15 +349,12 @@ class JudgeGate(BaseGate):
                 resolved_backend.close()
             raise
 
+        _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
         self.backend = resolved_backend
         self.model = effective_model
+        self.profile = loaded_profile
         self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
-            logit_temperature,
-            effective_model,
-            self.backend,
-            binary=False,
-        )
+        self._needs_lazy_calibration = needs_lazy
         self._calibration_lock = threading.Lock()
         self._probe_lock = threading.Lock()
         self.escalation_policy = trigger

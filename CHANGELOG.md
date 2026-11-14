@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Unified Conformal Calibration Profiles (`CalibrationProfile`):** Added versioned (`schema_version=1`) Pydantic calibration artifacts in `logitgate.calibration.profile` (re-exported at `logitgate`) with `from_calibration_result()`, `from_log_odds_samples()`, `with_choice_thresholds()`, `with_score_thresholds()`, symlink-safe atomic `.save()`, and size-bounded `.load()`, alongside strict validation raising `CalibrationError` on boolean/non-finite/out-of-range inputs and legacy field aliases (`optimal_temperature`, `tau_accept`, `tau_reject`).
+- **Turnkey Calibration & Selective Conformal Helpers:** Added `fit_calibration_profile()`, `afit_calibration_profile()`, `resolve_calibration_profile()`, `ChoiceConformalThresholds` / `calibrate_choice_thresholds()`, and `ScoreConformalThresholds` / `calibrate_score_thresholds()` to fit temperatures and split-conformal abstention thresholds in a single pass.
+- **First-Class `profile` Integration Across Gates, Benchmarks, & CLI:** Added `profile: CalibrationProfile | str | Path | None = None` across `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `JudgeGate`, and `run_benchmark()`, plus `logitgate calibrate --output`, `logitgate eval --profile`, and `logitgate benchmark --profile`, bypassing lazy calibration probes (`_needs_lazy_calibration = False`) when a profile provides calibrated state and emitting `CalibrationWarning` on model mismatch.
+
+### Changed
+- **Precedence & `ScoreGate` Default Threshold Resolution:** Enforced explicit precedence (`explicit kwarg > profile > preset > defaults`) across gates, changed `ScoreGate.threshold` default to `None` (resolving to `profile.score_threshold` when provided or `3.5` otherwise), and introduced `CalibrationProfile.effective_multiclass_temperature` with a `0.65` floor for multiclass softmax gates.
+
+### Fixed
+- **Post-Temperature Conformal Threshold Consistency in `logitgate calibrate`:** Fixed `T_old -> T_new` conformal drift when saving or applying temperature scaling alongside split-conformal thresholds so threshold fitting operates on the post-temperature calibrated distribution.
+
 ## [0.5.1] - 2026-11-13
 
 ### Added

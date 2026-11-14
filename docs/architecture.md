@@ -98,3 +98,17 @@ When deploying LLM evaluation pipelines, a common production failure mode is **K
 - **100% of GPU VRAM** is preserved for the primary generator model.
 - **Layer 1 `LogitGate`** runs on the host CPU with `options={"num_gpu": 0, "num_ctx": 2048}` in ~170 ms (single-pass) using standard System RAM (~3.2 GB for 3B Q4 models like `qwen2.5:3b` / `llama3.2:3b`, or ~9.4 GB for `gemma4:e4b`).
 - **Short-Circuiting**: Clear passes short-circuit without GPU VRAM interference. Only ambiguous items or failures escalate to the GPU-backed `JudgeGate`.
+
+---
+
+## Portable Calibration Profiles & Zero-Probe Cold Start (`CalibrationProfile`)
+
+Production CI/CD runners and stateless containers often deploy unrecognized fine-tuned or quantized Bring-Your-Own (BYO) checkpoints. Without an explicit profile, the first evaluation triggers lazy micro-calibration probes (~16–32 HTTP calls), and setting thresholds independently of temperature causes scale drift.
+
+`CalibrationProfile` (`schema_version=1`, atomically serialized with symlink rejection and 1 MiB load guard via `.save()` / `.load()`) bundles calibrated temperatures alongside mutually consistent Layer-1 conformal cutoffs:
+
+- **Unified Configuration Precedence**: All gates accepting `profile: CalibrationProfile | str | Path | None = None` (`LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, and `JudgeGate`) enforce strict resolution order:
+  `explicit constructor kwarg > profile field > preset > global defaults`.
+- **Zero-Probe Cold Start**: Supplying a `profile=` sets `_needs_lazy_calibration = False`, eliminating lazy micro-calibration probes on unseen BYO checkpoints (`2` forward/reverse calls from request #1) while emitting a `CalibrationWarning` if the loaded profile's `model` tag differs from the runtime gate model.
+- **Multiclass `0.65` Softmax Floor (`effective_multiclass_temperature`)**: Sub-4B checkpoints often fit sharp binary temperatures ($T_{\text{bin}} \approx 0.06\text{--}0.40$) to counteract zero-shot `A/B` symbol attenuation. When a binary-only profile (`multiclass_temperature=None`) is passed to `ChoiceGate`, `ScoreGate`, or `JudgeGate`, `effective_multiclass_temperature` automatically applies `max(0.65, binary_temperature)` so multi-option softmax distributions do not over-sharpen unless a dedicated `multiclass_temperature` was fitted (`calibrate_multiclass=True`).
+- **Snapshot Independence**: `VerdictSnapshot` records resolved gate configuration values (`logit_temperature`, `pass_threshold`, `fail_threshold`, `score_threshold`, `score_fail_threshold`, `choice_min_confidence`, `choice_min_margin`) directly into the snapshot so `VerdictSnapshot.replay()` and `areplay()` remain reproducible even after an external `profile.json` file is removed.

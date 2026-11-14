@@ -5,9 +5,11 @@ import math
 import secrets
 import threading
 import time
+import warnings
 import weakref
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 from logitgate.backends.base import LogitBackend, StubBackend, resolve_logit_backend
 from logitgate.config import (
@@ -37,10 +39,13 @@ from logitgate.debiasing.softmax import (
 from logitgate.debiasing.softmax import (
     softmax_probabilities as _softmax,
 )
-from logitgate.exceptions import BackendError, ConfigurationError
+from logitgate.exceptions import BackendError, CalibrationWarning, ConfigurationError
 from logitgate.gates.base import BaseGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
+
+if TYPE_CHECKING:
+    from logitgate.calibration.profile import CalibrationProfile
 
 TopLogprobs = list[dict[str, Any]]
 
@@ -243,6 +248,53 @@ async def _lazy_calibrate_async(model_name: str, backend: LogitBackend, *, binar
         return cal.optimal_temperature if binary else (cal.multiclass_temperature or cal.optimal_temperature)
 
 
+def _warn_if_profile_model_mismatch(
+    profile: CalibrationProfile | None,
+    effective_model: str | None,
+    gate_name: str,
+) -> None:
+    if profile is None or not profile.model or not effective_model:
+        return
+    prof_m = profile.model.strip().lower()
+    eff_m = effective_model.strip().lower()
+    if not prof_m or prof_m in ("default", "stub") or not eff_m or eff_m in ("default", "stub"):
+        return
+    if prof_m != eff_m:
+        warnings.warn(
+            f"{gate_name} was initialized for model '{effective_model}', but CalibrationProfile "
+            f"was fitted on '{profile.model}'. Thresholds and temperatures may not transfer faithfully.",
+            CalibrationWarning,
+            stacklevel=3,
+        )
+
+
+def _resolve_gate_temperature(
+    logit_temperature: float | Literal["auto"] | None,
+    effective_model: str | None,
+    backend: Any,
+    profile: CalibrationProfile | None,
+    *,
+    binary: bool,
+) -> tuple[float, bool]:
+    """Resolves gate temperature and lazy-calibration flag respecting explicit > profile > defaults."""
+    if logit_temperature is None and profile is not None:
+        temp = profile.binary_temperature if binary else profile.effective_multiclass_temperature
+        return temp, False
+    temp = _resolve_logit_temperature(
+        logit_temperature,
+        effective_model,
+        backend,
+        binary=binary,
+    )
+    needs_lazy = _should_lazy_auto_calibrate(
+        logit_temperature,
+        effective_model,
+        backend,
+        binary=binary,
+    )
+    return temp, needs_lazy
+
+
 class LogitGate(BaseGate):
     """First-token Logit Gate (Layer 1).
 
@@ -270,6 +322,9 @@ class LogitGate(BaseGate):
         max_positional_bias: Optional maximum allowed positional log-odds divergence across
             opposite-polarity passes before abstaining to AMBIGUOUS.
         name: Identifier for this gate instance.
+        warm_prefix: Override whether async symmetric passes run Pass 1 before Pass 2 to warm KV prefix.
+        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
+            temperature and conformal cutoffs; explicit keyword arguments take precedence.
 
     Raises:
         ConfigurationError: If rubric is empty, thresholds are outside [0, 1],
@@ -292,7 +347,11 @@ class LogitGate(BaseGate):
         name: str = "LogitGate",
         *,
         warm_prefix: bool | None = None,
+        profile: CalibrationProfile | str | Path | None = None,
     ) -> None:
+        from logitgate.calibration.profile import resolve_calibration_profile
+
+        loaded_profile = resolve_calibration_profile(profile)
         if preset is not None:
             if preset == "strict":
                 default_pass = 0.90
@@ -315,8 +374,24 @@ class LogitGate(BaseGate):
             default_fail = LogitGateDefaults.fail_threshold
             default_sym = True
 
-        raw_pass_thresh = default_pass if pass_threshold is None else pass_threshold
-        raw_fail_thresh = default_fail if fail_threshold is None else fail_threshold
+        raw_pass_thresh = (
+            pass_threshold
+            if pass_threshold is not None
+            else (
+                loaded_profile.pass_threshold
+                if loaded_profile is not None and loaded_profile.pass_threshold is not None
+                else default_pass
+            )
+        )
+        raw_fail_thresh = (
+            fail_threshold
+            if fail_threshold is not None
+            else (
+                loaded_profile.fail_threshold
+                if loaded_profile is not None and loaded_profile.fail_threshold is not None
+                else default_fail
+            )
+        )
         effective_sym = (
             default_sym if symmetric_debiasing is None else bool(symmetric_debiasing)
         )
@@ -353,10 +428,11 @@ class LogitGate(BaseGate):
                 or getattr(resolved_backend, "model_name", None)
                 or get_default_model()
             )
-            effective_temp = _resolve_logit_temperature(
+            effective_temp, needs_lazy = _resolve_gate_temperature(
                 logit_temperature,
                 effective_model,
                 resolved_backend,
+                loaded_profile,
                 binary=True,
             )
         except BaseException:
@@ -364,8 +440,10 @@ class LogitGate(BaseGate):
                 resolved_backend.close()
             raise
 
+        _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
         self.backend = resolved_backend
         self.model = effective_model
+        self.profile = loaded_profile
         self.rubric = rubric.strip()
         self.preset = preset
         self.save_on_fail = save_on_fail
@@ -374,12 +452,7 @@ class LogitGate(BaseGate):
         self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
-            logit_temperature,
-            effective_model,
-            self.backend,
-            binary=True,
-        )
+        self._needs_lazy_calibration = needs_lazy
         self._calibration_lock = threading.Lock()
         self.max_positional_bias = bias_val
         self.warm_prefix = effective_warm_prefix
@@ -785,6 +858,10 @@ class MultiRubricGate(BaseGate):
     def warm_prefix(self) -> bool | None:
         return self._gate.warm_prefix
 
+    @property
+    def profile(self) -> CalibrationProfile | None:
+        return self._gate.profile
+
     def __repr__(self) -> str:
         return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
 
@@ -887,6 +964,10 @@ class ChoiceGate(BaseGate):
             micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
             unknown BYO models when ``auto_calibrate=True``).
         name: Identifier for this gate instance.
+        min_confidence: Optional minimum top-choice probability required to avoid abstaining (AMBIGUOUS).
+        min_margin: Optional minimum top-2 probability margin required to avoid abstaining (AMBIGUOUS).
+        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
+            multiclass temperature and selective confidence/margin cutoffs.
 
     Raises:
         ConfigurationError: If question is empty, options has fewer than 2 items, or logit_temperature <= 0.
@@ -908,7 +989,11 @@ class ChoiceGate(BaseGate):
         min_margin: float | None = None,
         save_on_fail: bool | None = None,
         warm_prefix: bool | None = None,
+        profile: CalibrationProfile | str | Path | None = None,
     ) -> None:
+        from logitgate.calibration.profile import resolve_calibration_profile
+
+        loaded_profile = resolve_calibration_profile(profile)
         if not isinstance(question, str) or not question.strip():
             raise ConfigurationError("question cannot be empty or whitespace")
         if permutation_mode not in ("derangement", "cyclic", "reverse"):
@@ -924,8 +1009,18 @@ class ChoiceGate(BaseGate):
             raise ConfigurationError(
                 f"ChoiceGate option keys must be single characters (e.g. 'A', 'B', 'C'), got: {invalid_keys}"
             )
-        effective_min_conf = _validate_optional_unit_float("min_confidence", min_confidence)
-        effective_min_margin = _validate_optional_unit_float("min_margin", min_margin)
+        raw_min_conf = (
+            min_confidence
+            if min_confidence is not None
+            else (loaded_profile.choice_min_confidence if loaded_profile is not None else None)
+        )
+        raw_min_margin = (
+            min_margin
+            if min_margin is not None
+            else (loaded_profile.choice_min_margin if loaded_profile is not None else None)
+        )
+        effective_min_conf = _validate_optional_unit_float("min_confidence", raw_min_conf)
+        effective_min_margin = _validate_optional_unit_float("min_margin", raw_min_margin)
         effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
         effective_warm_prefix = _validate_optional_bool("warm_prefix", warm_prefix)
         normalized_options: dict[str, str] = {}
@@ -951,10 +1046,11 @@ class ChoiceGate(BaseGate):
                 or getattr(resolved_backend, "model_name", None)
                 or get_default_model()
             )
-            effective_temp = _resolve_logit_temperature(
+            effective_temp, needs_lazy = _resolve_gate_temperature(
                 logit_temperature,
                 effective_model,
                 resolved_backend,
+                loaded_profile,
                 binary=False,
             )
         except BaseException:
@@ -962,20 +1058,17 @@ class ChoiceGate(BaseGate):
                 resolved_backend.close()
             raise
 
-        self.question = question.strip()
-        self.options = normalized_options
+        _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
         self.backend = resolved_backend
         self.model = effective_model
+        self.profile = loaded_profile
+        self.question = question.strip()
+        self.options = normalized_options
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.permutation_mode = permutation_mode
         self.query_first = query_first
         self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
-            logit_temperature,
-            effective_model,
-            resolved_backend,
-            binary=False,
-        )
+        self._needs_lazy_calibration = needs_lazy
         self._calibration_lock = threading.Lock()
         self.min_confidence = effective_min_conf
         self.min_margin = effective_min_margin
@@ -1246,7 +1339,8 @@ class ScoreGate(BaseGate):
         rubric: Evaluation rubric describing scoring expectations.
         min_score: Minimum integer score rating (default: 1).
         max_score: Maximum integer score rating (default: 5).
-        threshold: Score threshold required for a PASSED verdict (default: 3.5).
+        threshold: Score threshold required for a PASSED verdict (default: 3.5, or
+            ``profile.score_threshold`` when a `CalibrationProfile` provides one).
         backend: Backend instance or specifier URI.
         model: Optional model identifier string for the backend.
         symmetric_debiasing: When True, queries both normal and inverted scale prompts
@@ -1257,6 +1351,10 @@ class ScoreGate(BaseGate):
             unknown BYO models when ``auto_calibrate=True``).
         save_on_fail: Override failure snapshot persistence for this gate.
         name: Identifier for this gate instance.
+        fail_threshold: Optional lower cutoff below or at which scores return FAILED; scores in
+            ``(fail_threshold, threshold)`` abstain as AMBIGUOUS.
+        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
+            multiclass temperature and score cutoffs.
 
     Raises:
         ConfigurationError: If rubric is empty, min_score >= max_score, threshold is out of bounds,
@@ -1268,7 +1366,7 @@ class ScoreGate(BaseGate):
         rubric: str,
         min_score: int = 1,
         max_score: int = 5,
-        threshold: float = 3.5,
+        threshold: float | None = None,
         backend: str | LogitBackend | None = None,
         model: str | None = None,
         symmetric_debiasing: bool | None = True,
@@ -1280,7 +1378,11 @@ class ScoreGate(BaseGate):
         fail_threshold: float | None = None,
         max_score_std: float | None = None,
         warm_prefix: bool | None = None,
+        profile: CalibrationProfile | str | Path | None = None,
     ) -> None:
+        from logitgate.calibration.profile import resolve_calibration_profile
+
+        loaded_profile = resolve_calibration_profile(profile)
         if not isinstance(rubric, str) or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
         if (
@@ -1299,27 +1401,42 @@ class ScoreGate(BaseGate):
                 f"ScoreGate requires single-digit integer bounds (0 <= min_score < max_score <= 9), "
                 f"got min_score={min_score}, max_score={max_score}"
             )
+
+        raw_threshold: Any = (
+            threshold
+            if threshold is not None
+            else (
+                loaded_profile.score_threshold
+                if loaded_profile is not None and loaded_profile.score_threshold is not None
+                else 3.5
+            )
+        )
         if (
-            isinstance(threshold, bool)
-            or not isinstance(threshold, (int, float))
-            or not math.isfinite(float(threshold))
-            or not (min_score <= float(threshold) <= max_score)
+            isinstance(raw_threshold, bool)
+            or not isinstance(raw_threshold, (int, float))
+            or not math.isfinite(float(raw_threshold))
+            or not (min_score <= float(raw_threshold) <= max_score)
         ):
             raise ConfigurationError(
-                f"threshold ({threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
+                f"threshold ({raw_threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
             )
+        raw_fail_threshold: Any = (
+            fail_threshold
+            if fail_threshold is not None
+            else (loaded_profile.score_fail_threshold if loaded_profile is not None else None)
+        )
         effective_fail_thresh: float | None = None
-        if fail_threshold is not None:
+        if raw_fail_threshold is not None:
             if (
-                isinstance(fail_threshold, bool)
-                or not isinstance(fail_threshold, (int, float))
-                or not math.isfinite(float(fail_threshold))
-                or not (min_score <= float(fail_threshold) <= float(threshold))
+                isinstance(raw_fail_threshold, bool)
+                or not isinstance(raw_fail_threshold, (int, float))
+                or not math.isfinite(float(raw_fail_threshold))
+                or not (min_score <= float(raw_fail_threshold) <= float(raw_threshold))
             ):
                 raise ConfigurationError(
-                    f"fail_threshold ({fail_threshold!r}) must be between min_score ({min_score}) and threshold ({threshold})"
+                    f"fail_threshold ({raw_fail_threshold!r}) must be between min_score ({min_score}) and threshold ({raw_threshold})"
                 )
-            effective_fail_thresh = float(fail_threshold)
+            effective_fail_thresh = float(raw_fail_threshold)
         effective_max_std: float | None = None
         if max_score_std is not None:
             if (
@@ -1344,10 +1461,11 @@ class ScoreGate(BaseGate):
                 or getattr(resolved_backend, "model_name", None)
                 or get_default_model()
             )
-            effective_temp = _resolve_logit_temperature(
+            effective_temp, needs_lazy = _resolve_gate_temperature(
                 logit_temperature,
                 effective_model,
                 resolved_backend,
+                loaded_profile,
                 binary=False,
             )
         except BaseException:
@@ -1355,21 +1473,18 @@ class ScoreGate(BaseGate):
                 resolved_backend.close()
             raise
 
+        _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
+        self.backend = resolved_backend
+        self.model = effective_model
+        self.profile = loaded_profile
         self.rubric = rubric.strip()
         self.min_score = min_score
         self.max_score = max_score
-        self.threshold = float(threshold)
-        self.backend = resolved_backend
-        self.model = effective_model
+        self.threshold = float(raw_threshold)
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.query_first = query_first
         self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = _should_lazy_auto_calibrate(
-            logit_temperature,
-            effective_model,
-            resolved_backend,
-            binary=False,
-        )
+        self._needs_lazy_calibration = needs_lazy
         self._calibration_lock = threading.Lock()
         self.fail_threshold = effective_fail_thresh
         self.max_score_std = effective_max_std

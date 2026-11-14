@@ -30,7 +30,8 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from logitgate.backends.base import (
     GenerativeBackend,
@@ -44,6 +45,9 @@ from logitgate.gates.base import BaseGate, EscalationPolicy
 from logitgate.gates.judge_gate import JudgeGate
 from logitgate.gates.logit_gate import LogitGate
 from logitgate.models import DecisionStatus
+
+if TYPE_CHECKING:
+    from logitgate.calibration.profile import CalibrationProfile
 
 MODES = ("judge", "logit", "cascade")
 
@@ -311,6 +315,7 @@ def run_benchmark(
     judge_max_tokens: int | None = None,
     judge_think: bool = False,
     cascade_trigger: EscalationPolicy = "on_ambiguous_only",
+    profile: CalibrationProfile | str | Path | None = None,
     dataset_label: str = "builtin",
     progress: Callable[[str], None] | None = None,
 ) -> BenchmarkReport:
@@ -328,6 +333,7 @@ def run_benchmark(
         judge_max_tokens: Optional generation token limit for ``JudgeGate`` (>= 1).
         judge_think: Whether to enable reasoning tokens on Ollama judges.
         cascade_trigger: Escalation policy for the ``cascade`` mode.
+        profile: Optional `CalibrationProfile` (or path to JSON) applied to ``LogitGate``.
         dataset_label: Human-readable label recorded in report metadata.
         progress: Optional callback invoked after each timed case evaluation.
 
@@ -335,6 +341,8 @@ def run_benchmark(
         ValueError: If parameters are out of valid bounds.
         TypeError: If a requested generative mode lacks a ``GenerativeBackend``.
     """
+    from logitgate.calibration.profile import resolve_calibration_profile
+
     if not cases:
         raise ValueError("Benchmark needs at least one case")
     if not modes:
@@ -347,6 +355,7 @@ def run_benchmark(
     if judge_max_tokens is not None and (isinstance(judge_max_tokens, bool) or judge_max_tokens < 1):
         raise ValueError(f"judge_max_tokens must be >= 1, got {judge_max_tokens!r}")
 
+    resolved_profile = resolve_calibration_profile(profile)
     needs_logit = any(m in ("logit", "cascade") for m in modes)
     needs_generative = any(m in ("judge", "cascade") for m in modes)
 
@@ -359,7 +368,8 @@ def run_benchmark(
             owns_backend = not isinstance(backend, LogitBackend)
             resolved = resolve_logit_backend(backend, model=model)
             effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
-            _prewarm_calibration_if_needed(resolved, effective_model)
+            if resolved_profile is None:
+                _prewarm_calibration_if_needed(resolved, effective_model)
             metered: _MeteredBackend | None = _MeteredBackend(resolved, require_generative=False)
         else:
             effective_model = model
@@ -432,6 +442,7 @@ def run_benchmark(
         from logitgate.backends.ollama import OllamaBackend
 
         effective_think = judge_think if isinstance(resolved_judge, (OllamaBackend, StubBackend)) else None
+        judge_profile = resolved_profile if (resolved_judge is resolved and resolved_profile is not None) else None
 
         def _counts() -> tuple[int, int]:
             l_calls = metered.logit_calls if metered is not None else 0
@@ -450,8 +461,15 @@ def run_benchmark(
                     trigger="always",
                     max_tokens=judge_max_tokens,
                     think=effective_think,
+                    profile=judge_profile,
                 )
-            logit = LogitGate(rubric=rubric, backend=metered, model=effective_model, save_on_fail=False)
+            logit = LogitGate(
+                rubric=rubric,
+                backend=metered,
+                model=effective_model,
+                save_on_fail=False,
+                profile=resolved_profile,
+            )
             if mode == "logit":
                 return logit
             judge = JudgeGate(
@@ -461,6 +479,7 @@ def run_benchmark(
                 trigger=cascade_trigger,
                 max_tokens=judge_max_tokens,
                 think=effective_think,
+                profile=judge_profile,
             )
             return logit >> judge
 
@@ -503,7 +522,7 @@ def run_benchmark(
     ).hexdigest()[:12]
     backend_spec = infer_backend_spec(primary_backend)
     judge_backend_spec = infer_backend_spec(resolved_judge if resolved_judge is not None else primary_backend)
-    metadata = {
+    metadata: dict[str, Any] = {
         "logitgate_version": __version__,
         "python": platform.python_version(),
         "platform": platform.platform(),
@@ -521,6 +540,14 @@ def run_benchmark(
         "judge_max_tokens": judge_max_tokens,
         "cascade_trigger": cascade_trigger,
     }
+    if resolved_profile is not None:
+        metadata["profile"] = {
+            "binary_temperature": resolved_profile.binary_temperature,
+            "pass_threshold": resolved_profile.pass_threshold,
+            "fail_threshold": resolved_profile.fail_threshold,
+            "target_risk_alpha": resolved_profile.target_risk_alpha,
+            "guarantee_holds": resolved_profile.guarantee_holds,
+        }
     return BenchmarkReport(metadata=metadata, modes=stats)
 
 
@@ -551,6 +578,15 @@ def format_report(report: BenchmarkReport) -> str:
             f"judge_think={meta['judge_think']} cascade_trigger={meta['cascade_trigger']}"
         ),
     ]
+    prof_meta = meta.get("profile")
+    if isinstance(prof_meta, dict):
+        lines.append(
+            f"profile: T={prof_meta.get('binary_temperature')} "
+            f"tau_reject={prof_meta.get('fail_threshold')} "
+            f"tau_accept={prof_meta.get('pass_threshold')} "
+            f"alpha={prof_meta.get('target_risk_alpha')} "
+            f"guarantee_holds={prof_meta.get('guarantee_holds')}"
+        )
     if meta["is_stub"]:
         lines.append("NOTE: stub backend. Timings measure harness overhead only, not model latency.")
     header = f"{'mode':<9}{'p50 ms':>10}{'p95 ms':>10}{'mean ms':>10}{'gen tok':>9}{'calls':>7}{'accuracy':>11}{'ambig':>7}{'fast-path':>11}"

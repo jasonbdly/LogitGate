@@ -479,7 +479,46 @@ On single-slot `Ollama` servers where concurrent HTTP calls already serialize in
 
 ---
 
-### 7. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 7. Unified Turnkey Conformal Calibration Profiles (`v0.6.0`)
+
+Out-of-sample evaluation of joint post-temperature split-conformal calibration (`fit_calibration_profile(..., target_risk_alpha=0.10, calibrate_multiclass=True)`) vs. uncalibrated (`T=1.0`, static `0.20/0.85`) and temperature-only (`T=T_bin`, stale `0.20/0.85`) heuristics on [`benchmarks/data/multi_domain_24.json`](../benchmarks/data/multi_domain_24.json) with Layer-2 escalation to `gemma4:26b` (`JudgeGate`, `think=False`, `max_tokens=256`: standalone accuracy `24/24 (100.0%)`, mean `976.9 ms`, median `894.4 ms` on RTX 5090). Profiles were fitted in **2.87–6.40 s** on a strictly disjoint 40-item holdout set (`20` Pass / `20` Fail, `guarantee_holds=True` at $\alpha = 0.10$ since $\min(m_+, m_-) = 20 \ge 19$):
+
+#### A. Binary Post-Temperature Conformal Cascade (`MultiDomain-24`, Out-of-Sample)
+
+| Layer-1 Model (RTX 4070) | Regime | Fitted $T_{\text{bin}}$ / $T_{\text{mc}}$ | Cutoffs ($\tau_{\text{reject}}, \tau_{\text{accept}}$) | L1 Fast-Path Rate | L1 Selective Error | Cascade Accuracy | Cascade Mean (Speedup vs 26B Judge) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b`** | Uncalibrated (`T=1.0`) | `1.0000` / — | `0.2000, 0.8500` | 8/24 (33.3%) | 0/24 (0.0%) | 24/24 (100.0%) | 790.1 ms (`1.24x`) |
+| **`qwen2.5-coder:3b`** | Temp-Only + Heuristic Cutoffs | `0.6135` / — | `0.2000, 0.8500` | 15/24 (62.5%) | **1/24 (4.2%)** | 23/24 (95.8%) | 483.8 ms (`2.02x`) |
+| **`qwen2.5-coder:3b`** | **Unified `CalibrationProfile` ($\alpha=0.10$)** | **`0.6135` / `0.8399`** | **`0.1096, 0.9100`** | 10/24 (41.7%) | **0/24 (0.0%)** | **24/24 (100.0%)** | 685.0 ms (`1.43x`) |
+| **`llama3.2:3b`** | Uncalibrated (`T=1.0`) | `1.0000` / — | `0.2000, 0.8500` | 16/24 (66.7%) | **3/24 (12.5%!)** | 21/24 (87.5%) | 419.2 ms (`2.33x`) |
+| **`llama3.2:3b`** | Temp-Only + Heuristic Cutoffs | `1.8045` / — | `0.2000, 0.8500` | 5/24 (20.8%) | 0/24 (0.0%) | 24/24 (100.0%) | 893.6 ms (`1.09x`) |
+| **`llama3.2:3b`** | **Unified `CalibrationProfile` ($\alpha=0.10$)** | **`1.8045` / `1.2441`** | **`0.5167, 0.8281`** | **12/24 (50.0%)** | **1/24 (4.2%)** | **23/24 (95.8%)** | **522.7 ms (`1.87x`)** |
+| **`gemma4:e4b`** | Uncalibrated (`T=1.0`) | `1.0000` / — | `0.2000, 0.8500` | 23/24 (95.8%) | 0/24 (0.0%) | 24/24 (100.0%) | 224.8 ms (`4.35x`) |
+| **`gemma4:e4b`** | Temp-Only + Heuristic Cutoffs | `4.6404` / — | `0.2000, 0.8500` | 20/24 (83.3%) | 0/24 (0.0%) | 24/24 (100.0%) | 357.2 ms (`2.74x`) |
+| **`gemma4:e4b`** | **Unified `CalibrationProfile` ($\alpha=0.10$)** | **`4.6404` / `3.7126`** | **`0.1647, 0.2497`** | **24/24 (100.0%)** | **0/24 (0.0%)** | **24/24 (100.0%)** | **178.7 ms (`5.47x`)** |
+
+*Key empirical findings:*
+- **Eliminating `T_old -> T_new` Drift**: On `qwen2.5-coder:3b`, applying `T=0.6135` without recalibrating the heuristic `0.85` accept cutoff leaked a false-pass at Layer 1 (`23/24`), whereas the unified profile tightened $\tau_{\text{accept}}$ to `0.9100` on the `T=0.6135` scale (`0/24` L1 error, `24/24` cascade accuracy). Conversely, uncalibrated `llama3.2:3b` violated the $10\%$ risk target (`12.5%` L1 error), while temperature-only heuristic `0.85` collapsed fast-path rate to `20.8%`; the conformal profile delivered **2.4x more fast-paths (`50.0%`)** at `4.2% <= 10%` risk.
+- **Data-Driven Asymmetric Cutoffs**: On `gemma4:e4b` ($\text{AUROC}=0.9925$), fitting conformal cutoffs directly on post-temperature holdout scores captured the model's asymmetric probability calibration band `(0.1647, 0.2497)`, unlocking **100.0% fast-path resolution (`178.7 ms` mean, `5.47x` faster than 26B Judge, `24/24` accurate)**.
+
+#### B. Selective `ChoiceGate` & `ScoreGate` Conformal Calibration (`22`-Item Combined Suite)
+
+Evaluated via 2-fold out-of-sample cross-validation across [`choice_and_score_12.json`](../benchmarks/data/choice_and_score_12.json) + [`adversarial_choice_and_score_32.json`](../benchmarks/data/adversarial_choice_and_score_32.json) (`ChoiceGate` $\alpha=0.10$, `guarantee_holds=True` on all folds; `ScoreGate` $\alpha=0.20$, best-effort `guarantee_holds=False` as 8 positives / 14 negatives $< 9$ per class):
+
+| Model (RTX 4070) | `ChoiceGate` Unguarded Err | `ChoiceGate` 2-Fold Conformal ($\alpha=0.10$) | `ScoreGate` Unguarded Err (`@3.5`) | `ScoreGate` 2-Fold Conformal ($\alpha=0.20$) |
+| :--- | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b`** | 1/22 (4.5%) | **1/22 (4.5% <= 10%)**, 8/22 abstained | 4/22 (18.2%) | **2/22 (9.1%)**, 6/22 abstained |
+| **`gemma4:e4b`** | 1/22 (4.5%) | **1/22 (4.5% <= 10%)**, 0/22 abstained | 3/22 (13.6%) | **0/22 (0.0%)**, 2/22 abstained |
+
+#### C. Pure-CPU Zero-Probe Cold Start (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`)
+
+Loading the saved `CalibrationProfile` on an unseen BYO model alias in pure CPU mode (`2.09 GB RAM`, `0.0 GB VRAM`, confirmed zero lazy micro-probe calls across 12 stratified items from `MultiDomain-24`):
+- **`LogitGate(profile=...)`**: `5/12 (41.7%)` fast-path rate, **`0/12 (0.0%)` selective error**, mean latency **`2,126.7 ms`** (`2,265.0 ms` median).
+- **`JudgeGate(profile=..., max_tokens=160, think=False)`**: `9/12 (75.0%)` accuracy, mean latency `14,027.6 ms` (`14,491.6 ms` median) — **`6.6x` mean speedup** via `LogitGate` with portable profile reuse.
+
+---
+
+### 8. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

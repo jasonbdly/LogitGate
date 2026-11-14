@@ -76,6 +76,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Fail probability threshold (defaults to LOGITGATE_FAIL_THRESHOLD or 0.20)",
     )
     eval_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Path to a CalibrationProfile JSON file",
+    )
+    eval_parser.add_argument(
         "--ast-syntax",
         action="store_true",
         help="Enable Layer 0 AST syntax validation before logit evaluation",
@@ -124,6 +130,13 @@ def create_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.05,
         help="Target risk bound alpha for selective classification (default: 0.05)",
+    )
+    cal_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Optional path to save a portable CalibrationProfile JSON file",
     )
     cal_parser.add_argument(
         "--json",
@@ -235,6 +248,12 @@ def create_parser() -> argparse.ArgumentParser:
         choices=("on_ambiguous_only", "on_ambiguous_or_fail", "adjudicate", "always"),
         default="on_ambiguous_only",
         help="JudgeGate escalation policy inside the cascade (default: on_ambiguous_only)",
+    )
+    bench_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Path to a CalibrationProfile JSON file for LogitGate / cascade modes",
     )
     bench_parser.add_argument("--json", action="store_true", help="Emit machine-readable results")
     bench_parser.add_argument("--quiet", action="store_true", help="Suppress per-case progress on stderr")
@@ -504,7 +523,11 @@ def render_snapshot_report(
 def _cmd_calibrate(args: argparse.Namespace) -> int:
     from pathlib import Path
 
-    from logitgate.backends.base import resolve_logit_backend
+    from logitgate.backends.base import infer_backend_spec, resolve_logit_backend
+    from logitgate.calibration.profile import (
+        CalibrationProfile,
+        fit_calibration_profile,
+    )
 
     if args.dataset and (
         isinstance(args.alpha, bool) or not math.isfinite(args.alpha) or not (0.0 < args.alpha < 1.0)
@@ -517,12 +540,8 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
     try:
         if args.dataset:
             import json
-            from dataclasses import asdict
 
-            from logitgate.calibration.conformal import (
-                calibrate_cascade_thresholds,
-                load_calibration_dataset,
-            )
+            from logitgate.calibration.conformal import load_calibration_dataset
 
             try:
                 samples = load_calibration_dataset(args.dataset)
@@ -543,79 +562,66 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
                 )
                 return EXIT_FAILED
 
-            calibrated_probs: list[float] = []
-            ground_truth_labels: list[bool] = []
-            log_odds_samples: list[tuple[float, float, int]] = []
-
-            for sample_rubric, sample_candidate, sample_y in samples:
-                gate = LogitGate(rubric=sample_rubric, backend=backend, model=args.model, save_on_fail=False)
-                v = gate.evaluate(sample_candidate, save_on_fail=False)
-                prob = v.probability if v.probability is not None else (1.0 if v.passed else 0.0)
-                calibrated_probs.append(prob)
-                ground_truth_labels.append(bool(sample_y))
-                tr = v.traces[-1] if v.traces else None
-                if tr is not None and tr.log_odds_pass is not None:
-                    f_lo = tr.forward_log_odds if tr.forward_log_odds is not None else tr.log_odds_pass
-                    r_lo = tr.reverse_log_odds if tr.reverse_log_odds is not None else f_lo
-                    if math.isfinite(f_lo) and math.isfinite(r_lo):
-                        log_odds_samples.append((f_lo, r_lo, 1 if sample_y else 0))
-
             try:
-                thresholds = calibrate_cascade_thresholds(
-                    calibrated_probs=calibrated_probs,
-                    ground_truth_labels=ground_truth_labels,
+                profile = fit_calibration_profile(
+                    backend=backend,
+                    model=args.model,
+                    samples=samples,
                     target_risk_alpha=args.alpha,
+                    output_path=args.output,
+                    cache_path=args.cache_path,
                 )
-            except ValueError as e:
+            except (OSError, ValueError, CalibrationError) as e:
                 sys.stderr.write(f"Error: {sanitize_terminal_text(str(e))}\n")
                 return EXIT_FAILED
 
-            if args.cache_path and log_odds_samples:
-                from logitgate.debiasing.permutation import (
-                    _persist_calibration_profile,
-                    fit_calibration,
-                )
-
-                try:
-                    temp_result = fit_calibration(log_odds_samples)
-                    _persist_calibration_profile(
-                        effective_model,
-                        temp_result,
-                        cache_path=Path(args.cache_path),
-                    )
-                except (OSError, ValueError, CalibrationError) as e:
-                    sys.stderr.write(
-                        f"Warning: could not persist temperature calibration cache to "
-                        f"'{sanitize_terminal_text(str(args.cache_path))}': {sanitize_terminal_text(str(e))}\n"
-                    )
+            assert profile.fail_threshold is not None
+            assert profile.pass_threshold is not None
+            assert profile.target_risk_alpha is not None
+            assert profile.empirical_escalation_rate is not None
 
             if args.json:
-                print(json.dumps(asdict(thresholds), indent=2))
+                payload = {
+                    **profile.model_dump(),
+                    "optimal_temperature": profile.binary_temperature,
+                    "tau_reject": profile.fail_threshold,
+                    "tau_accept": profile.pass_threshold,
+                }
+                print(json.dumps(payload, indent=2))
             else:
                 print("=" * 60)
                 print("LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION")
                 print("=" * 60)
                 print(f"Dataset:                   {sanitize_terminal_text(str(args.dataset))}")
-                print(f"Calibration Samples:       {thresholds.calibration_set_size}")
-                print(f"Target Risk (Alpha):       {thresholds.target_risk_alpha:.4f}")
+                print(f"Calibration Samples:       {profile.calibration_set_size}")
+                print(f"Target Risk (Alpha):       {profile.target_risk_alpha:.4f}")
+                print(f"Fitted Temperature:        {profile.binary_temperature:.4f}")
                 print("-" * 60)
-                print(f"Layer 1 Tau Reject:        {thresholds.tau_reject:.4f}")
-                print(f"Layer 1 Tau Accept:        {thresholds.tau_accept:.4f}")
-                print(f"Layer 2 Escalation Rate:   {thresholds.empirical_escalation_rate:.2%}")
+                print(f"Layer 1 Tau Reject:        {profile.fail_threshold:.4f}")
+                print(f"Layer 1 Tau Accept:        {profile.pass_threshold:.4f}")
+                print(f"Layer 2 Escalation Rate:   {profile.empirical_escalation_rate:.2%}")
                 print("-" * 60)
-                if thresholds.guarantee_holds:
-                    print(f"Guaranteed Layer 1 Error: <= {thresholds.target_risk_alpha:.2%} "
-                          "(marginal; assumes production inputs resemble this dataset)")
+                if profile.guarantee_holds:
+                    print(
+                        f"Guaranteed Layer 1 Error: <= {profile.target_risk_alpha:.2%} "
+                        "(marginal; assumes production inputs resemble this dataset)"
+                    )
                 else:
                     print(
-                        f"Guaranteed Layer 1 Error: NONE. Need >= {thresholds.min_samples_per_class} positives "
-                        f"and negatives (have {thresholds.num_positive} / {thresholds.num_negative}); "
+                        f"Guaranteed Layer 1 Error: NONE. Need >= {profile.min_samples_per_class} positives "
+                        f"and negatives (have {profile.num_positive} / {profile.num_negative}); "
                         "thresholds are best-effort."
                     )
-                print(
-                    f"Use: LogitGate(..., pass_threshold={thresholds.tau_accept}, "
-                    f"fail_threshold={thresholds.tau_reject})"
-                )
+                if args.output:
+                    safe_out = sanitize_terminal_text(str(args.output))
+                    print(f"Saved Profile:             {safe_out}")
+                    print(f'Use: LogitGate(..., profile="{safe_out}")')
+                else:
+                    print(
+                        f"Use: LogitGate(..., pass_threshold={profile.pass_threshold}, "
+                        f"fail_threshold={profile.fail_threshold}, "
+                        f"logit_temperature={profile.binary_temperature})"
+                    )
                 print("=" * 60)
             return EXIT_OK
 
@@ -632,6 +638,13 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
                 save_cache=True,
                 cache_path=cache_path,
             )
+            if args.output:
+                profile = CalibrationProfile.from_calibration_result(
+                    result,
+                    model=effective_model,
+                    backend=infer_backend_spec(backend),
+                )
+                profile.save(args.output)
         except (OSError, ValueError) as e:
             sys.stderr.write(f"Error saving calibration cache: {sanitize_terminal_text(str(e))}\n")
             return EXIT_FAILED
@@ -646,6 +659,8 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
             print(f"Brier Score: {result.brier_score_before:.6f} -> {result.brier_score_after:.6f}")
             print(f"ECE: {result.ece_before:.6f} -> {result.ece_after:.6f}")
             print("Calibration successfully saved to cache.")
+            if args.output:
+                print(f"Calibration profile saved to {sanitize_terminal_text(str(args.output))}.")
         return EXIT_OK
     finally:
         backend.close()
@@ -734,6 +749,7 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             judge_max_tokens=args.judge_max_tokens,
             judge_think=args.judge_think,
             cascade_trigger=args.cascade_trigger,
+            profile=args.profile,
             dataset_label=label,
             progress=None if (args.quiet or args.json) else progress,
         )
@@ -776,6 +792,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         model=args.model,
         pass_threshold=args.threshold,
         fail_threshold=args.fail_threshold,
+        profile=args.profile,
     )
     try:
         evaluator: Cascade | LogitGate

@@ -326,6 +326,34 @@ verdict = scorer.evaluate("def add(a, b): return a + b")
 print(f"Expected Score: {verdict.score:.2f} / 5.00")
 ```
 
+### Turnkey Conformal Calibration Profiles (`CalibrationProfile`)
+Fit temperature scaling first and derive distribution-free split-conformal Layer-1 cutoffs strictly on the post-temperature probabilities (`T -> tau_reject / tau_accept`) via `fit_calibration_profile(..., dataset=..., target_risk_alpha=0.10, calibrate_multiclass=True, output_path="profile.json")` so thresholds and softmax scaling never fall out of sync and BYO checkpoints skip lazy cold-start calibration probes:
+
+```python
+import tempfile
+from pathlib import Path
+from logitgate import CalibrationProfile, ChoiceGate, LogitGate, ScoreGate
+
+# Build from measured (forward_log_odds, reverse_log_odds, label) holdout tuples,
+# or call fit_calibration_profile(backend="ollama://...", dataset="holdout.json") on a live server
+samples = [(2.1 + 0.05 * i, 2.0 + 0.05 * i, 1) for i in range(20)] + [
+    (-2.1 - 0.05 * i, -2.0 - 0.05 * i, 0) for i in range(20)
+]
+profile = CalibrationProfile.from_log_odds_samples(
+    samples, target_risk_alpha=0.10, model="qwen2.5:7b", multiclass_temperature=1.05
+)
+
+with tempfile.TemporaryDirectory() as tmp:
+    profile_path = Path(tmp) / "profile.json"
+    profile.save(profile_path)
+    gate = LogitGate("Does the response cite the provided context?", profile=profile_path)
+    router = ChoiceGate("Select queue", {"A": "Billing", "B": "Security"}, profile=profile_path)
+    scorer = ScoreGate("Rate clarity 1-5", profile=profile_path)
+    assert gate.pass_threshold == profile.pass_threshold
+    assert router.logit_temperature == profile.effective_multiclass_temperature
+    assert scorer.logit_temperature == profile.effective_multiclass_temperature
+```
+
 ---
 
 ## Command-Line Interface (CLI)
@@ -350,8 +378,11 @@ logitgate explain --offline
 logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:7b"
 logitgate benchmark --backend "ollama://localhost:11434/qwen2.5-coder:3b" --judge-model "gemma4:e4b"
 
-# Fit temperature and split-conformal thresholds on a labeled dataset or built-in sanity set
-logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b"
+# Fit a unified temperature + split-conformal CalibrationProfile JSON artifact and apply it
+logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b" \
+    --dataset EPISTEMIC_REASONING_TEST_CASES.md --alpha 0.10 --output logitgate_profile.json
+logitgate eval --rubric "Must be valid JSON" --candidate '{"ok": true}' --profile logitgate_profile.json
+logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:14b" --profile logitgate_profile.json
 ```
 
 Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreachable or misconfigured.
