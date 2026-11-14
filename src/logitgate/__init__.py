@@ -51,6 +51,8 @@ from logitgate.debiasing.inversion import (
     compile_binary_prompt,
     compile_choice_prompt,
     compile_cot_binary_prompt,
+    compile_listwise_rank_prompt,
+    compile_pairwise_prompt,
     compile_score_prompt,
 )
 from logitgate.debiasing.permutation import (
@@ -94,6 +96,7 @@ from logitgate.gates.ast_gate import (
 from logitgate.gates.base import BaseGate, EscalationPolicy
 from logitgate.gates.judge_gate import JudgeGate
 from logitgate.gates.logit_gate import ChoiceGate, LogitGate, MultiRubricGate, ScoreGate
+from logitgate.gates.rank_gate import BestOfNGate, BestOfNResult, RankGate
 from logitgate.hardware.memory_guard import (
     PCIeSpilloverGuard,
     VRAMWatermarkStatus,
@@ -147,6 +150,8 @@ __all__ = [
     "BackendTimeoutError",
     "BackendUnavailableError",
     "BaseGate",
+    "BestOfNGate",
+    "BestOfNResult",
     "CalibrationError",
     "CalibrationProfile",
     "CalibrationResult",
@@ -176,6 +181,7 @@ __all__ = [
     "OpenAICompatBackend",
     "PCIeSpilloverGuard",
     "PrefixBroadcastLogitEvaluator",
+    "RankGate",
     "RecurrentLoopTrace",
     "RecurrentPyTorchBackend",
     "ScoreConformalThresholds",
@@ -200,6 +206,8 @@ __all__ = [
     "compile_binary_prompt",
     "compile_choice_prompt",
     "compile_cot_binary_prompt",
+    "compile_listwise_rank_prompt",
+    "compile_pairwise_prompt",
     "compile_score_prompt",
     "compute_binary_log_odds",
     "compute_normalized_probabilities",

@@ -518,12 +518,47 @@ Loading the saved `CalibrationProfile` on an unseen BYO model alias in pure CPU 
 
 ---
 
-### 8. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 8. Zero-Token Tournament & Best-of-N Preference Ranking (`v0.7.0`)
+
+#### A. Pairwise Positional-Bias Cancellation vs. 26B Generative Judge (`24` Multi-Domain Pairs)
+
+Evaluating `24` domain-matched `(good, bad)` pairs constructed from [`benchmarks/data/multi_domain_24.json`](../benchmarks/data/multi_domain_24.json) (`6` pairs each across RAG groundedness, support policy, SQL safety, and Python security):
+
+| Model & Hardware | Regime (`max_tokens`) | Order-1 Slot-A Acc | Order-2 Slot-B Acc | Order Flip Rate | Symmetric Debiased Acc (Fwd / Rev) | Mean `\|Bias\|` (nats) | Mean / Median Latency |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`gemma4:26b`** (RTX 5090, `17.84 GB`) | Generative Critique (`max_tokens=160, think=False`, `50.0` tok) | `24/24 (100.0%)` | — | — | — | — | `432.2 ms / 381.0 ms` |
+| **`qwen2.5-coder:3b`** (RTX 4070, `2.09 GB`) | Single-Pass vs. **Pairwise `RankGate`** (`0` tok) | `24/24 (100.0%)` | **`0/24 (0.0%)`** | **`24/24 (100.0%)`** | **`24/24 (100.0%)` / `24/24 (100.0%)`** | `1.7272` | **`119.3 ms / 120.3 ms` (`3.62x`)** |
+| **`llama3.2:3b`** (RTX 4070, `2.33 GB`) | Single-Pass vs. **Pairwise `RankGate`** (`0` tok) | `24/24 (100.0%)` | **`2/24 (8.3%)`** | **`22/24 (91.7%)`** | **`24/24 (100.0%)` / `24/24 (100.0%)`** | `1.7603` | **`113.9 ms / 113.9 ms` (`3.79x`)** |
+| **`gemma4:e4b`** (RTX 4070, `3.21 GB`) | Single-Pass vs. **Pairwise `RankGate`** (`0` tok) | `24/24 (100.0%)` | `22/24 (91.7%)` | `2/24 (8.3%)` | **`24/24 (100.0%)` / `24/24 (100.0%)`** | `1.0255` | **`235.8 ms / 235.5 ms` (`1.83x`)** |
+
+Without symmetric A/B swap cancellation, `qwen2.5-coder:3b` and `llama3.2:3b` exhibit **91.7%–100.0% order flip rates** (nearly always choosing Slot `A`). Symmetric log-odds averaging eliminates the positional bias mathematically (`1.73–1.76` nats), recovering **100.0% order-invariant accuracy** in both directions at **1.83x–3.79x lower latency** than the 26B generative judge.
+
+#### B. Best-of-4 Mode Scaling & All-Bad Pool Rejection (`20` Pools across Python, SQL, JSON, RAG)
+
+Across `16` valid-winner 4-candidate pools and `4` all-bad pools on RTX 4070 GPU:
+
+- **Mode Comparison (`16` Valid Pools):**
+  - `qwen2.5-coder:3b`: `listwise` (`2` calls/pool) `12/16 (75.0%)` at `277.3 ms` mean (`141.1 ms` median); `tournament` (`6` calls/pool) **`15/16 (93.8%)`** at `301.8 ms`; `round_robin` (`12` calls/pool) **`15/16 (93.8%)`** with `cycle_residual = 0.1480` at `575.4 ms`.
+  - `gemma4:e4b`: `listwise` (`2` calls/pool) **`16/16 (100.0%)`** at **`280.3 ms` mean** (`266.3 ms` median); `tournament` (`6` calls/pool) **`16/16 (100.0%)`** at `617.8 ms`; `round_robin` (`12` calls/pool) **`16/16 (100.0%)`** with `cycle_residual = 1.2885` at `1,237.0 ms`.
+- **Naive `RankGate` vs. Contract-Filtered `BestOfNGate(pre_gate=ASTGate, post_gate=LogitGate)` (`20` Pools):**
+  - On `qwen2.5-coder:3b`, Layer-0 `ASTGate` deterministically pruned **`28/80 (35.0%)` invalid candidates**, lifting valid Top-1 accuracy from `12/16 (75.0%)` to **`14/16 (87.5%)`** and raising All-Bad Pool Rejection Rate from **`0/4 (0.0%)` to `3/4 (75.0%)`** (`213.7 ms` mean).
+  - On `gemma4:e4b`, naive `RankGate` selected a defective winner on all 4 all-bad pools (`0/4 (0.0%)` rejection), whereas `BestOfNGate` achieved **`4/4 (100.0%)` All-Bad Pool Rejection** (`423.3 ms` mean, `35.0%` Layer-0 prune rate; using an uncalibrated static `0.55` post-gate cutoff rejected `3/16` valid pools (`13/16`), underscoring why `post_gate` should load a fitted `CalibrationProfile`).
+
+#### C. Pure-CPU Pairwise Ranking (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`, `12` Stratified Pairs)
+
+Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `[]`):
+- **Pairwise `RankGate` (`max_tokens=1`, 2 swapped calls):** **`12/12 (100.0%)`**, mean **`5,849.2 ms`** (`5,734.6 ms` median, `7,067.7 ms` p95).
+- **CPU Generative Pairwise (`max_tokens=160, think=False`, `90.2` mean tok):** `12/12 (100.0%)`, mean `6,923.7 ms` (`6,730.4 ms` median, `7,530.3 ms` p95) — **`1.18x` mean speedup** without multi-token variance or answer-format parsing failures.
+
+---
+
+### 9. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.
   - **Discrete Routing & Classification (`ChoiceGate`)**: Selecting downstream agent tools, intent buckets, or workflow branches in ~40–90 ms.
   - **Continuous Rubric Scoring (`ScoreGate`)**: Probability-weighted expected value scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with symmetric scale reversal.
+  - **Zero-Token Candidate Ranking & Best-of-$N$ Selection (`RankGate` & `BestOfNGate`)**: Comparing candidate completions across `pairwise`, `listwise`, `round_robin` (Hodge ranking + Condorcet residual), and `tournament` regimes with deterministic Layer-0 pruning and post-selection verification.
 - **Escalate to Layer 2 (`JudgeGate`) — Autoregressive Generation**:
   - **Multi-Step Deductive Reasoning**: Proof verification or multi-hop logic where conclusions depend on intermediate reasoning steps.
   - **Complex Symbolic Arithmetic**: Calculations requiring scratchpad calculation or token-by-token recurrence (or route deterministic math checks to Layer 0 `ASTGate` / `ContractGate`).

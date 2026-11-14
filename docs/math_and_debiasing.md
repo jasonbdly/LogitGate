@@ -121,19 +121,52 @@ The same `CalibrationProfile` ecosystem extends distribution-free selective risk
 
 ---
 
-## 7. Foundational Literature Credited
+## 7. Positional Swap Debiasing & Hodge Pairwise Ranking (`RankGate`)
+
+When compact LLMs judge preference between candidate completions (`A` vs. `B`, or slot list `A, B, C, ...`), single-pass prompting suffers from strong positional ordering bias $\beta_{\text{pos}}$ (typically favoring Slot `A`) and label token prior bias $\beta_{\text{tok}}$ (Zheng et al., 2023). `RankGate` cancels both biases using single-token log-probabilities (`max_tokens=1`) across four structured regimes:
+
+### A. Pairwise Symmetric Swap Cancellation ($N = 2$)
+Given candidates $(c_i, c_j)$, `compile_pairwise_prompt()` formats rubric and context before the nonce-delimited candidate blocks (`query_first=True`) and swaps candidate order across two passes:
+- Pass 1 measures $\Delta^{(1)}_{ij} = \log P_1(\text{A}) - \log P_1(\text{B}) = s_i - s_j + \beta_{\text{pos}} + \beta_{\text{tok}}$.
+- Pass 2 evaluates $(c_j, c_i)$ and extracts $\Delta^{(2)}_{ij} = \log P_2(\text{B}) - \log P_2(\text{A}) = s_i - s_j - (\beta_{\text{pos}} + \beta_{\text{tok}})$.
+
+Averaging in log-odds space recovers the debiased pairwise log-preference $z_{ij} = \frac{1}{2}(\Delta^{(1)}_{ij} + \Delta^{(2)}_{ij}) = s_i - s_j$, while $\frac{1}{2}|\Delta^{(1)}_{ij} - \Delta^{(2)}_{ij}|$ measures positional divergence against optional `max_positional_bias`.
+
+### B. Listwise Slot-Permutation Debiasing ($2 \le N \le 10$)
+`compile_listwise_rank_prompt()` places candidates under single-character slot tokens `A, B, C, ...` and averages centered per-pass log-softmax slot probabilities $\tilde{\ell}^{(m)}_k = \log P_m(\text{slot}_m(k)) - \log\sum_{r} \exp(\log P_m(r))$ across permutation schedules (`"derangement"` 2-pass cycle-shift, `"reverse"` 2-pass reversal, or `"cyclic"` $N$-pass Latin-square rotation), then maps mean log-worths through temperature-scaled softmax $P(k) = \operatorname{softmax}(w / T)$.
+
+### C. Round-Robin Hodge / Bradley-Terry Projection & Condorcet Residual
+Evaluating all $\binom{N}{2}$ unordered pairs produces a skew-symmetric debiased log-preference matrix $Z_{ij} = -Z_{ji}$. Least-squares / combinatorial Hodge projection onto zero-sum Bradley-Terry log-worths (Bradley & Terry, 1952; Jiang et al., 2011) admits the exact closed-form average over outgoing pairwise edges:
+
+$$w_i = \frac{1}{N} \sum_{j \neq i} Z_{ij}, \qquad \sum_{i=1}^N w_i = 0$$
+
+The orthogonal non-transitive / Condorcet cycle component is quantified directly via root-mean-square `cycle_residual`:
+
+$$r_{\text{cycle}} = \sqrt{\frac{1}{\binom{N}{2}} \sum_{1 \le i < j \le N} \left(Z_{ij} - (w_i - w_j)\right)^2}$$
+
+When preferences are pairwise transitive, $r_{\text{cycle}} \approx 0$; cyclic trade-offs (`X > Y > Z > X`) produce strictly positive `cycle_residual` surfaced in trace metadata.
+
+### D. Single-Elimination Tournament Bracket
+For larger pools (`tournament`, up to $N = 32$), `RankGate` seeds pairs round-by-round ($N - 1$ swapped matches total), advances odd-$N$ byes automatically, records each match gap $|z_{ij}|$, and recovers global log-worths along the champion-rooted elimination tree ($w_{\text{loser}} = w_{\text{winner}} - |z_{ij}|$, zero-centered before temperature softmax).
+
+---
+
+## 8. Foundational Literature Credited
 
 1. **Pretraining Token Prior Bias & Calibration**:
    - Zhao, T. Z., Wallace, E., Feng, S., Klein, D., & Singh, S. (2021). *"Calibrate Before Use: Improving Few-Shot Performance of Language Models"*. **ICML 2021**. [arXiv:2102.09690](https://arxiv.org/abs/2102.09690).
-2. **Positional & Label Permutation Bias in LLM Judges**:
+2. **Paired Comparison Log-Odds Modeling & Combinatorial Hodge Ranking**:
+   - Bradley, R. A., & Terry, M. E. (1952). *"Rank Analysis of Incomplete Block Designs: I. The Method of Paired Comparisons"*. **Biometrika**, 39(3/4), 324–345.
+   - Jiang, X., Lim, L.-H., Yao, Y., & Ye, Y. (2011). *"Statistical ranking and combinatorial Hodge theory"*. **Mathematical Programming**, 127(1), 203–244.
+3. **Positional & Label Permutation Bias in LLM Judges**:
    - Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu, Z., Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E. P., Zhang, H., Gonzalez, J. E., & Stoica, I. (2023). *"Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena"*. **NeurIPS 2023**. [arXiv:2306.05685](https://arxiv.org/abs/2306.05685).
-3. **Probability-Weighted Continuous Expected Scoring**:
+4. **Probability-Weighted Continuous Expected Scoring**:
    - Liu, Y., Iter, D., Xu, Y., Wang, S., Xu, R., & Zhu, C. (2023). *"G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment"*. **EMNLP 2023**. [arXiv:2303.16634](https://arxiv.org/abs/2303.16634).
-4. **Post-Hoc Temperature Scaling & Expected Calibration Error (ECE)**:
+5. **Post-Hoc Temperature Scaling & Expected Calibration Error (ECE)**:
    - Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017). *"On Calibration of Modern Neural Networks"*. **ICML 2017**. [arXiv:1706.04599](https://arxiv.org/abs/1706.04599).
-5. **Split-Conformal Selective Classification & Distribution-Free Uncertainty Quantification**:
+6. **Split-Conformal Selective Classification & Distribution-Free Uncertainty Quantification**:
    - Angelopoulos, A. N., & Bates, S. (2021). *"A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification"*. [arXiv:2107.07511](https://arxiv.org/abs/2107.07511).
-6. **System-1 Single-Token Decision Benchmarking**:
+7. **System-1 Single-Token Decision Benchmarking**:
    - Deußer, T., Sparrenberg, L., & Sifa, R. (2026). *"Evaluating and Benchmarking the System One Model Jev"*. [arXiv:2609.37647](https://arxiv.org/abs/2609.37647).
-7. **Recurrent Depth & Universal Transformers**:
+8. **Recurrent Depth & Universal Transformers**:
    - Dehghani, M., Gouws, S., Vinyals, O., Uszkoreit, J., & Kaiser, Ł. (2019). *"Universal Transformers"*. **ICLR 2019**. [arXiv:1807.03819](https://arxiv.org/abs/1807.03819).

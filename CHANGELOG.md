@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Zero-Token Preference Ranking (`RankGate` & `BestOfNResult`):** Added `logitgate.gates.rank_gate.RankGate` (re-exported at `logitgate` and `logitgate.gates`) supporting `pairwise`, `listwise` (`derangement`, `cyclic`, `reverse`), `round_robin` (Hodge / Bradley-Terry centered log-worths with `cycle_residual` inconsistency metric), `tournament` (single-elimination bracket with odd-N byes and tree log-worths), and `auto` modes, with `min_confidence`, `min_margin`, `max_positional_bias`, `warm_prefix`, `profile` integration, and sync/async parity (`evaluate`/`aevaluate` and `rank`/`arank`).
+- **Contract-Filtered Best-of-N Selection (`BestOfNGate`):** Added `BestOfNGate` (`pre_gate -> RankGate -> post_gate`) for zero-LLM short-circuiting on 0/1 survivors, zero-filled rejected candidate probabilities, all-bad pool rejection via `post_gate`, `_normalized_out` winning-candidate forwarding across `Cascade` pipelines (`BestOfNGate >> LogitGate`), and single-snapshot failure persistence.
+- **Prompt Compilers, Stub Debiasing, Snapshot Replay, & CLI:** Added `compile_pairwise_prompt()` and `compile_listwise_rank_prompt()` with randomized nonce boundaries and `query_first` KV-prefix stability in `logitgate.debiasing.inversion`; extended `StubBackend` with `Preferred:` awareness and automatic Pass-2 derangement token shifting; added `RankGate` and `BestOfNGate` reconstruction (with owned child backend cleanup) to `VerdictSnapshot`; and added the `logitgate rank` CLI subcommand (`--rubric`, `--candidate`, `--file`, `--candidates-json`, `--mode`, `--ast-syntax`, `--normalize`, `--verify-winner`, `--profile`, `--json`).
+
 ## [0.6.0] - 2026-11-14
 
 ### Added

@@ -445,14 +445,14 @@ class StubBackend(LogitBackend, GenerativeBackend):
                 {"token": low_tok, "logprob": math.log(1.0 - p)},
             ]
 
-        # 2. Check if this is Pass 2 (reversed mapping where A is Fail / violates, or ChoiceGate Pass 2)
+        # 2. Check if this is Pass 2 (reversed mapping where A is Fail / violates, or ChoiceGate/RankGate Pass 2)
         is_reverse_pass = (
             "A: The candidate artifact violates" in decision_section
             or "A: The content violates" in decision_section
             or "A: The candidate does not" in decision_section
             or (
                 self.reverse_top_logprobs is not None
-                and "Choice:" in decision_section
+                and ("Choice:" in decision_section or "Preferred:" in decision_section)
                 and resp_idx % 2 == 1
             )
         )
@@ -464,6 +464,20 @@ class StubBackend(LogitBackend, GenerativeBackend):
         )
         tok0 = clean_toks[0] if len(clean_toks) >= 2 else "A"
         tok1 = clean_toks[1] if len(clean_toks) >= 2 else "B"
+
+        if (
+            "Preferred:" in decision_section
+            and self.forward_top_logprobs is None
+            and self.reverse_top_logprobs is None
+            and len(clean_toks) >= 2
+            and resp_idx % 2 == 1
+        ):
+            p = max(min(self.default_prob, 0.9999), 0.0001)
+            shifted_tok = clean_toks[max(1, len(clean_toks) // 2)]
+            return [
+                {"token": shifted_tok, "logprob": math.log(p)},
+                {"token": tok0, "logprob": math.log(1.0 - p)},
+            ]
 
         if is_reverse_pass:
             if self.reverse_top_logprobs is not None:

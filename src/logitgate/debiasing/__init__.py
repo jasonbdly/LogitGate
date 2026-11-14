@@ -3,6 +3,8 @@ from logitgate.debiasing.inversion import (
     compile_binary_prompt,
     compile_choice_prompt,
     compile_cot_binary_prompt,
+    compile_listwise_rank_prompt,
+    compile_pairwise_prompt,
     compile_score_prompt,
 )
 from logitgate.debiasing.permutation import (
@@ -40,6 +42,8 @@ __all__ = [
     "compile_binary_prompt",
     "compile_choice_prompt",
     "compile_cot_binary_prompt",
+    "compile_listwise_rank_prompt",
+    "compile_pairwise_prompt",
     "compile_score_prompt",
     "compute_binary_log_odds",
     "compute_normalized_probabilities",

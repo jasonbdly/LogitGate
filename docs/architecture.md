@@ -107,8 +107,26 @@ Production CI/CD runners and stateless containers often deploy unrecognized fine
 
 `CalibrationProfile` (`schema_version=1`, atomically serialized with symlink rejection and 1 MiB load guard via `.save()` / `.load()`) bundles calibrated temperatures alongside mutually consistent Layer-1 conformal cutoffs:
 
-- **Unified Configuration Precedence**: All gates accepting `profile: CalibrationProfile | str | Path | None = None` (`LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, and `JudgeGate`) enforce strict resolution order:
+- **Unified Configuration Precedence**: All gates accepting `profile: CalibrationProfile | str | Path | None = None` (`LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `RankGate`, `BestOfNGate`, and `JudgeGate`) enforce strict resolution order:
   `explicit constructor kwarg > profile field > preset > global defaults`.
 - **Zero-Probe Cold Start**: Supplying a `profile=` sets `_needs_lazy_calibration = False`, eliminating lazy micro-calibration probes on unseen BYO checkpoints (`2` forward/reverse calls from request #1) while emitting a `CalibrationWarning` if the loaded profile's `model` tag differs from the runtime gate model.
-- **Multiclass `0.65` Softmax Floor (`effective_multiclass_temperature`)**: Sub-4B checkpoints often fit sharp binary temperatures ($T_{\text{bin}} \approx 0.06\text{--}0.40$) to counteract zero-shot `A/B` symbol attenuation. When a binary-only profile (`multiclass_temperature=None`) is passed to `ChoiceGate`, `ScoreGate`, or `JudgeGate`, `effective_multiclass_temperature` automatically applies `max(0.65, binary_temperature)` so multi-option softmax distributions do not over-sharpen unless a dedicated `multiclass_temperature` was fitted (`calibrate_multiclass=True`).
+- **Multiclass `0.65` Softmax Floor (`effective_multiclass_temperature`)**: Sub-4B checkpoints often fit sharp binary temperatures ($T_{\text{bin}} \approx 0.06\text{--}0.40$) to counteract zero-shot `A/B` symbol attenuation. When a binary-only profile (`multiclass_temperature=None`) is passed to `ChoiceGate`, `ScoreGate`, `RankGate`, or `JudgeGate`, `effective_multiclass_temperature` automatically applies `max(0.65, binary_temperature)` so multi-option softmax distributions do not over-sharpen unless a dedicated `multiclass_temperature` was fitted (`calibrate_multiclass=True`).
 - **Snapshot Independence**: `VerdictSnapshot` records resolved gate configuration values (`logit_temperature`, `pass_threshold`, `fail_threshold`, `score_threshold`, `score_fail_threshold`, `choice_min_confidence`, `choice_min_margin`) directly into the snapshot so `VerdictSnapshot.replay()` and `areplay()` remain reproducible even after an external `profile.json` file is removed.
+
+---
+
+## Zero-Token Candidate Ranking & Best-of-N Pipelines (`RankGate` & `BestOfNGate`)
+
+Evaluating a pool of $N \ge 2$ candidate completions adds two structural requirements beyond single-candidate verification: permutation-invariant preference extraction and defense against **all-bad pools** where pure relative ranking otherwise promotes the least defective candidate.
+
+- **Mode Scaling (`RankGate.mode`)**:
+  - `pairwise` ($N = 2$): 2 swapped forward/reverse single-token calls (`max_tokens=1`).
+  - `listwise` ($2 \le N \le 10$): single-token slot softmax (`A..J`) across `"derangement"` (2 calls), `"reverse"` (2 calls), or `"cyclic"` ($N$ calls).
+  - `round_robin` ($2 \le N \le 16$): all $N(N - 1)/2$ swapped pairs with Hodge centered log-worths and Condorcet `cycle_residual`.
+  - `tournament` ($2 \le N \le 32$): $N - 1$ swapped single-elimination matches with automatic odd-$N$ byes and champion-rooted tree log-worths.
+  - `auto`: selects `pairwise` ($N = 2$), `listwise` ($3 \le N \le 6$), and `tournament` ($7 \le N \le 32$).
+- **Contract-Filtered `BestOfNGate` (`pre_gate -> RankGate -> post_gate`)**:
+  - Runs optional deterministic/cheap `pre_gate` (`ASTGate`, `ContractGate`, etc.) across all candidates first (`evaluate` sync / `asyncio.gather` async): `0` survivors fails immediately with `0` LLM calls; `1` sole survivor promotes at `probability=1.0` with `0` ranking calls; $\ge 2$ survivors are ranked and zero-filled for rejected keys while remapping `winner_index` to original pool indices.
+  - Runs optional `post_gate` (`LogitGate` / `JudgeGate`) against the winning candidate to catch **all-bad pools** where even the top-ranked survivor violates core correctness or policy contracts, persisting a single `VerdictSnapshot` across the full gate pipeline.
+- **`Cascade` Winner Forwarding (`_normalized_out`) & Snapshot Replay**:
+  - Both `RankGate` and `BestOfNGate` emit the winning candidate artifact via `kwargs["_normalized_out"]` on `verdict.passed`, allowing downstream `Cascade` stages (`selector >> JudgeGate(...)`) to verify the selected artifact directly while `VerdictSnapshot.replay()` / `areplay()` reconstructs `RankGate` and `BestOfNGate` (including `pre_gate_config` / `post_gate_config`) identically.

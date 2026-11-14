@@ -461,6 +461,87 @@ class VerdictSnapshot(BaseModel):
                 owns_logit_backend,
             )
 
+        if gate_type in ("RankGate", "BestOfNGate"):
+            from logitgate.gates.rank_gate import BestOfNGate, RankGate
+
+            rank_allowed = {
+                "mode",
+                "context",
+                "symmetric_debiasing",
+                "permutation_mode",
+                "query_first",
+                "logit_temperature",
+                "min_confidence",
+                "min_margin",
+                "max_positional_bias",
+                "warm_prefix",
+                "name",
+            }
+            rank_init = {k: v for k, v in gate_kwargs.items() if k in rank_allowed}
+            if gate_type == "RankGate":
+                return (
+                    RankGate(
+                        rubric=self.rubric,
+                        backend=effective_backend,
+                        model=effective_model,
+                        **rank_init,
+                    ),
+                    owns_logit_backend,
+                )
+
+            def _rebuild_child(cfg: Any) -> tuple[Any | None, bool]:
+                if not isinstance(cfg, dict):
+                    return None, False
+                c_is_judge = cfg.get("gate_type") == "JudgeGate"
+                if isinstance(effective_backend, (LogitBackend, GenerativeBackend)) and (
+                    isinstance(effective_backend, GenerativeBackend)
+                    if c_is_judge
+                    else isinstance(effective_backend, LogitBackend)
+                ):
+                    c_backend: Any = effective_backend
+                    c_model: str | None = effective_model
+                else:
+                    hint = effective_backend if isinstance(effective_backend, str) else None
+                    c_backend, c_model = self._resolve_replay_backend_and_model(
+                        hint, effective_model, cfg, prefer_judge=c_is_judge
+                    )
+                return self._build_replay_gate(cfg, c_backend, c_model)
+
+            pre_gate: Any = None
+            owns_pre = False
+            post_gate: Any = None
+            owns_post = False
+            try:
+                pre_gate, owns_pre = _rebuild_child(gate_kwargs.get("pre_gate_config"))
+                post_gate, owns_post = _rebuild_child(gate_kwargs.get("post_gate_config"))
+                best_gate = BestOfNGate(
+                    rubric=self.rubric,
+                    backend=effective_backend,
+                    model=effective_model,
+                    pre_gate=pre_gate,
+                    post_gate=post_gate,
+                    **rank_init,
+                )
+            except BaseException:
+                for child, owns_child in ((post_gate, owns_post), (pre_gate, owns_pre)):
+                    if child is not None and owns_child:
+                        c_b = getattr(child, "backend", None)
+                        if c_b is not None:
+                            c_b.close()
+                raise
+
+            extra_backends: list[Any] = []
+            for child, owns_child in ((pre_gate, owns_pre), (post_gate, owns_post)):
+                if child is not None and owns_child:
+                    c_b = getattr(child, "backend", None)
+                    if c_b is not None and c_b is not best_gate.backend and c_b not in extra_backends:
+                        extra_backends.append(c_b)
+                    for nested_b in getattr(child, "_replay_extra_backends", ()):
+                        if nested_b is not best_gate.backend and nested_b not in extra_backends:
+                            extra_backends.append(nested_b)
+            best_gate._replay_extra_backends = extra_backends  # type: ignore[attr-defined]
+            return best_gate, owns_logit_backend
+
         allowed_keys = {
             "pass_threshold",
             "fail_threshold",
@@ -516,6 +597,8 @@ class VerdictSnapshot(BaseModel):
         finally:
             if owns_backend:
                 gate.backend.close()
+            for extra_backend in getattr(gate, "_replay_extra_backends", ()):
+                extra_backend.close()
 
     async def areplay(
         self,
@@ -533,6 +616,8 @@ class VerdictSnapshot(BaseModel):
         finally:
             if owns_backend:
                 await gate.backend.aclose()
+            for extra_backend in getattr(gate, "_replay_extra_backends", ()):
+                await extra_backend.aclose()
 
     def _merge_explained_verdict(self, judge: Any, judge_verdict: Verdict) -> Verdict:
         combined_traces = list(self.verdict.traces) + list(judge_verdict.traces)

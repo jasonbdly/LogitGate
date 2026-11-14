@@ -354,6 +354,45 @@ with tempfile.TemporaryDirectory() as tmp:
     assert scorer.logit_temperature == profile.effective_multiclass_temperature
 ```
 
+### Zero-Token Candidate Ranking & Best-of-N Selection (`RankGate` & `BestOfNGate`)
+Rank $N \ge 2$ candidate completions against a rubric using single-token log-probabilities (`max_tokens=1`) with symmetric swap debiasing across `pairwise`, `listwise` (`derangement`/`cyclic`/`reverse`), `round_robin` (Hodge log-worth projection + Condorcet cycle residual), and single-elimination `tournament` modes, or wrap them in a contract-filtered `pre_gate -> RankGate -> post_gate` `BestOfNGate` pipeline that skips invalid drafts and forwards the winning artifact downstream in `Cascade`:
+
+```python
+from logitgate import ASTGate, BestOfNGate, LogitGate, RankGate
+
+# Standalone symmetric zero-token preference ranking
+ranker = RankGate(rubric="Which helper is clearer and better typed?", mode="auto")
+ranked = ranker.rank({
+    "v1": "def add(a, b): return a + b",
+    "v2": "def add(a: int, b: int) -> int:\n    return a + b",
+})
+assert ranked.verdict.passed and ranked.winner_key in ("v1", "v2")
+
+# Contract-filtered BestOfNGate -> forwards winning candidate downstream in Cascade
+selector = BestOfNGate(
+    rubric="Pick the cleanest Python helper",
+    pre_gate=ASTGate(syntax=True),
+    post_gate=LogitGate("Uses type annotations cleanly"),
+    mode="listwise",
+)
+result = selector.select([
+    "def broken(:",
+    "def clean_a(x: int) -> int:\n    return x + 1",
+    "def clean_b(x: int) -> int:\n    return x + 2",
+])
+assert result.passed if hasattr(result, "passed") else result.verdict.passed
+assert result.surviving_keys == ("1", "2")
+assert result.choice_probabilities["0"] == 0.0
+
+pipeline = selector >> LogitGate("Returns an integer value")
+final_verdict = pipeline.evaluate([
+    "def broken(:",
+    "def clean_a(x: int) -> int:\n    return x + 1",
+    "def clean_b(x: int) -> int:\n    return x + 2",
+])
+assert final_verdict.passed
+```
+
 ---
 
 ## Command-Line Interface (CLI)
@@ -383,6 +422,10 @@ logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b" \
     --dataset EPISTEMIC_REASONING_TEST_CASES.md --alpha 0.10 --output logitgate_profile.json
 logitgate eval --rubric "Must be valid JSON" --candidate '{"ok": true}' --profile logitgate_profile.json
 logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:14b" --profile logitgate_profile.json
+
+# Rank candidate completions zero-token with optional Layer-0 AST pre-filtering and winner verification
+logitgate rank --rubric "Clean, idiomatic Python" --file draft_a.py --file draft_b.py --ast-syntax --verify-winner --json
+logitgate rank --rubric "Accurate summary" --candidates-json drafts.json --mode round_robin --backend "ollama://localhost:11434/gemma4:e4b"
 ```
 
 Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreachable or misconfigured.
@@ -395,6 +438,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - 24-item multi-domain cascade latency, accuracy, and token savings
   - Pure-CPU CI/CD runner benchmarks (`1B-3B` vs `4B` baseline, Ollama vs in-process `llama.cpp`, thread scaling sweeps)
   - Hardened 32-item adversarial suite across `ChoiceGate` and `ScoreGate` ($N=5$)
+  - Zero-token preference ranking (`RankGate`) & contract-filtered `BestOfNGate` pools
   - Falsification boundaries: reasoning depth, 16k-token haystack scaling, and context window (`num_ctx`) squeezing
   - Elastic recurrent layer-looping (NVIDIA Dory-4B, RTX 5090 vs RTX 4070)
 - **[3-Layer Architecture & Deployment Topologies](docs/architecture.md)**:
