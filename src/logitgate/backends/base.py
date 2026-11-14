@@ -176,6 +176,8 @@ def strip_reasoning_blocks(text: str) -> str:
 class LogitBackend(abc.ABC):
     """Abstract base class for extracting first-token log-probabilities."""
 
+    prefers_sequential_prefix_warmup: bool = False
+
     @abc.abstractmethod
     def query_top_logprobs(
         self,
@@ -455,21 +457,29 @@ class StubBackend(LogitBackend, GenerativeBackend):
             )
         )
 
+        clean_toks = (
+            [str(t).strip() for t in allowed_tokens if isinstance(t, str) and str(t).strip()]
+            if allowed_tokens
+            else []
+        )
+        tok0 = clean_toks[0] if len(clean_toks) >= 2 else "A"
+        tok1 = clean_toks[1] if len(clean_toks) >= 2 else "B"
+
         if is_reverse_pass:
             if self.reverse_top_logprobs is not None:
                 return self.reverse_top_logprobs
             p = max(min(self.default_prob, 0.9999), 0.0001)
             return [
-                {"token": "B", "logprob": math.log(p)},
-                {"token": "A", "logprob": math.log(1.0 - p)},
+                {"token": tok1, "logprob": math.log(p)},
+                {"token": tok0, "logprob": math.log(1.0 - p)},
             ]
         else:
             if self.forward_top_logprobs is not None:
                 return self.forward_top_logprobs
             p = max(min(self.default_prob, 0.9999), 0.0001)
             return [
-                {"token": "A", "logprob": math.log(p)},
-                {"token": "B", "logprob": math.log(1.0 - p)},
+                {"token": tok0, "logprob": math.log(p)},
+                {"token": tok1, "logprob": math.log(1.0 - p)},
             ]
 
     async def aquery_top_logprobs(

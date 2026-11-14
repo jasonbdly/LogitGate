@@ -371,24 +371,24 @@ class VerdictSnapshot(BaseModel):
         )
         return effective_backend, effective_model
 
-    def replay(
+    def _build_replay_gate(
         self,
-        backend: str | LogitBackend | GenerativeBackend | None = None,
-        model: str | None = None,
-    ) -> Verdict:
-        """
-        Re-runs Layer 1 LogitGate, MultiRubricGate, ScoreGate, or Layer 2 JudgeGate using
-        self.rubric, self.candidate, and self.gate_config against the specified (or default) backend.
-        """
-        from logitgate.gates.logit_gate import LogitGate, ScoreGate
-
-        gate_kwargs = dict(self.gate_config)
-        effective_backend, effective_model = self._resolve_replay_backend_and_model(
-            backend, model, gate_kwargs
+        gate_kwargs: dict[str, Any],
+        effective_backend: Any,
+        effective_model: str | None,
+    ) -> tuple[Any, bool]:
+        """Constructs the gate instance and ownership flag shared by `replay` and `areplay`."""
+        from logitgate.gates.logit_gate import (
+            ChoiceGate,
+            LogitGate,
+            MultiRubricGate,
+            ScoreGate,
         )
-        owns_backend = not isinstance(effective_backend, LogitBackend)
 
-        if gate_kwargs.get("gate_type") == "JudgeGate":
+        gate_type = gate_kwargs.get("gate_type")
+        owns_logit_backend = not isinstance(effective_backend, LogitBackend)
+
+        if gate_type == "JudgeGate":
             from logitgate.gates.judge_gate import JudgeGate
 
             judge_allowed = {
@@ -400,45 +400,42 @@ class VerdictSnapshot(BaseModel):
             }
             judge_init = {k: v for k, v in gate_kwargs.items() if k in judge_allowed}
             judge_owns = not isinstance(effective_backend, GenerativeBackend)
-            judge_gate = JudgeGate(
-                rubric=self.rubric,
-                backend=effective_backend,
-                model=effective_model,
-                trigger="always",
-                **judge_init,
+            return (
+                JudgeGate(
+                    rubric=self.rubric,
+                    backend=effective_backend,
+                    model=effective_model,
+                    trigger="always",
+                    **judge_init,
+                ),
+                judge_owns,
             )
-            try:
-                return judge_gate.evaluate(self.candidate, save_on_fail=False)
-            finally:
-                if judge_owns:
-                    judge_gate.backend.close()
 
-        if gate_kwargs.get("gate_type") == "ScoreGate":
+        if gate_type == "ScoreGate":
             score_allowed = {
                 "min_score",
                 "max_score",
                 "threshold",
+                "fail_threshold",
+                "max_score_std",
                 "symmetric_debiasing",
                 "query_first",
                 "logit_temperature",
+                "warm_prefix",
                 "name",
             }
             score_init = {k: v for k, v in gate_kwargs.items() if k in score_allowed}
-            score_gate = ScoreGate(
-                rubric=self.rubric,
-                backend=effective_backend,
-                model=effective_model,
-                **score_init,
+            return (
+                ScoreGate(
+                    rubric=self.rubric,
+                    backend=effective_backend,
+                    model=effective_model,
+                    **score_init,
+                ),
+                owns_logit_backend,
             )
-            try:
-                return score_gate.evaluate(self.candidate, save_on_fail=False)
-            finally:
-                if owns_backend:
-                    score_gate.backend.close()
 
-        if gate_kwargs.get("gate_type") == "ChoiceGate":
-            from logitgate.gates.logit_gate import ChoiceGate
-
+        if gate_type == "ChoiceGate":
             options = gate_kwargs.get("options")
             if not isinstance(options, dict) or len(options) < 2:
                 raise ValueError("ChoiceGate snapshot is missing valid 'options' metadata for replay")
@@ -447,21 +444,22 @@ class VerdictSnapshot(BaseModel):
                 "permutation_mode",
                 "query_first",
                 "logit_temperature",
+                "min_confidence",
+                "min_margin",
+                "warm_prefix",
                 "name",
             }
             choice_init = {k: v for k, v in gate_kwargs.items() if k in choice_allowed}
-            choice_gate = ChoiceGate(
-                question=gate_kwargs.get("question") or self.rubric,
-                options=options,
-                backend=effective_backend,
-                model=effective_model,
-                **choice_init,
+            return (
+                ChoiceGate(
+                    question=gate_kwargs.get("question") or self.rubric,
+                    options=options,
+                    backend=effective_backend,
+                    model=effective_model,
+                    **choice_init,
+                ),
+                owns_logit_backend,
             )
-            try:
-                return choice_gate.evaluate(self.candidate, save_on_fail=False)
-            finally:
-                if owns_backend:
-                    choice_gate.backend.close()
 
         allowed_keys = {
             "pass_threshold",
@@ -470,6 +468,7 @@ class VerdictSnapshot(BaseModel):
             "query_first",
             "logit_temperature",
             "max_positional_bias",
+            "warm_prefix",
             "preset",
             "name",
         }
@@ -477,26 +476,41 @@ class VerdictSnapshot(BaseModel):
 
         rubrics = gate_kwargs.get("rubrics")
         if isinstance(rubrics, list) and rubrics:
-            from logitgate.gates.logit_gate import MultiRubricGate
+            return (
+                MultiRubricGate(
+                    rubrics=rubrics,
+                    backend=effective_backend,
+                    model=effective_model,
+                    fail_fast=bool(gate_kwargs.get("fail_fast", False)),
+                    **init_kwargs,
+                ),
+                owns_logit_backend,
+            )
 
-            multi_gate = MultiRubricGate(
-                rubrics=rubrics,
+        return (
+            LogitGate(
+                rubric=self.rubric,
                 backend=effective_backend,
                 model=effective_model,
                 **init_kwargs,
-            )
-            try:
-                return multi_gate.evaluate(self.candidate, save_on_fail=False)
-            finally:
-                if owns_backend:
-                    multi_gate.backend.close()
-
-        gate = LogitGate(
-            rubric=self.rubric,
-            backend=effective_backend,
-            model=effective_model,
-            **init_kwargs,
+            ),
+            owns_logit_backend,
         )
+
+    def replay(
+        self,
+        backend: str | LogitBackend | GenerativeBackend | None = None,
+        model: str | None = None,
+    ) -> Verdict:
+        """
+        Re-runs Layer 1 LogitGate, MultiRubricGate, ScoreGate, ChoiceGate, or Layer 2 JudgeGate
+        using self.rubric, self.candidate, and self.gate_config against the specified backend.
+        """
+        gate_kwargs = dict(self.gate_config)
+        effective_backend, effective_model = self._resolve_replay_backend_and_model(
+            backend, model, gate_kwargs
+        )
+        gate, owns_backend = self._build_replay_gate(gate_kwargs, effective_backend, effective_model)
         try:
             return gate.evaluate(self.candidate, save_on_fail=False)
         finally:
@@ -509,123 +523,11 @@ class VerdictSnapshot(BaseModel):
         model: str | None = None,
     ) -> Verdict:
         """Async version of `replay`."""
-        from logitgate.gates.logit_gate import LogitGate, ScoreGate
-
         gate_kwargs = dict(self.gate_config)
         effective_backend, effective_model = self._resolve_replay_backend_and_model(
             backend, model, gate_kwargs
         )
-        owns_backend = not isinstance(effective_backend, LogitBackend)
-
-        if gate_kwargs.get("gate_type") == "JudgeGate":
-            from logitgate.gates.judge_gate import JudgeGate
-
-            judge_allowed = {
-                "max_tokens",
-                "think",
-                "symmetric_debiasing",
-                "logit_temperature",
-                "name",
-            }
-            judge_init = {k: v for k, v in gate_kwargs.items() if k in judge_allowed}
-            judge_owns = not isinstance(effective_backend, GenerativeBackend)
-            judge_gate = JudgeGate(
-                rubric=self.rubric,
-                backend=effective_backend,
-                model=effective_model,
-                trigger="always",
-                **judge_init,
-            )
-            try:
-                return await judge_gate.aevaluate(self.candidate, save_on_fail=False)
-            finally:
-                if judge_owns:
-                    await judge_gate.backend.aclose()
-
-        if gate_kwargs.get("gate_type") == "ScoreGate":
-            score_allowed = {
-                "min_score",
-                "max_score",
-                "threshold",
-                "symmetric_debiasing",
-                "query_first",
-                "logit_temperature",
-                "name",
-            }
-            score_init = {k: v for k, v in gate_kwargs.items() if k in score_allowed}
-            score_gate = ScoreGate(
-                rubric=self.rubric,
-                backend=effective_backend,
-                model=effective_model,
-                **score_init,
-            )
-            try:
-                return await score_gate.aevaluate(self.candidate, save_on_fail=False)
-            finally:
-                if owns_backend:
-                    await score_gate.backend.aclose()
-
-        if gate_kwargs.get("gate_type") == "ChoiceGate":
-            from logitgate.gates.logit_gate import ChoiceGate
-
-            options = gate_kwargs.get("options")
-            if not isinstance(options, dict) or len(options) < 2:
-                raise ValueError("ChoiceGate snapshot is missing valid 'options' metadata for replay")
-            choice_allowed = {
-                "symmetric_debiasing",
-                "permutation_mode",
-                "query_first",
-                "logit_temperature",
-                "name",
-            }
-            choice_init = {k: v for k, v in gate_kwargs.items() if k in choice_allowed}
-            choice_gate = ChoiceGate(
-                question=gate_kwargs.get("question") or self.rubric,
-                options=options,
-                backend=effective_backend,
-                model=effective_model,
-                **choice_init,
-            )
-            try:
-                return await choice_gate.aevaluate(self.candidate, save_on_fail=False)
-            finally:
-                if owns_backend:
-                    await choice_gate.backend.aclose()
-
-        allowed_keys = {
-            "pass_threshold",
-            "fail_threshold",
-            "symmetric_debiasing",
-            "query_first",
-            "logit_temperature",
-            "max_positional_bias",
-            "preset",
-            "name",
-        }
-        init_kwargs = {k: v for k, v in gate_kwargs.items() if k in allowed_keys}
-
-        rubrics = gate_kwargs.get("rubrics")
-        if isinstance(rubrics, list) and rubrics:
-            from logitgate.gates.logit_gate import MultiRubricGate
-
-            multi_gate = MultiRubricGate(
-                rubrics=rubrics,
-                backend=effective_backend,
-                model=effective_model,
-                **init_kwargs,
-            )
-            try:
-                return await multi_gate.aevaluate(self.candidate, save_on_fail=False)
-            finally:
-                if owns_backend:
-                    await multi_gate.backend.aclose()
-
-        gate = LogitGate(
-            rubric=self.rubric,
-            backend=effective_backend,
-            model=effective_model,
-            **init_kwargs,
-        )
+        gate, owns_backend = self._build_replay_gate(gate_kwargs, effective_backend, effective_model)
         try:
             return await gate.aevaluate(self.candidate, save_on_fail=False)
         finally:

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Selective abstention symmetry on `ScoreGate` & `ChoiceGate`:** Added `fail_threshold: float | None` (creating an `AMBIGUOUS` uncertainty band between `fail_threshold` and `threshold`) and `max_score_std: float | None` (abstaining when score standard deviation exceeds the cap, recording `score_std` in `trace.metadata`) to `ScoreGate`, plus `min_confidence: float | None`, `min_margin: float | None` (`top2_margin`), and `save_on_fail: bool | None` to `ChoiceGate`. Both gates now also abstain with `DecisionStatus.AMBIGUOUS` and `abstained_reason="unobserved_target_tokens"` (setting `score=None` on `ScoreGate` and `choice=None` on `ChoiceGate`) when no valid target token appears in `top_logprobs`, enabling clean escalation to Layer-2 `JudgeGate` inside `Cascade`.
+- **Reasoning-model Layer-1 suppression & optional `auto_logit_bias`:** Added `suppress_thinking: bool = True` and `auto_logit_bias: bool = False` to `OpenAICompatBackend` and `LlamaCppBackend`. `OpenAICompatBackend` now instructs reasoning models not to think or explain, defaults `reasoning_effort="none"` with sticky HTTP 400/422 opt-out, automatically falls back to `chat_template_kwargs={"enable_thinking": False}` (with sticky circuit-breaking) when detecting empty/`<think>`/`<|thought|>` prefill traps, and probes `/tokenize` (`vLLM` and `llama.cpp` schemas) when `auto_logit_bias=True`. `LlamaCppBackend` injects `chat_template_kwargs={"enable_thinking": False}` in HTTP Mode B (with sticky HTTP 400/422 opt-out) and computes cached `SurfaceTokenMap` `logit_bias` via `llm.tokenize` in in-process Mode A.
+- **`fail_fast` batch short-circuiting & async Pass-1 `warm_prefix` scheduling:** Added `fail_fast: bool = False` to `MultiRubricGate`, `LogitGate.evaluate_batch()`, and `LogitGate.aevaluate_batch()` to halt immediately on the first `DecisionStatus.FAILED` rubric, plus `warm_prefix: bool | None = None` on `LogitGate`, `ChoiceGate`, and `ScoreGate` (and `prefers_sequential_prefix_warmup = True` on `OllamaBackend` and `LlamaCppBackend`) so async multi-pass evaluations warm Pass 1 before dispatching Pass 2+ concurrently.
+
+### Changed
+- **Legacy Ollama `"think"` compatibility & custom-key `StubBackend`:** `OllamaBackend` now performs sticky HTTP 400 fallback stripping `"think"` on legacy servers that reject the field (`query_top_logprobs` and `aquery_top_logprobs`), and `StubBackend` derives its default pass/fail mock tokens from custom `allowed_tokens` (so custom `ChoiceGate` keys work out of the box).
+- **Snapshot replay parity:** Refactored `VerdictSnapshot.replay()` and `areplay()` onto a shared gate builder supporting `fail_threshold`, `max_score_std`, `min_confidence`, `min_margin`, `warm_prefix`, and `MultiRubricGate(..., fail_fast=...)`.
+
+---
+
 ## [0.5.0] - 2026-11-12
 
 ### Added

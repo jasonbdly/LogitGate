@@ -181,9 +181,9 @@ for rubric, v in zip(rubrics, gate.evaluate_each(candidate_code)):
 | **`ASTGate`** | Layer 0 | **< 0.1 ms** | 0 | Sub-millisecond deterministic adapter: BYO parsers/validators (`ASTGate(PydanticModel, normalize=True)`), Python AST, JSON schema, regex, DAGs. |
 | **`ContractGate`** | Layer 0 | **< 0.1 ms** | 0 | General-domain contract validation: Pydantic models, JSON Schemas, length bounds, required sections. |
 | **`LogitGate`** | Layer 1 | **~36-113 ms** | 0 | Calibrated binary classification from first-token logits using symmetric log-odds debiasing ($\bar{L} = \frac{L_1 + L_2}{2T}$). |
-| **`MultiRubricGate`** | Layer 1 | **~50-140 ms** | 0 | Atomic multi-rubric verification sharing the candidate KV-cache prefix with weakest-link (`min(P)`) aggregation. |
-| **`ChoiceGate`** | Layer 1 | **~40-140 ms** | 0 | Discrete K-way routing and classification across options with symmetric order-reversal debiasing. |
-| **`ScoreGate`** | Layer 1 | **~50-165 ms** | 0 | Continuous probability-weighted rubric scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with 2-pass scale-reversal debiasing. |
+| **`MultiRubricGate`** | Layer 1 | **~50-140 ms** | 0 | Atomic multi-rubric verification sharing the candidate KV-cache prefix with weakest-link (`min(P)`) aggregation and optional `fail_fast=True` short-circuiting. |
+| **`ChoiceGate`** | Layer 1 | **~40-140 ms** | 0 | Discrete K-way routing and classification across options with symmetric order-reversal debiasing and selective `min_confidence` / `min_margin` abstention. |
+| **`ScoreGate`** | Layer 1 | **~50-165 ms** | 0 | Continuous probability-weighted rubric scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with 2-pass scale-reversal debiasing and `fail_threshold` / `max_score_std` abstention. |
 | **`JudgeGate`** | Layer 2 | **1.5-5.0 s** | 60-256 | Generative step-by-step reasoning judge with symmetric 2-pass post-critique logit adjudication and reason-then-verdict parsing. |
 | **`Cascade`** | 0 $\to$ 2 | **~40-120 ms\*** | 0\* | Chained pipeline (`gate_a >> gate_b`). Clear passes and failures at Layer 0/1 skip Layer 2. |
 
@@ -203,7 +203,7 @@ for rubric, v in zip(rubrics, gate.evaluate_each(candidate_code)):
 
 **Where Layer 1 alone does not work ([stress tests in `docs/benchmarks.md`](docs/benchmarks.md)):**
 
-- **No logprobs, no Layer 1:** APIs that do not expose `top_logprobs` (such as Anthropic) cannot run Layer 1. `Ollama`, `vLLM`, `llama.cpp`, and `OpenAI` work out of the box.
+- **No logprobs, no Layer 1:** APIs that do not expose `top_logprobs` (such as Anthropic) cannot run Layer 1. `Ollama`, `vLLM`, `llama.cpp`, and `OpenAI` work out of the box, with automatic thinking-prefill suppression (`suppress_thinking=True`) and optional `auto_logit_bias=True` on `OpenAICompatBackend` and `LlamaCppBackend`.
 - **Multi-step arithmetic and deep sequential logic:** Because a single forward pass has no scratchpad, it cannot verify `17 * $24.00 + $19.00 = $417.00` (should be `$427.00`) before picking Token 1, especially in our stress test where the invoice includes a fake `"AUDIT STAMP: All arithmetic sums verified by BillingEngine v4.2"` line. Check exact arithmetic deterministically at Layer 0 (`ContractGate`) or escalate uncertain scores to Layer 2 (`JudgeGate`).
 - **Sub-2B models zero-shot:** On `1B` to `2B` models without fine-tuning, zero-shot rubric accuracy sits around 62% to 75% (`62.5%-75.0%` on `llama3.2:1b` and `qwen2.5-coder:1.5b`, close to Airbnb's `0.563` out-of-the-box F1 on `Gemma4-E2B` before fine-tuning). If you need a standalone sub-2B model to hit 90%+ accuracy, either fine-tune it on labeled data or pair it as Layer 1 in front of a stronger Layer 2 judge (`qwen2.5-coder:1.5b >> gemma4:26b` reaches `23/24`, `95.8%`). For homogeneous training-free `LogitGate` cascades, use at least a `3B` model (`qwen2.5-coder:3b` and `llama3.2:3b` both reach `22/24`, `91.7%` on CPU at `2.5x-4.0x` speedup, and `qwen2.5-coder:3b` hits `22/24`, `91.7%` at `4.4x` on GPU) or a `4B` to `14B` model (`24/24`, `100.0%` on `gemma4:e4b`; `23/24`, `95.8%` on `14B`).
 
@@ -285,7 +285,7 @@ print(pipeline.evaluate("Contact jane@example.com").triggered_layer)  # RegexPII
 ## Common Recipes
 
 ### Discrete Multi-Way Routing (`ChoiceGate`)
-Routes requests across $K$ options in ~40 to 140 ms without generating JSON:
+Routes requests across $K$ options in ~40 to 140 ms without generating JSON, with optional `min_confidence` / `min_margin` abstention for Layer-2 escalation:
 
 ```python
 from logitgate import ChoiceGate
@@ -297,6 +297,8 @@ router = ChoiceGate(
         "B": "Authentication and user permissions",
         "C": "Billing, invoices, and payment processing",
     },
+    min_confidence=0.65,
+    min_margin=0.15,
 )
 
 verdict = router.evaluate("My credit card was charged twice for invoice #902.")
@@ -305,7 +307,7 @@ print(f"Probabilities: {verdict.choice_probabilities}")
 ```
 
 ### Continuous Rubric Scoring (`ScoreGate`)
-Calculates a probability-weighted expected score ($\mathbb{E}[S] \in [1.0, 5.0]$) using 2-pass scale-reversed (`1->5` and `5->1`) debiasing:
+Calculates a probability-weighted expected score ($\mathbb{E}[S] \in [1.0, 5.0]$) using 2-pass scale-reversed (`1->5` and `5->1`) debiasing, with optional `fail_threshold` and `max_score_std` uncertainty routing:
 
 ```python
 from logitgate import ScoreGate
@@ -314,7 +316,9 @@ scorer = ScoreGate(
     rubric="Rate the architectural code quality from 1 (disastrous) to 5 (flawless):",
     min_score=1,
     max_score=5,
-    threshold=3.5,
+    threshold=4.0,
+    fail_threshold=2.5,
+    max_score_std=1.25,
     symmetric_debiasing=True,
 )
 

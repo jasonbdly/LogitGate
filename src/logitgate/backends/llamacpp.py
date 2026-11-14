@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import threading
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -15,7 +16,7 @@ from logitgate.backends.base import (
     strip_reasoning_blocks,
     translate_transport_errors,
 )
-from logitgate.exceptions import BackendError
+from logitgate.exceptions import BackendError, ConfigurationError
 
 
 class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
@@ -27,6 +28,7 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
 
     service_name = "llama.cpp server"
     connect_hint = "Is llama-server running? (e.g. `llama-server -m model.gguf --port 8080`)"
+    prefers_sequential_prefix_warmup = True
 
     def __init__(
         self,
@@ -36,11 +38,22 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         timeout: float = 30.0,
         client: httpx.Client | None = None,
         async_client: httpx.AsyncClient | None = None,
+        *,
+        suppress_thinking: bool = True,
+        auto_logit_bias: bool = False,
     ) -> None:
+        if not isinstance(suppress_thinking, bool):
+            raise ConfigurationError(f"suppress_thinking must be a bool, got {suppress_thinking!r}")
+        if not isinstance(auto_logit_bias, bool):
+            raise ConfigurationError(f"auto_logit_bias must be a bool, got {auto_logit_bias!r}")
         self.llm = llm
         self.base_url = base_url.rstrip("/") if base_url is not None else "http://localhost:8080"
         self.model = model
         self.timeout = timeout
+        self.suppress_thinking = suppress_thinking
+        self.auto_logit_bias = auto_logit_bias
+        self._supports_chat_template_kwargs = True
+        self._logit_bias_cache: dict[tuple[str, ...], dict[str, int | float]] = {}
         self._init_http_clients(client=client, async_client=async_client)
         self._use_completion_fallback = False
         self._llm_lock = threading.Lock()
@@ -153,6 +166,47 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
                 raise BackendError(f"Failed to load GGUF model '{self.model}': {err}") from err
             return True
 
+    def _resolve_in_process_logit_bias(self, allowed_tokens: list[str] | None) -> dict[str, int | float] | None:
+        if not getattr(self, "auto_logit_bias", False) or not allowed_tokens or self.llm is None:
+            return None
+        tokenize_fn = getattr(self.llm, "tokenize", None)
+        if not callable(tokenize_fn):
+            return None
+        clean = tuple(t.strip() for t in allowed_tokens if isinstance(t, str) and t.strip())
+        if len(clean) < 2:
+            return None
+        with self._llm_lock:
+            cached = self._logit_bias_cache.get(clean)
+        if cached is not None:
+            return cached
+
+        from logitgate.debiasing.permutation import SurfaceTokenMap
+
+        class _LlamaTokenizerAdapter:
+            def __init__(self, tokenize: Callable[..., Any]) -> None:
+                self._tokenize = tokenize
+
+            def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+                raw = text.encode("utf-8")
+                try:
+                    return [int(t) for t in self._tokenize(raw, add_bos=add_special_tokens)]
+                except TypeError:
+                    return [int(t) for t in self._tokenize(raw)]
+
+        adapter = _LlamaTokenizerAdapter(tokenize_fn)
+        merged_bias: dict[str, int | float] = {}
+        try:
+            merged_bias.update(SurfaceTokenMap.from_tokenizer(adapter, clean[0], clean[1]).to_logit_bias())
+            for extra in clean[2:]:
+                merged_bias.update(SurfaceTokenMap.from_tokenizer(adapter, clean[0], extra).to_logit_bias())
+        except (ValueError, TypeError, RuntimeError):
+            return None
+        if not merged_bias:
+            return None
+        with self._llm_lock:
+            self._logit_bias_cache[clean] = merged_bias
+        return merged_bias
+
     def _in_process_query_top_logprobs(
         self,
         prompt: str,
@@ -183,6 +237,10 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         for k, v in kwargs.items():
             if k not in EXCLUDED_INTERNAL_KWARGS:
                 call_kwargs[k] = v
+        if "logit_bias" not in call_kwargs:
+            auto_bias = self._resolve_in_process_logit_bias(allowed_tokens)
+            if auto_bias:
+                call_kwargs["logit_bias"] = auto_bias
         with self._llm_lock:
             res = self.llm.create_chat_completion(
                 messages=messages,
@@ -233,6 +291,12 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             "logprobs": True,
             "top_logprobs": effective_top_k,
         }
+        if (
+            getattr(self, "suppress_thinking", False)
+            and getattr(self, "_supports_chat_template_kwargs", True)
+            and "chat_template_kwargs" not in kwargs
+        ):
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         if "logit_bias" in kwargs:
             payload["logit_bias"] = kwargs["logit_bias"]
         for k, v in kwargs.items():
@@ -277,6 +341,14 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
                 prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
             )
             resp = self.client.post(url, json=payload)
+            if (
+                resp.status_code in (400, 422)
+                and "chat_template_kwargs" in payload
+                and "chat_template_kwargs" not in kwargs
+            ):
+                self._supports_chat_template_kwargs = False
+                payload.pop("chat_template_kwargs", None)
+                resp = self.client.post(url, json=payload)
             if resp.status_code == 404:
                 self._use_completion_fallback = True
             else:
@@ -333,6 +405,14 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
                 prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
             )
             resp = await self.async_client.post(url, json=payload)
+            if (
+                resp.status_code in (400, 422)
+                and "chat_template_kwargs" in payload
+                and "chat_template_kwargs" not in kwargs
+            ):
+                self._supports_chat_template_kwargs = False
+                payload.pop("chat_template_kwargs", None)
+                resp = await self.async_client.post(url, json=payload)
             if resp.status_code == 404:
                 self._use_completion_fallback = True
             else:

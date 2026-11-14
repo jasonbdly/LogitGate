@@ -448,7 +448,38 @@ Evaluating needle-in-a-haystack compliance across prompt lengths up to 16,000 to
 
 ---
 
-### 6. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 6. Reasoning-Model Suppression, Fail-Fast Batching, & Selective Score/Choice Cascades
+
+Empirical verification of thinking-prefill suppression on `/v1/chat/completions`, `MultiRubricGate(fail_fast=True)` short-circuiting, async `warm_prefix` scheduling, and selective `ScoreGate`/`ChoiceGate` abstention cascades across local RTX 5090 (32 GB), RTX 4070 (12 GB), and Pure CPU (`options={"num_gpu": 0}`) endpoints:
+
+#### A. OpenAI-Compatible Reasoning-Model Suppression (`multi_domain_24.json`, `logit_temperature=1.0`)
+
+| Model (`OpenAICompatBackend`) | Hardware | `suppress_thinking=False` Valid / Accuracy (Failures) | `suppress_thinking=True` Valid / Accuracy | p50 / Mean Latency |
+| :--- | :---: | :---: | :---: | :---: |
+| **`deepseek-r1:32b`** | RTX 5090 (32 GB) | `0/24 (0.0%)` — `24 BackendError` (empty `top_logprobs`) | **24/24 (100.0%)** | **161.7 ms / 165.5 ms** |
+| **`gemma4:26b`** | RTX 5090 (32 GB) | `0/24 (0.0%)` — `24 AMBIGUOUS` (`unobserved_target_tokens` trap) | **24/24 (100.0%)** | **162.9 ms / 164.1 ms** |
+| **`gemma4:e4b`** | RTX 4070 (12 GB) | `24/24` directional (`193.4 ms` p50) | **24/24 directional (`23/24` decisive)** | **183.3 ms / 182.8 ms** |
+
+#### B. `MultiRubricGate(fail_fast=True)` & Async `warm_prefix`
+
+Evaluated across 6 5-rubric service implementations (4 defective, 2 clean) with `100%` `passed` decision parity between `fail_fast=False` and `fail_fast=True`:
+
+| Model & Device | `fail_fast=False` Calls / Wall Time | `fail_fast=True` Calls / Wall Time | Calls Saved | Wall Speedup |
+| :--- | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b` (RTX 4070 GPU)** | 60 calls / 2,498.3 ms | **36 calls / 1,670.8 ms** | **40.0%** | **1.50x** |
+| **`gemma4:e4b` (RTX 4070 GPU)** | 60 calls / 4,602.5 ms | **32 calls / 2,934.5 ms** | **46.7%** | **1.57x** |
+| **`qwen2.5-coder:3b` (Pure CPU `num_gpu=0`)** | 60 calls / 82.11 s | **12 calls / 44.12 s** | **80.0%** | **1.86x (-38.0 s)** |
+
+On single-slot `Ollama` servers where concurrent HTTP calls already serialize in the runner scheduler, sequential `warm_prefix=True` vs parallel `warm_prefix=False` on cold ~1,500-token candidate prefixes (`N=5` timed runs after warmup) adds only ~1–3% round-trip overhead (`355.0 ± 3.5 ms` vs `343.6 ± 1.9 ms` on `qwen2.5-coder:3b` GPU; `526.4 ± 2.4 ms` vs `516.1 ± 3.7 ms` on `gemma4:e4b` GPU; `27.90 s` vs `27.85 s` on CPU) while preventing 2x cold-prefill races under multi-slot parallelism (`OLLAMA_NUM_PARALLEL >= 2` or `llama-server --parallel N`).
+
+#### C. Selective `ScoreGate` & `ChoiceGate` Abstention Cascades
+
+- **`ScoreGate(threshold=4.0, fail_threshold=2.5, max_score_std=1.25) >> JudgeGate`:** Across 4 clear and borderline code-quality cases, selective escalation lifted `qwen2.5-coder:3b` GPU accuracy from **3/4 to 4/4** (`749.4 ms` mean, fast-pathing clear passes in `88.2 ms` and escalating borderline `E[S]=3.43` to `JudgeGate`), while `gemma4:e4b` GPU fast-pathed `3/4` clear cases in `178–190 ms` (`654.4 ms` mean).
+- **`ChoiceGate(min_confidence=0.65, min_margin=0.15) >> JudgeGate`:** Fast-pathed `3/4` clear support routing tickets in `68–164 ms` (`361.3 ms` mean on `qwen2.5-coder:3b`, `498.9 ms` mean on `gemma4:e4b`) and selectively escalated the ambiguous multi-domain ticket.
+
+---
+
+### 7. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

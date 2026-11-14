@@ -24,6 +24,7 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
 
     service_name = "Ollama"
     connect_hint = "Is ollama running? (start it with `ollama serve`)"
+    prefers_sequential_prefix_warmup = True
 
     def transport_hint(self, status_code: int, detail: str) -> str | None:
         """Turns Ollama's 'model "x" not found, try pulling it first' into the exact command."""
@@ -48,6 +49,7 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         self.num_ctx: int | None = num_ctx if num_ctx is not None else LogitGateDefaults.num_ctx
         self.options = dict(options) if options else {}
         self.keep_alive = keep_alive
+        self._supports_think_param = True
         self._init_http_clients(client=client, async_client=async_client)
 
     def __repr__(self) -> str:
@@ -87,11 +89,14 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "think": False,
             "logprobs": True,
             "top_logprobs": effective_top_k,
             "options": opts,
         }
+        if "think" in kwargs:
+            payload["think"] = kwargs["think"]
+        elif getattr(self, "_supports_think_param", True):
+            payload["think"] = False
         if self.keep_alive is not None:
             payload["keep_alive"] = self.keep_alive
         for k, v in kwargs.items():
@@ -128,6 +133,10 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
         )
         resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
+        if resp.status_code == 400 and "think" in payload and "think" not in kwargs:
+            self._supports_think_param = False
+            payload.pop("think", None)
+            resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
@@ -144,6 +153,10 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
         )
         resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
+        if resp.status_code == 400 and "think" in payload and "think" not in kwargs:
+            self._supports_think_param = False
+            payload.pop("think", None)
+            resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
