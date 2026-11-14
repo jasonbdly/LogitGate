@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.7.0] - 2026-11-14
 
 ### Added
 - **Zero-Token Preference Ranking (`RankGate` & `BestOfNResult`):** Added `logitgate.gates.rank_gate.RankGate` (re-exported at `logitgate` and `logitgate.gates`) supporting `pairwise`, `listwise` (`derangement`, `cyclic`, `reverse`), `round_robin` (Hodge / Bradley-Terry centered log-worths with `cycle_residual` inconsistency metric), `tournament` (single-elimination bracket with odd-N byes and tree log-worths), and `auto` modes, with `min_confidence`, `min_margin`, `max_positional_bias`, `warm_prefix`, `profile` integration, and sync/async parity (`evaluate`/`aevaluate` and `rank`/`arank`).
