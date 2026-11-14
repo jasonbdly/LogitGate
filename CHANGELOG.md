@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.6.0] - 2026-11-14
 
 ### Added
 - **Unified Conformal Calibration Profiles (`CalibrationProfile`):** Added versioned (`schema_version=1`) Pydantic calibration artifacts in `logitgate.calibration.profile` (re-exported at `logitgate`) with `from_calibration_result()`, `from_log_odds_samples()`, `with_choice_thresholds()`, `with_score_thresholds()`, symlink-safe atomic `.save()`, and size-bounded `.load()`, alongside strict validation raising `CalibrationError` on boolean/non-finite/out-of-range inputs and legacy field aliases (`optimal_temperature`, `tau_accept`, `tau_reject`).
