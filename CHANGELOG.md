@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.5.1] - 2026-11-13
 
 ### Added
 - **Selective abstention symmetry on `ScoreGate` & `ChoiceGate`:** Added `fail_threshold: float | None` (creating an `AMBIGUOUS` uncertainty band between `fail_threshold` and `threshold`) and `max_score_std: float | None` (abstaining when score standard deviation exceeds the cap, recording `score_std` in `trace.metadata`) to `ScoreGate`, plus `min_confidence: float | None`, `min_margin: float | None` (`top2_margin`), and `save_on_fail: bool | None` to `ChoiceGate`. Both gates now also abstain with `DecisionStatus.AMBIGUOUS` and `abstained_reason="unobserved_target_tokens"` (setting `score=None` on `ScoreGate` and `choice=None` on `ChoiceGate`) when no valid target token appears in `top_logprobs`, enabling clean escalation to Layer-2 `JudgeGate` inside `Cascade`.

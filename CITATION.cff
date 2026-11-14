@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use LogitGate in your research or production systems, please cite it as below."
 title: "LogitGate: Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs"
-version: 0.5.0
-date-released: "2026-11-12"
+version: 0.5.1
+date-released: "2026-11-13"
 license: Apache-2.0
 repository-code: "https://github.com/jasonbdly/LogitGate"
 url: "https://github.com/jasonbdly/LogitGate"
