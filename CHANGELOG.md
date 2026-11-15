@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.8.1] - 2026-11-14
 
 ### Added
 - **Benchmark Confounder & Cross-Split Leakage Auditor (`logitgate.calibration.audit`):** Added `DatasetAuditReport`, `SplitLeakageReport`, `audit_benchmark_dataset()`, and `check_split_leakage()` (re-exported at `logitgate` and `logitgate.calibration`) to audit JSON/JSONL/Markdown evaluation datasets in `0` LLM calls for Pass-vs-Fail length confounders (exact tie-aware `length_auroc` and per-domain char/word relative differences), rubric-blind Laplace-smoothed unigram leave-one-out shortcuts (`lexical_loo_accuracy`), split-conformal sample-power floors (`holds_at_alpha_010` requiring `>= 19`/class; `holds_at_alpha_005` requiring `>= 39`/class), duplicate candidates, and cross-split leakage via exact candidate/rubric hashing plus an inverted word-3-gram Jaccard shingle index (`O_NOFOLLOW` symlink-hardened, 32 MiB bounded).
