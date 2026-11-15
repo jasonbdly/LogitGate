@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0] - 2026-11-15
+
+### Added
+- **Mid-Stream Token Guardrails (`logitgate.streaming`):** Added `StreamGuard`, `GuardedStream`, `AsyncGuardedStream`, `StreamGuardSummary`, `StreamCheckRecord`, `StreamAbortedError`, `guard_stream()`, `aguard_stream()`, and `BaseGate.guard_stream()` / `BaseGate.aguard_stream()` (re-exported at `logitgate`) for synchronous and asynchronous verification of live LLM token streams (`str`, OpenAI `ChatCompletionChunk`, Ollama dicts, or custom `chunk_extractor`). Supports clause-aligned character/chunk strides (`min_chars`, `stride_chars`, `stride_chunks`, `clause_boundary`, `max_wait_chars`), consecutive-failure hysteresis (`consecutive_failures`), `abort_on_ambiguous` / `abort_prob_threshold`, `"optimistic"` vs. zero-leakage `"buffered"` chunk delivery (holding pending chunks across `AMBIGUOUS` checkpoints until verified `PASSED`), immediate upstream generator cancellation via `.close()` / `await .aclose()`, exact-prefix `final_check` deduplication, `max_buffer_chars` overflow protection, and single-record stream telemetry emission.
+- **Deterministic Content-Addressed Verdict Caching (`logitgate.cache`):** Added `VerdictCache`, `CacheStats`, `CacheWarning`, `gate_cache_fingerprint()`, `compute_verdict_cache_key()`, `resolve_verdict_cache()`, `lookup_cached_verdict()`, and `store_cached_verdict()` (re-exported at `logitgate`). Provides thread-safe bounded `OrderedDict` LRU caching plus optional `0o600` WAL-mode SQLite persistence (`O_NOFOLLOW` symlink rejection, `256 MiB` existing-file cap, `max_disk_entries` pruning, and optional `ttl_seconds`), `cache_ambiguous=False` abstention safety, secret-free canonical SHA-256 fingerprinting across all gates/profiles/backends, and `_normalized_out` artifact preservation across RAM and SQLite reloads.
+- **End-to-End Cache, Benchmark, & CLI Integration:** Wired `cache: VerdictCache | str | Path | bool | None = None` across `ASTGate`, `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `RankGate`, `BestOfNGate`, `JudgeGate`, `Cascade` (inheriting child gate caches across `>>` / `|` chaining while preventing duplicate child writes), `logitgate.configure(..., cache=...)`, `LOGITGATE_CACHE_PATH`, and `run_benchmark(..., cache=...)`, plus `logitgate stream` and `--cache` on `logitgate eval` and `logitgate benchmark`.
+
+### Changed
+- **Offline Replay & Benchmark Warmup Cache Isolation:** `VerdictSnapshot.replay()` / `areplay()` / `explain()` / `aexplain()` and `run_benchmark()` warmup passes pass `_bypass_cache=True` automatically so live diagnostic replays and benchmark warmups never read or pollute `VerdictCache`.
+
 ## [0.8.1] - 2026-11-14
 
 ### Added
