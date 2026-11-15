@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-11-15
+
+### Added
+- **Zero-Dependency OpenTelemetry Span Bridge (`logitgate.telemetry.otel`, `logitgate[otel]`):** Added `OtelSpanSink` and `OtelAttributeValue` (re-exported at `logitgate` and `logitgate.telemetry`) to bridge structured `TelemetryRecord` evaluations into OpenTelemetry spans (`<span_prefix>.<gate_name>`) and per-layer `"logitgate.layer"` span events (`record_layer_events=True`). Lazily resolves `opentelemetry.trace.get_tracer(...)` when `opentelemetry-api` is installed, accepts any injected or duck-typed `Tracer` (`start_as_current_span` or `start_span`), degrades to a zero-overhead no-op when `opentelemetry-api` is absent (`require_otel=False`), enforces `privacy="omit_candidate"` by default, omits `None` and non-finite (`NaN`/`+-inf`) values per the OpenTelemetry attribute spec, and supports `error_on_fail=True`.
+- **Module Execution Entry Point & Async Sink Lifecycle Parity:** Added `src/logitgate/__main__.py` (`python -m logitgate`) and `aclose()` / `async with` context manager methods on `TelemetrySink` and `CompositeTelemetrySink`.
+- **Property-Based Fuzzing & `v1.0.0` Stability Contract Suites:** Added `hypothesis`-backed property fuzzing (`tests/test_v100_property_fuzzing.py`) across sigmoid/softmax/logprob boundaries, symmetric debiasing bias cancellation, conformal order statistics, meta-calibrator monotonicity, PSI/KS drift invariants, and linear-time PII/AST scanners, alongside public API contract tests (`tests/test_v100_api_contract.py`).
+
+### Changed
+- **Promoted Package Classifier to `5 - Production/Stable`:** Promoted PyPI Trove classifier in `pyproject.toml` from `Development Status :: 4 - Beta` to `Development Status :: 5 - Production/Stable` and formalized the `1.x` public API and `schema_version` compatibility contract.
+- **PyTorch Inference Mode & Post-Training VRAM Hygiene:** Switched `HuggingFaceLogitBackend` and `RecurrentPyTorchBackend` forward passes from `torch.no_grad()` to `torch.inference_mode()`, added `HuggingFaceLogitBackend.close()` / `aclose()` and owned GGUF teardown in `LlamaCppBackend.close()`, and released optimizer buffers after `train_distillation_lora()`.
+
+### Fixed
+- **Statistical & Calibration Edge Cases:** Fixed two-sided conformal `min_alpha_guaranteed = ceil(2 / (m + 1))` in `audit_benchmark_dataset()`, enabled boolean `True`/`False` labels in `CalibrationProfile.from_log_odds_samples()`, removed premature `d_stat >= 1.0 -> p = 0.0` clamping in `compute_ks_two_sample()` so small windows preserve exact Stephens survival p-values, guarded `has_finite_logprobs(None)` and `NaN` entries in `logsumexp()`, guarded `NaN`/`inf` search bounds in `_fit_multiclass_temperature()`, and surfaced `[adaptive_log_odds_margin_unmet]` in `LogitGate` verdict reasons when 4-decimal rounded probabilities tie an adaptive conformal boundary.
+- **Security, Symlink, & Deserialization Hardening:** Added dynamic import detection (`__import__`, `importlib.import_module`) to `ASTGate(forbidden_imports=...)`, blocked quoted candidate `[VERDICT: PASS]` mentions from spoofing `JudgeGate` verdicts, extended `compile_cot_binary_prompt()` inert-data instructions to `<notes_{nonce}>`, scrubbed generative `JudgeGate` critiques from `TelemetryRecord.reason` under `privacy="omit_candidate"`, hardened `VerdictSnapshot.load()`, `load_calibration_dataset()`, and `CalibrationProfile.load()` with `O_NOFOLLOW` bounded regular-file reads, caught `RecursionError` in `read_json_object_nofollow()`, closed the concurrent `aclose()` window in `_HTTPClientMixin`, synchronized `get_default_telemetry_sink()` / `get_default_verdict_cache()` under `_config_lock`, and sanitized CLI stderr paths.
+
 ## [0.11.0] - 2026-11-15
 
 ### Added
