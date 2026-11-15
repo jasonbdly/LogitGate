@@ -348,10 +348,13 @@ class LogitGate(BaseGate):
         *,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
+        telemetry_sink: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         loaded_profile = resolve_calibration_profile(profile)
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         if preset is not None:
             if preset == "strict":
                 default_pass = 0.90
@@ -456,6 +459,7 @@ class LogitGate(BaseGate):
         self._calibration_lock = threading.Lock()
         self.max_positional_bias = bias_val
         self.warm_prefix = effective_warm_prefix
+        self.telemetry_sink = resolved_sink
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -489,6 +493,19 @@ class LogitGate(BaseGate):
         return config
 
     def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="LogitGate",
+            rubric=self.rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
+        )
         if verdict.passed:
             return verdict
         return persist_failure_snapshot(
@@ -862,6 +879,10 @@ class MultiRubricGate(BaseGate):
     def profile(self) -> CalibrationProfile | None:
         return self._gate.profile
 
+    @property
+    def telemetry_sink(self) -> Any:
+        return self._gate.telemetry_sink
+
     def __repr__(self) -> str:
         return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
 
@@ -923,6 +944,19 @@ class MultiRubricGate(BaseGate):
         }
 
     def _snapshot(self, candidate: Any, verdict: Verdict, kwargs: dict[str, Any]) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="MultiRubricGate",
+            rubric=self.rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
+        )
         if verdict.passed:
             return verdict
         return persist_failure_snapshot(
@@ -990,10 +1024,13 @@ class ChoiceGate(BaseGate):
         save_on_fail: bool | None = None,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
+        telemetry_sink: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         loaded_profile = resolve_calibration_profile(profile)
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         if not isinstance(question, str) or not question.strip():
             raise ConfigurationError("question cannot be empty or whitespace")
         if permutation_mode not in ("derangement", "cyclic", "reverse"):
@@ -1074,6 +1111,7 @@ class ChoiceGate(BaseGate):
         self.min_margin = effective_min_margin
         self.save_on_fail = effective_save_on_fail
         self.warm_prefix = effective_warm_prefix
+        self.telemetry_sink = resolved_sink
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -1106,6 +1144,19 @@ class ChoiceGate(BaseGate):
         return config
 
     def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="ChoiceGate",
+            rubric=self.question,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
+        )
         if verdict.passed:
             return verdict
         return persist_failure_snapshot(
@@ -1379,10 +1430,13 @@ class ScoreGate(BaseGate):
         max_score_std: float | None = None,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
+        telemetry_sink: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         loaded_profile = resolve_calibration_profile(profile)
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         if not isinstance(rubric, str) or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
         if (
@@ -1490,6 +1544,7 @@ class ScoreGate(BaseGate):
         self.max_score_std = effective_max_std
         self.warm_prefix = effective_warm_prefix
         self.save_on_fail = effective_save_on_fail
+        self.telemetry_sink = resolved_sink
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -1523,6 +1578,19 @@ class ScoreGate(BaseGate):
         return config
 
     def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="ScoreGate",
+            rubric=self.rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
+        )
         if verdict.passed:
             return verdict
         return persist_failure_snapshot(

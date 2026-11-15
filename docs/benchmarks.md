@@ -552,7 +552,46 @@ Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to 
 
 ---
 
-### 9. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 9. Production Telemetry & Self-Distilling JSONL Sinks (`v0.8.0`)
+
+#### A. Per-Verdict Telemetry & PII-Redaction Overhead (`N = 1,000` Evaluations)
+
+Measured across `N = 1,000` sequential evaluations containing realistic PII payloads (email, US SSN, Luhn-valid payment card, and `sk-` API token):
+
+| Gate & Sink Configuration | Median Latency | p95 Latency | Median Sink Overhead |
+| :--- | :---: | :---: | :---: |
+| `LogitGate(StubBackend)` — Telemetry Disabled | `0.0176 ms` | `0.0223 ms` | — |
+| `LogitGate(StubBackend)` — `MemoryTelemetrySink(privacy="full")` | `0.0296 ms` | `0.0900 ms` | **`+0.0120 ms` (`12.0 us`)** |
+| `LogitGate(StubBackend)` — `JsonlTelemetrySink(privacy="full")` | `0.0403 ms` | `0.1023 ms` | **`+0.0227 ms` (`22.7 us`)** |
+| `LogitGate(StubBackend)` — `JsonlTelemetrySink(privacy="redact_pii")` | `0.0546 ms` | `0.1240 ms` | **`+0.0370 ms` (`37.0 us`)** |
+| `ASTGate(syntax=True)` — Telemetry Disabled | `0.0130 ms` | `0.0136 ms` | — |
+| `ASTGate(syntax=True)` — `JsonlTelemetrySink(privacy="redact_pii")` | `0.0385 ms` | `0.1020 ms` | **`+0.0255 ms` (`25.5 us`)** |
+
+Even full linear-time PII scrubbing plus thread-locked `O_NOFOLLOW` JSONL disk persistence adds **`37.0 us`** per verdict (**`<0.04%`** of a typical `~100 ms` GPU Layer-1 check).
+
+#### B. Live GPU Discrepancy Mining & Zero-LLM-Call Offline Recalibration (`40`-Item Burn-In -> `MultiDomain-24` Holdout)
+
+Phase 1 streams `40` diverse burn-in items (`19` Teacher Pass / `21` Teacher Fail across [`UNIVERSAL_CALIBRATION_DATASET`](../src/logitgate/calibration/datasets.py) and [`EPISTEMIC_REASONING_TEST_CASES.md`](../EPISTEMIC_REASONING_TEST_CASES.md)) through an uncalibrated student `LogitGate` (`RTX 4070`) paired with a full-audit `JudgeGate(model="gemma4:26b", trigger="always")` teacher (`RTX 5090`, `17.84 GB` VRAM, standalone `MultiDomain-24` baseline: **`24/24 (100.0%)`**, `999.2 ms` mean / `928.0 ms` median) into `CompositeTelemetrySink([JsonlTelemetrySink, DistillationSink])`.
+
+Phase 2 calls `recalibrate_from_telemetry(distill.jsonl, target_risk_alpha=0.10)` (**`0` LLM calls**, `<5 ms` CPU optimization) and evaluates the refitted profile on the disjoint `24`-item [`multi_domain_24.json`](../benchmarks/data/multi_domain_24.json) holdout (`JudgeGate(trigger="on_ambiguous_only")`):
+
+| Student Model (RTX 4070) | Burn-In Discrepancies (`40` Items -> `80` Symmetric SFT Rows) | Zero-Call Recalibration (`0` LLM Calls) | Uncalibrated Holdout (`MultiDomain-24`) | Telemetry-Recalibrated Holdout (`alpha=0.10`) | Cascade Mean / Median (`Speedup` vs 26B L2) |
+| :--- | :--- | :--- | :--- | :--- | :---: |
+| **`qwen2.5-coder:3b`** (`2.09 GB`) | `6/40 (15.0%)` (`6 polarity_flip`, `34 ambiguous_resolved`) | **`4.94 ms`** -> `T=0.5743`, `[0.0915, 0.9453]` (`AUROC=0.885`) | `37.5%` fast-path, `1/24 (4.2%)` L1 err, `23/24 (95.8%)` acc | `29.2%` fast-path, **`0/24 (0.0%)` L1 err**, **`24/24 (100.0%)` acc** | `865.4 ms / 1,005.7 ms` (`1.15x`) |
+| **`llama3.2:3b`** (`2.33 GB`) | `13/40 (32.5%)` (`4 false_accept_caught`, `9 polarity_flip`, `27 ambiguous_resolved`) | **`4.87 ms`** -> `T=2.1391`, `[0.4732, 0.8343]` (`AUROC=0.895`) | `62.5%` fast-path, `2/24 (8.3%)` L1 err, `22/24 (91.7%)` acc | `37.5%` fast-path, **`1/24 (4.2%)` L1 err**, **`23/24 (95.8%)` acc** | `723.8 ms / 874.6 ms` (`1.38x`) |
+| **`gemma4:e4b`** (`3.21 GB`) | `4/40 (10.0%)` (`1 false_accept_caught`, `3 false_reject_overturned`, `36 ambiguous_resolved`) | **`4.70 ms`** -> `T=5.0541`, `[0.1792, 0.7634]` (`AUROC=0.988`) | `95.8%` fast-path, `0/24 (0.0%)` L1 err, `24/24 (100.0%)` acc | **`91.7%` fast-path**, **`0/24 (0.0%)` L1 err**, **`24/24 (100.0%)` acc** | **`270.3 ms / 185.8 ms` (`3.70x / 5.00x`)** |
+
+Across the three compact student architectures, `DistillationSink` automatically isolated all four discrepancy regimes (`false_accept_caught`, `false_reject_overturned`, `polarity_flip`, and `ambiguous_resolved`), exported `80` `2x` symmetric `A/B` + `B/A` SFT rows and `80` DPO rows per model, and cut holdout Layer-1 selective errors without issuing a single calibration probe call.
+
+#### C. Pure-CPU Self-Distilling Stream (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`, `16` Items)
+
+Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `[]`):
+- **Pure-CPU Layer-1 Student + Teacher Escalation (`16` balanced items):** `1,699.3 ms` median Layer-1 CPU latency (`1,721.1 ms` mean), `16/16` distilled (`1` discrepancy, `32` symmetric SFT rows exported).
+- **Zero-Call Offline Recalibration:** **`2.60 ms`** (`0` LLM calls) -> `T_bin = 0.1854` (`probe_auroc = 0.9531`, Brier `0.1070 -> 0.0656`, ECE `0.2357 -> 0.0973`).
+
+---
+
+### 10. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

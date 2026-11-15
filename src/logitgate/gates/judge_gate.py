@@ -308,10 +308,13 @@ class JudgeGate(BaseGate):
         name: str = "JudgeGate",
         *,
         profile: CalibrationProfile | str | Path | None = None,
+        telemetry_sink: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         loaded_profile = resolve_calibration_profile(profile)
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         try:
             trigger_valid = trigger in _VALID_TRIGGERS
         except TypeError:
@@ -364,6 +367,7 @@ class JudgeGate(BaseGate):
         self.think = think
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.save_on_fail = save_on_fail
+        self.telemetry_sink = resolved_sink
         self.name = name
         self._probe_gate: LogitGate | None = None
 
@@ -592,6 +596,7 @@ class JudgeGate(BaseGate):
                     symmetric_debiasing=use_sym,
                     logit_temperature=self.logit_temperature,
                     save_on_fail=False,
+                    telemetry_sink=False,
                 )
             return self._probe_gate
 
@@ -619,7 +624,9 @@ class JudgeGate(BaseGate):
         probe = self._probe()
         if probe is not None:
             try:
-                probed = self._from_probe(probe.evaluate(cleaned), cleaned)
+                probed = self._from_probe(
+                    probe.evaluate(cleaned, _suppress_telemetry=True), cleaned
+                )
             except (ValueError, RuntimeError, OSError, httpx.HTTPError, BackendError):
                 probed = None
             if probed is not None:
@@ -638,7 +645,9 @@ class JudgeGate(BaseGate):
         probe = self._probe()
         if probe is not None:
             try:
-                probed = self._from_probe(await probe.aevaluate(cleaned), cleaned)
+                probed = self._from_probe(
+                    await probe.aevaluate(cleaned, _suppress_telemetry=True), cleaned
+                )
             except (ValueError, RuntimeError, OSError, httpx.HTTPError, BackendError):
                 probed = None
             if probed is not None:
@@ -701,7 +710,22 @@ class JudgeGate(BaseGate):
             traces=[trace],
         )
         from logitgate.snapshot import persist_failure_snapshot
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
 
+        eff_rubric = self.rubric or rubric_override
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="JudgeGate",
+            rubric=eff_rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kw,
+            teacher_model=self.model,
+            teacher_passed=passed,
+        )
         persist_failure_snapshot(
             verdict=verdict,
             candidate=candidate,
@@ -710,7 +734,7 @@ class JudgeGate(BaseGate):
             snapshot_dir=kw.get("snapshot_dir"),
             gate_type="JudgeGate",
             gate_config=self.replay_config(),
-            rubric=self.rubric or rubric_override,
+            rubric=eff_rubric,
         )
         return verdict
 

@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from logitgate.telemetry.distill import (
+    DistillationMode,
+    DistillationSink,
+    ExportFormat,
+    export_distillation_dataset,
+    extract_distillation_record,
+    load_distillation_records,
+    recalibrate_from_telemetry,
+)
+from logitgate.telemetry.models import (
+    DiscrepancyType,
+    DistillationRecord,
+    ErrorPolicy,
+    PrivacyMode,
+    TelemetryRecord,
+    TelemetrySummary,
+    apply_privacy,
+    hash_candidate,
+    redact_text,
+)
+from logitgate.telemetry.sinks import (
+    CallbackTelemetrySink,
+    CompositeTelemetrySink,
+    JsonlTelemetrySink,
+    MemoryTelemetrySink,
+    TelemetrySink,
+    emit_verdict_telemetry,
+    load_telemetry_records,
+    resolve_telemetry_sink,
+    summarize_telemetry,
+)
+
+__all__ = [
+    "CallbackTelemetrySink",
+    "CompositeTelemetrySink",
+    "DiscrepancyType",
+    "DistillationMode",
+    "DistillationRecord",
+    "DistillationSink",
+    "ErrorPolicy",
+    "ExportFormat",
+    "JsonlTelemetrySink",
+    "MemoryTelemetrySink",
+    "PrivacyMode",
+    "TelemetryRecord",
+    "TelemetrySink",
+    "TelemetrySummary",
+    "apply_privacy",
+    "emit_verdict_telemetry",
+    "export_distillation_dataset",
+    "extract_distillation_record",
+    "hash_candidate",
+    "load_distillation_records",
+    "load_telemetry_records",
+    "recalibrate_from_telemetry",
+    "redact_text",
+    "resolve_telemetry_sink",
+    "summarize_telemetry",
+]

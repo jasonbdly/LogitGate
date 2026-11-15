@@ -191,7 +191,10 @@ class Cascade(BaseGate):
         *,
         fuse_logits: bool = True,
         prior_weight: float = 0.30,
+        telemetry_sink: Any = None,
     ) -> None:
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
+
         if not gates:
             raise ConfigurationError("Cascade requires at least one gate")
         if any(not isinstance(g, BaseGate) for g in gates):
@@ -206,10 +209,37 @@ class Cascade(BaseGate):
             raise ConfigurationError(f"prior_weight must be a float between 0.0 and 1.0, got {prior_weight!r}") from e
         if not math.isfinite(pw) or not (0.0 <= pw <= 1.0):
             raise ConfigurationError(f"prior_weight must be between 0.0 and 1.0, got {prior_weight!r}")
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         self.gates = list(gates)
         self.name = name
         self.fuse_logits = fuse_logits
         self.prior_weight = pw
+        self.telemetry_sink = resolved_sink
+
+    def _effective_telemetry_sink(self) -> Any:
+        if self.telemetry_sink is not None:
+            return self.telemetry_sink
+        from logitgate.telemetry.sinks import CompositeTelemetrySink, TelemetrySink
+
+        inner_sinks: list[TelemetrySink] = []
+        seen_ids: set[int] = set()
+        all_false = True
+        for g in self.gates:
+            s = getattr(g, "telemetry_sink", None)
+            if isinstance(s, TelemetrySink):
+                all_false = False
+                if id(s) not in seen_ids:
+                    seen_ids.add(id(s))
+                    inner_sinks.append(s)
+            elif s is not False:
+                all_false = False
+        if len(inner_sinks) == 1:
+            return inner_sinks[0]
+        if len(inner_sinks) > 1:
+            return CompositeTelemetrySink(inner_sinks)
+        if all_false:
+            return False
+        return None
 
     def __repr__(self) -> str:
         pipeline_repr = " >> ".join(repr(g) for g in self.gates)
@@ -247,7 +277,7 @@ class Cascade(BaseGate):
 
     def _pipeline(self, candidate: Any, kwargs: dict[str, Any]) -> _Pipeline:
         t0 = time.perf_counter()
-        gate_kwargs = {**kwargs, "save_on_fail": False}
+        gate_kwargs = {**kwargs, "save_on_fail": False, "_suppress_telemetry": True}
         traces: list[LayerTrace] = []
         tokens = 0
         rubric: str | None = None  # inherited by generative gates without their own rubric
@@ -255,6 +285,12 @@ class Cascade(BaseGate):
         upstream_gate: BaseGate | None = None  # most recent non-generative gate that ran
         upstream: Verdict | None = None
         outcome: dict[str, Any] | None = None  # what the cascade returns if nothing else runs
+        escalated = False
+        fast_pathed = False
+        primary_model: str | None = None
+        primary_backend: Any = None
+        teacher_model: str | None = None
+        raw_teacher_passed: bool | None = None
 
         def conclude(fields: dict[str, Any]) -> Verdict:
             verdict = Verdict(
@@ -262,6 +298,32 @@ class Cascade(BaseGate):
                 total_latency_ms=(time.perf_counter() - t0) * 1000.0,
                 total_tokens_generated=tokens,
                 traces=traces,
+            )
+            from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+            eff_rubric = rubric or next(
+                (
+                    r
+                    for g in self.gates
+                    if isinstance(r := (getattr(g, "rubric", None) or getattr(g, "question", None)), str)
+                    and r
+                ),
+                None,
+            )
+            emit_verdict_telemetry(
+                verdict,
+                candidate=candidate,
+                gate_name=self.name,
+                gate_type="Cascade",
+                rubric=eff_rubric,
+                model=primary_model,
+                backend=primary_backend,
+                gate_sink=self._effective_telemetry_sink(),
+                call_kwargs=kwargs,
+                fast_pathed=fast_pathed and not escalated,
+                escalated=escalated,
+                teacher_model=teacher_model,
+                teacher_passed=raw_teacher_passed,
             )
             return self._persist_failure(verdict, candidate, rubric, kwargs, replay_cfg=replay_cfg)
 
@@ -273,6 +335,7 @@ class Cascade(BaseGate):
                 policy = gate.escalation_policy
                 if not _should_escalate(policy, upstream_gate, upstream):
                     assert upstream is not None and upstream_gate is not None
+                    fast_pathed = True
                     if upstream.passed:
                         outcome = _verdict_fields(
                             upstream,
@@ -294,6 +357,18 @@ class Cascade(BaseGate):
                     **gate_kwargs,
                     "rubric_override": rubric if rubric is not None else gate_kwargs.get("rubric_override"),
                 }
+                escalated = True
+                raw_teacher_passed = verdict.passed
+                jg_backend = getattr(gate, "backend", None)
+                teacher_model = (
+                    getattr(gate, "model", None)
+                    or getattr(jg_backend, "model", None)
+                    or getattr(jg_backend, "model_name", None)
+                )
+                if primary_backend is None and jg_backend is not None:
+                    primary_backend = jg_backend
+                if primary_model is None and teacher_model is not None:
+                    primary_model = teacher_model
                 traces.extend(verdict.traces)
                 tokens += verdict.total_tokens_generated
 
@@ -402,6 +477,17 @@ class Cascade(BaseGate):
 
             norm_box: list[Any] = []
             verdict = yield gate, candidate, {**gate_kwargs, "_normalized_out": norm_box}
+            if gate.layer_tier >= TIER_LOGIT:
+                g_backend = getattr(gate, "backend", None)
+                g_model = (
+                    getattr(gate, "model", None)
+                    or getattr(g_backend, "model", None)
+                    or getattr(g_backend, "model_name", None)
+                )
+                if g_backend is not None:
+                    primary_backend = g_backend
+                if g_model is not None:
+                    primary_model = g_model
             if verdict.passed:
                 if norm_box:
                     candidate = norm_box[-1]
@@ -428,6 +514,8 @@ class Cascade(BaseGate):
                 and next_gate.layer_tier >= TIER_GENERATIVE
             )
             if not defers_to_generative:
+                if any(g.layer_tier > gate.layer_tier for g in self.gates[i + 1 :]):
+                    fast_pathed = True
                 return conclude(fields)
 
         if outcome is None:  # pragma: no cover - at least one gate always runs

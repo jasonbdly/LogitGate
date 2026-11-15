@@ -488,7 +488,9 @@ def run_benchmark(
             if cases:
                 for w_idx in range(warmup):
                     w_case = cases[w_idx % len(cases)]
-                    build(mode, w_case.rubric).evaluate(w_case.candidate, save_on_fail=False)
+                    build(mode, w_case.rubric).evaluate(
+                        w_case.candidate, save_on_fail=False, _suppress_telemetry=True
+                    )
             for rep in range(repeat):
                 for idx, case in enumerate(cases):
                     gate = build(mode, case.rubric)

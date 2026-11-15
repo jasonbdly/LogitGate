@@ -50,5 +50,9 @@ class CalibrationWarning(UserWarning):
     """A calibration result is usable but does not carry its advertised statistical guarantee."""
 
 
+class TelemetryWarning(UserWarning):
+    """Emitted when a telemetry or distillation sink fails in non-fatal ``on_error='warn'`` mode."""
+
+
 class ContractViolationError(LogitGateError, ValueError):
     """Raised when an AST or ContractGate encounters an unrecoverable structural violation."""

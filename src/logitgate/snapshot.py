@@ -593,7 +593,7 @@ class VerdictSnapshot(BaseModel):
         )
         gate, owns_backend = self._build_replay_gate(gate_kwargs, effective_backend, effective_model)
         try:
-            return gate.evaluate(self.candidate, save_on_fail=False)
+            return gate.evaluate(self.candidate, save_on_fail=False, _suppress_telemetry=True)
         finally:
             if owns_backend:
                 gate.backend.close()
@@ -612,7 +612,9 @@ class VerdictSnapshot(BaseModel):
         )
         gate, owns_backend = self._build_replay_gate(gate_kwargs, effective_backend, effective_model)
         try:
-            return await gate.aevaluate(self.candidate, save_on_fail=False)
+            return await gate.aevaluate(
+                self.candidate, save_on_fail=False, _suppress_telemetry=True
+            )
         finally:
             if owns_backend:
                 await gate.backend.aclose()
@@ -693,7 +695,9 @@ class VerdictSnapshot(BaseModel):
             logit_temperature=judge_temp,
         )
         try:
-            judge_verdict = judge.evaluate(self.candidate, save_on_fail=False)
+            judge_verdict = judge.evaluate(
+                self.candidate, save_on_fail=False, _suppress_telemetry=True
+            )
         finally:
             if owns_backend:
                 judge.backend.close()
@@ -730,7 +734,9 @@ class VerdictSnapshot(BaseModel):
             logit_temperature=judge_temp,
         )
         try:
-            judge_verdict = await judge.aevaluate(self.candidate, save_on_fail=False)
+            judge_verdict = await judge.aevaluate(
+                self.candidate, save_on_fail=False, _suppress_telemetry=True
+            )
         finally:
             if owns_backend:
                 await judge.backend.aclose()

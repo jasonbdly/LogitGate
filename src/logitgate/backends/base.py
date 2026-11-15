@@ -24,7 +24,16 @@ from logitgate.exceptions import (
 _F = TypeVar("_F", bound=Callable[..., Any])
 _OFFLINE_HINT = "Or set backend='stub://' for offline testing."
 EXCLUDED_INTERNAL_KWARGS: frozenset[str] = frozenset(
-    {"save_on_fail", "snapshot_dir", "test_name", "rubric_override", "_normalized_out"}
+    {
+        "save_on_fail",
+        "snapshot_dir",
+        "test_name",
+        "rubric_override",
+        "_normalized_out",
+        "_suppress_telemetry",
+        "telemetry_sink",
+        "telemetry_tags",
+    }
 )
 
 

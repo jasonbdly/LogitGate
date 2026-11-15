@@ -148,11 +148,15 @@ class BaseGate(abc.ABC):
         """
         from logitgate.cascade import Cascade
         if isinstance(self, Cascade) and isinstance(other, Cascade):
+            eff_sink = (
+                self.telemetry_sink if self.telemetry_sink is not None else other.telemetry_sink
+            )
             return Cascade(
                 gates=list(self.gates) + list(other.gates),
                 name=self.name,
                 fuse_logits=self.fuse_logits,
                 prior_weight=self.prior_weight,
+                telemetry_sink=eff_sink,
             )
         if isinstance(self, Cascade):
             return Cascade(
@@ -160,12 +164,14 @@ class BaseGate(abc.ABC):
                 name=self.name,
                 fuse_logits=self.fuse_logits,
                 prior_weight=self.prior_weight,
+                telemetry_sink=self.telemetry_sink,
             )
         if isinstance(other, Cascade):
             return Cascade(
                 gates=[self] + list(other.gates),
                 fuse_logits=other.fuse_logits,
                 prior_weight=other.prior_weight,
+                telemetry_sink=other.telemetry_sink,
             )
         return Cascade(gates=[self, other])
 

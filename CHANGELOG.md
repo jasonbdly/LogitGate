@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Production Verdict Telemetry & Privacy Sinks (`logitgate.telemetry`):** Added `TelemetryRecord`, `TelemetrySummary`, `PrivacyMode` (`full`, `redact_pii`, `hash_candidate`, `metrics_only`), linear-time `redact_text()` (emails, `Bearer` headers, `sk-`/`ghp_`/`glpat-`/`AKIA` secrets, US SSNs, and Luhn-validated payment cards) and `hash_candidate()`, `TelemetrySink`, symlink-hardened thread-safe `JsonlTelemetrySink` with size-based file rotation (`max_bytes`, `backup_count`) and configurable `ErrorPolicy` (`warn`, `raise`, `ignore`), `MemoryTelemetrySink`, `CallbackTelemetrySink`, `CompositeTelemetrySink`, `load_telemetry_records()`, `summarize_telemetry()`, and `TelemetryWarning`.
+- **Self-Distilling Sinks, Zero-Call Offline Recalibration, & Dataset Export:** Added `DistillationRecord`, `DiscrepancyType` (`false_accept_caught`, `false_reject_overturned`, `polarity_flip`, `ambiguous_resolved`), `DistillationSink` (with bounded SHA-256 `(rubric, candidate)` deduplication), `extract_distillation_record()`, `load_distillation_records()` (accepting both distillation JSONL and raw telemetry JSONL), zero-LLM-call `recalibrate_from_telemetry()`, and `export_distillation_dataset()` (`calibration_jsonl`, `2x` symmetric `A/B`-swapped `sft_jsonl`, and `dpo_jsonl`).
+- **End-to-End Gate, Config, Cascade, & CLI Telemetry Integration:** Added `telemetry_sink` across `ASTGate`, `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `RankGate`, `BestOfNGate`, `JudgeGate`, `Cascade`, and `logitgate.configure(..., telemetry_sink=...)` (plus `LOGITGATE_TELEMETRY_PATH` environment configuration and per-call `telemetry_tags`), along with `--telemetry-out` on `logitgate eval` and `logitgate rank`, and `logitgate telemetry summary|export|recalibrate` CLI subcommands.
+
+### Changed
+- **Single-Record Composite Deduplication & Offline Replay Isolation:** `Cascade`, `BestOfNGate`, and `JudgeGate` suppress child probe/stage emissions (`_suppress_telemetry=True`) while `Cascade` inherits/multiplexes inner gate sinks across `>>` / `|` chaining and records uncontaminated `teacher_passed` prior to `locked_upstream_fail` or `fuse_logits`. `VerdictSnapshot.replay()`/`areplay()`/`explain()`/`aexplain()` and `BenchmarkRunner` warmups automatically suppress telemetry emission.
+
 ## [0.7.0] - 2026-11-14
 
 ### Added

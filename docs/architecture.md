@@ -130,3 +130,21 @@ Evaluating a pool of $N \ge 2$ candidate completions adds two structural require
   - Runs optional `post_gate` (`LogitGate` / `JudgeGate`) against the winning candidate to catch **all-bad pools** where even the top-ranked survivor violates core correctness or policy contracts, persisting a single `VerdictSnapshot` across the full gate pipeline.
 - **`Cascade` Winner Forwarding (`_normalized_out`) & Snapshot Replay**:
   - Both `RankGate` and `BestOfNGate` emit the winning candidate artifact via `kwargs["_normalized_out"]` on `verdict.passed`, allowing downstream `Cascade` stages (`selector >> JudgeGate(...)`) to verify the selected artifact directly while `VerdictSnapshot.replay()` / `areplay()` reconstructs `RankGate` and `BestOfNGate` (including `pre_gate_config` / `post_gate_config`) identically.
+
+---
+
+## Production Telemetry, Privacy Controls & Self-Distilling Sinks (`logitgate.telemetry`)
+
+Production deployments need continuous observability over fast-path rates, abstention drifts, and Layer-1 student vs. Layer-2 teacher disagreements without adding blocking latency or leaking sensitive artifacts into logs:
+
+- **Zero-Allocation Disabled Fast Path & Single-Record Cascade Deduplication**:
+  - When no sink is attached (`telemetry_sink=None` and `LOGITGATE_TELEMETRY_PATH` unset), `emit_verdict_telemetry` returns immediately before building a `TelemetryRecord`.
+  - Composite pipelines (`Cascade`, `BestOfNGate`, and `JudgeGate`'s internal fallback `_probe_gate`) pass `_suppress_telemetry=True` to inner stages and automatically inherit or multiplex child gate sinks (`_effective_telemetry_sink`), emitting **one consolidated `TelemetryRecord`** per top-level evaluation with `fast_pathed`, `escalated`, `primary_model`, `teacher_model`, and uncontaminated `teacher_passed` (captured prior to `locked_upstream_fail` or `fuse_logits`).
+  - `VerdictSnapshot.replay()` / `explain()` and `BenchmarkRunner` warmups suppress telemetry emission automatically so offline debugging and warmup probes never pollute production streams.
+- **Symlink-Hardened Rotation & Linear-Time PII Redaction**:
+  - `JsonlTelemetrySink` and `DistillationSink` open log files and rotated archives (`max_bytes`, `backup_count`) under a `threading.Lock` with `os.O_NOFOLLOW` symlink checks and configurable failure isolation (`on_error="warn" | "raise" | "ignore"`).
+  - Four `PrivacyMode` levels (`"full"`, `"redact_pii"`, `"hash_candidate"`, `"metrics_only"`) sanitize candidate artifacts before disk persistence; `"redact_pii"` scrubs emails, `Bearer` headers, `sk-`/`ghp_`/`glpat-`/`AKIA` tokens, US SSNs, and Luhn-validated payment card numbers in linear $O(N)$ time without catastrophic backtracking.
+- **Teacher-to-Student Discrepancy Mining, Zero-Call Recalibration & Dataset Export**:
+  - `DistillationSink` (with bounded SHA-256 `(rubric, candidate)` deduplication) and offline `load_distillation_records()` classify escalated evaluations into four discrepancy buckets: `false_accept_caught`, `false_reject_overturned`, `polarity_flip` ($L_{\text{fwd}} \cdot L_{\text{rev}} < 0$), and `ambiguous_resolved`.
+  - Because `TelemetryRecord` and `DistillationRecord` preserve raw Layer-1 `(student_forward_log_odds, student_reverse_log_odds)` alongside `teacher_passed`, `recalibrate_from_telemetry()` fits an updated temperature + split-conformal `CalibrationProfile` in **milliseconds with zero LLM calls** (best paired with a periodic full-audit shadow burn-in sample so non-conformity scores remain exchangeable across the full input distribution).
+  - `export_distillation_dataset()` compiles collected discrepancies into `"calibration_jsonl"` (compatible directly with `logitgate calibrate --dataset`), `"sft_jsonl"` (`2x` symmetric `A/B` + `B/A` swapped prompt/completion pairs so LoRA fine-tuning never re-introduces positional slot bias), or `"dpo_jsonl"` preference triples.

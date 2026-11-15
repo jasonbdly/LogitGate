@@ -92,6 +92,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Strip <think> blocks and unwrap markdown code fences before Layer 0 validation",
     )
     eval_parser.add_argument(
+        "--telemetry-out",
+        type=str,
+        default=None,
+        help="Optional JSONL path to append structured verdict telemetry",
+    )
+    eval_parser.add_argument(
         "--json",
         action="store_true",
         help="Output verdict and traces in JSON format",
@@ -349,10 +355,87 @@ def create_parser() -> argparse.ArgumentParser:
         help="Optional model name for backend",
     )
     rank_parser.add_argument(
+        "--telemetry-out",
+        type=str,
+        default=None,
+        help="Optional JSONL path to append structured verdict telemetry",
+    )
+    rank_parser.add_argument(
         "--json",
         action="store_true",
         help="Output BestOfNResult, probabilities, and traces in JSON format",
     )
+
+    telemetry_parser = subparsers.add_parser(
+        "telemetry",
+        help="Summarize production telemetry, export SFT/DPO datasets, or zero-call recalibrate profiles",
+    )
+    tel_sub = telemetry_parser.add_subparsers(dest="telemetry_command", help="Telemetry subcommands")
+
+    tel_summary = tel_sub.add_parser(
+        "summary",
+        help="Compute pass/escalation/discrepancy/latency summary from a telemetry JSONL file",
+    )
+    tel_summary.add_argument("input_path", help="Path to telemetry JSONL file")
+    tel_summary.add_argument("--json", action="store_true", help="Output summary as JSON")
+
+    tel_export = tel_sub.add_parser(
+        "export",
+        help="Export teacher-adjudicated escalations to SFT, DPO, or calibration JSONL",
+    )
+    tel_export.add_argument("input_path", help="Path to distillation or telemetry JSONL file")
+    tel_export.add_argument(
+        "--output", "-o", required=True, help="Destination JSONL dataset path"
+    )
+    tel_export.add_argument(
+        "--format",
+        choices=("sft_jsonl", "calibration_jsonl", "dpo_jsonl"),
+        default="sft_jsonl",
+        help="Export dataset format (default: sft_jsonl)",
+    )
+    tel_export.add_argument(
+        "--no-symmetric-swaps",
+        action="store_true",
+        help="Emit only forward A=Pass/B=Fail prompts instead of symmetric A/B + B/A pairs",
+    )
+    tel_export.add_argument(
+        "--no-dedupe",
+        action="store_true",
+        help="Keep duplicate (rubric, candidate) pairs instead of deduplicating by SHA-256",
+    )
+    tel_export.add_argument(
+        "--discrepancies-only",
+        action="store_true",
+        help="Export only student/teacher disagreements, omitting concordant ambiguous resolutions",
+    )
+    tel_export.add_argument("--json", action="store_true", help="Output export metadata as JSON")
+
+    tel_recal = tel_sub.add_parser(
+        "recalibrate",
+        help="Fit a CalibrationProfile from logged student/teacher escalations with 0 LLM calls",
+    )
+    tel_recal.add_argument("input_path", help="Path to distillation or telemetry JSONL file")
+    tel_recal.add_argument(
+        "--output", "-o", type=str, default=None, help="Optional path to save CalibrationProfile JSON"
+    )
+    tel_recal.add_argument(
+        "--alpha",
+        type=float,
+        default=0.10,
+        help="Target selective risk bound alpha (default: 0.10)",
+    )
+    tel_recal.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Optional student model name override for the profile",
+    )
+    tel_recal.add_argument(
+        "--no-dedupe",
+        action="store_true",
+        help="Keep duplicate (rubric, candidate) escalations during fitting",
+    )
+    tel_recal.add_argument("--json", action="store_true", help="Output CalibrationProfile as JSON")
 
     return parser
 
@@ -882,27 +965,38 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             sys.stderr.write("Error: Either --candidate or --file must be specified.\n")
             return EXIT_FAILED
 
-    logit_gate = LogitGate(
-        rubric=args.rubric,
-        backend=args.backend,
-        model=args.model,
-        pass_threshold=args.threshold,
-        fail_threshold=args.fail_threshold,
-        profile=args.profile,
-    )
-    try:
-        evaluator: Cascade | LogitGate
-        if args.ast_syntax or getattr(args, "normalize", False):
-            evaluator = Cascade([
-                ASTGate(syntax=args.ast_syntax, normalize=getattr(args, "normalize", False)),
-                logit_gate,
-            ])
-        else:
-            evaluator = logit_gate
+    from logitgate.telemetry.sinks import JsonlTelemetrySink
 
-        verdict = evaluator.evaluate(candidate)
+    sink = JsonlTelemetrySink(args.telemetry_out) if getattr(args, "telemetry_out", None) else None
+    try:
+        logit_gate = LogitGate(
+            rubric=args.rubric,
+            backend=args.backend,
+            model=args.model,
+            pass_threshold=args.threshold,
+            fail_threshold=args.fail_threshold,
+            profile=args.profile,
+            telemetry_sink=sink if not (args.ast_syntax or getattr(args, "normalize", False)) else None,
+        )
+        try:
+            evaluator: Cascade | LogitGate
+            if args.ast_syntax or getattr(args, "normalize", False):
+                evaluator = Cascade(
+                    [
+                        ASTGate(syntax=args.ast_syntax, normalize=getattr(args, "normalize", False)),
+                        logit_gate,
+                    ],
+                    telemetry_sink=sink,
+                )
+            else:
+                evaluator = logit_gate
+
+            verdict = evaluator.evaluate(candidate)
+        finally:
+            logit_gate.backend.close()
     finally:
-        logit_gate.backend.close()
+        if sink is not None:
+            sink.close()
 
     if args.json:
         print(verdict.model_dump_json(indent=2))
@@ -985,6 +1079,9 @@ def _cmd_rank(args: argparse.Namespace) -> int:
         )
         return EXIT_FAILED
 
+    from logitgate.telemetry.sinks import JsonlTelemetrySink
+
+    sink = JsonlTelemetrySink(args.telemetry_out) if getattr(args, "telemetry_out", None) else None
     resolved_backend = resolve_logit_backend(args.backend, model=args.model)
     try:
         pre_gate = (
@@ -998,6 +1095,7 @@ def _cmd_rank(args: argparse.Namespace) -> int:
                 backend=resolved_backend,
                 model=args.model,
                 profile=args.profile,
+                telemetry_sink=False,
             )
             if args.verify_winner
             else None
@@ -1014,10 +1112,13 @@ def _cmd_rank(args: argparse.Namespace) -> int:
             min_margin=args.min_margin,
             max_positional_bias=args.max_positional_bias,
             profile=args.profile,
+            telemetry_sink=sink,
         )
         result = gate.select(candidates_input)
     finally:
         resolved_backend.close()
+        if sink is not None:
+            sink.close()
 
     if args.json:
         payload = {
@@ -1046,12 +1147,121 @@ def _cmd_rank(args: argparse.Namespace) -> int:
     return EXIT_OK if result.verdict.passed else EXIT_FAILED
 
 
+def _cmd_telemetry(args: argparse.Namespace) -> int:
+    import json
+
+    from logitgate.telemetry import (
+        export_distillation_dataset,
+        recalibrate_from_telemetry,
+        summarize_telemetry,
+    )
+
+    sub = getattr(args, "telemetry_command", None)
+    if sub == "summary":
+        summary = summarize_telemetry(args.input_path)
+        if args.json:
+            print(json.dumps(summary.to_dict(), indent=2))
+        else:
+            print("=" * 60)
+            print("LOGITGATE TELEMETRY SUMMARY")
+            print("=" * 60)
+            print(f"Source:                    {sanitize_terminal_text(str(args.input_path))}")
+            print(f"Total Records:             {summary.total_records}")
+            print(
+                f"Verdicts:                  {summary.passed_count} passed / "
+                f"{summary.failed_count} failed / {summary.ambiguous_count} ambiguous"
+            )
+            print(
+                f"Fast-Path Rate:            {summary.fast_path_rate:.2%} "
+                f"({summary.fast_path_count}/{summary.total_records})"
+            )
+            print(
+                f"Escalation Rate:           {summary.escalation_rate:.2%} "
+                f"({summary.escalated_count}/{summary.total_records})"
+            )
+            print(
+                f"Teacher Discrepancies:     {summary.discrepancy_count} "
+                f"({summary.discrepancy_rate:.2%} of escalations)"
+            )
+            print(
+                f"Latency (p50 / p95 / avg): {summary.median_latency_ms:.2f}ms / "
+                f"{summary.p95_latency_ms:.2f}ms / {summary.mean_latency_ms:.2f}ms"
+            )
+            print(f"Total Tokens Generated:    {summary.total_tokens_generated}")
+            if summary.by_gate_type:
+                gates_str = ", ".join(
+                    f"{sanitize_terminal_text(k)}={v}" for k, v in sorted(summary.by_gate_type.items())
+                )
+                print(f"By Gate Type:              {gates_str}")
+            print("=" * 60)
+        return EXIT_OK
+
+    if sub == "export":
+        rows = export_distillation_dataset(
+            args.input_path,
+            args.output,
+            format=args.format,
+            include_symmetric_swaps=not args.no_symmetric_swaps,
+            dedupe=not args.no_dedupe,
+            discrepancies_only=args.discrepancies_only,
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "input_path": str(args.input_path),
+                        "output_path": str(args.output),
+                        "format": args.format,
+                        "rows_written": rows,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(
+                f"Exported {rows} rows ({args.format}) to "
+                f"{sanitize_terminal_text(str(args.output))}."
+            )
+        return EXIT_OK
+
+    if sub == "recalibrate":
+        profile = recalibrate_from_telemetry(
+            args.input_path,
+            target_risk_alpha=args.alpha,
+            model=args.model,
+            output_path=args.output,
+            dedupe=not args.no_dedupe,
+        )
+        if args.json:
+            print(profile.model_dump_json(indent=2))
+        else:
+            print("=" * 60)
+            print("LOGITGATE ZERO-CALL TELEMETRY RECALIBRATION")
+            print("=" * 60)
+            print(f"Telemetry Source:          {sanitize_terminal_text(str(args.input_path))}")
+            print(f"Escalation Samples Used:   {profile.calibration_set_size}")
+            print(f"Fitted Temperature:        {profile.binary_temperature:.4f}")
+            if profile.fail_threshold is not None and profile.pass_threshold is not None:
+                print(f"Layer 1 Tau Reject:        {profile.fail_threshold:.4f}")
+                print(f"Layer 1 Tau Accept:        {profile.pass_threshold:.4f}")
+            if profile.empirical_escalation_rate is not None:
+                print(f"Empirical Escalation Rate: {profile.empirical_escalation_rate:.2%}")
+            if args.output:
+                print(f"Saved Profile:             {sanitize_terminal_text(str(args.output))}")
+            print("=" * 60)
+        return EXIT_OK
+
+    sys.stderr.write("Error: Specify a telemetry subcommand: summary, export, or recalibrate.\n")
+    return EXIT_FAILED
+
+
 _COMMANDS: dict[str, Any] = {
     "eval": _cmd_eval,
     "calibrate": _cmd_calibrate,
     "explain": _cmd_explain,
     "benchmark": _cmd_benchmark,
     "rank": _cmd_rank,
+    "telemetry": _cmd_telemetry,
 }
 
 

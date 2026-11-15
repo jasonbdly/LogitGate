@@ -393,6 +393,68 @@ final_verdict = pipeline.evaluate([
 assert final_verdict.passed
 ```
 
+### Production Telemetry, Self-Distilling Sinks & Zero-Call Recalibration
+Stream structured `TelemetryRecord` JSONL logs with optional PII redaction (`"redact_pii"`, `"hash_candidate"`, `"metrics_only"`), collect Layer-1 student vs. Layer-2 teacher escalations via `DistillationSink`, refit a `CalibrationProfile` from logged `(forward_log_odds, reverse_log_odds, teacher_passed)` tuples in **0 LLM calls**, or export symmetric `A/B`-swapped SFT / DPO datasets:
+
+```python
+import tempfile
+from pathlib import Path
+from logitgate import (
+    CompositeTelemetrySink,
+    DistillationSink,
+    JsonlTelemetrySink,
+    JudgeGate,
+    LogitGate,
+    StubBackend,
+    export_distillation_dataset,
+    recalibrate_from_telemetry,
+    summarize_telemetry,
+)
+
+with tempfile.TemporaryDirectory() as tmp:
+    tel_path = Path(tmp) / "telemetry.jsonl"
+    distill_path = Path(tmp) / "distill.jsonl"
+    sft_path = Path(tmp) / "student_sft.jsonl"
+
+    pos_stub = StubBackend(
+        forward_top_logprobs=[{"token": "A", "logprob": -0.05}, {"token": "B", "logprob": -3.10}],
+        reverse_top_logprobs=[{"token": "B", "logprob": -0.06}, {"token": "A", "logprob": -2.95}],
+        diagnostic_text="[VERDICT: PASS]",
+    )
+    neg_stub = StubBackend(
+        forward_top_logprobs=[{"token": "A", "logprob": -3.10}, {"token": "B", "logprob": -0.05}],
+        reverse_top_logprobs=[{"token": "B", "logprob": -2.95}, {"token": "A", "logprob": -0.06}],
+        diagnostic_text="[VERDICT: FAIL]",
+    )
+
+    with (
+        JsonlTelemetrySink(tel_path, privacy="redact_pii") as tel_sink,
+        DistillationSink(distill_path, mode="all_escalations") as distill_sink,
+    ):
+        sink = CompositeTelemetrySink([tel_sink, distill_sink])
+        for i in range(19):
+            pos_pipe = LogitGate("Safe payload", backend=pos_stub) >> JudgeGate(
+                backend=pos_stub, trigger="always"
+            )
+            pos_pipe.telemetry_sink = sink
+            pos_pipe.evaluate(f"ok-{i} user@example.com", telemetry_tags={"env": "staging"})
+
+            neg_pipe = LogitGate("Safe payload", backend=neg_stub) >> JudgeGate(
+                backend=neg_stub, trigger="always"
+            )
+            neg_pipe.telemetry_sink = sink
+            neg_pipe.evaluate(f"bad-{i} sk-1234567890abcdefghijklmnop")
+
+    summary = summarize_telemetry(tel_path)
+    assert summary.total_records == 38 and summary.escalated_count == 38
+    written = export_distillation_dataset(distill_path, sft_path, format="sft_jsonl")
+    assert written == 76  # 2x symmetric A/B + B/A supervision rows per teacher resolution
+
+    # Zero-LLM-call offline recalibration directly from the collected JSONL sink
+    recal_profile = recalibrate_from_telemetry(distill_path, target_risk_alpha=0.10, model="qwen2.5:3b")
+    assert recal_profile.guarantee_holds and recal_profile.fail_threshold < recal_profile.pass_threshold
+```
+
 ---
 
 ## Command-Line Interface (CLI)
@@ -426,6 +488,12 @@ logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:14b" -
 # Rank candidate completions zero-token with optional Layer-0 AST pre-filtering and winner verification
 logitgate rank --rubric "Clean, idiomatic Python" --file draft_a.py --file draft_b.py --ast-syntax --verify-winner --json
 logitgate rank --rubric "Accurate summary" --candidates-json drafts.json --mode round_robin --backend "ollama://localhost:11434/gemma4:e4b"
+
+# Stream structured JSONL verdict telemetry, inspect summaries, recalibrate offline (0 LLM calls), or export SFT/DPO data
+logitgate eval --rubric "Safe SQL" --file query.sql --telemetry-out verdicts.jsonl
+logitgate telemetry summary verdicts.jsonl --json
+logitgate telemetry recalibrate verdicts.jsonl --alpha 0.10 --output recalibrated_profile.json
+logitgate telemetry export verdicts.jsonl --format sft_jsonl --output student_sft.jsonl
 ```
 
 Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreachable or misconfigured.
@@ -439,12 +507,14 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Pure-CPU CI/CD runner benchmarks (`1B-3B` vs `4B` baseline, Ollama vs in-process `llama.cpp`, thread scaling sweeps)
   - Hardened 32-item adversarial suite across `ChoiceGate` and `ScoreGate` ($N=5$)
   - Zero-token preference ranking (`RankGate`) & contract-filtered `BestOfNGate` pools
+  - Production JSONL telemetry micro-overhead & zero-call offline distillation/recalibration
   - Falsification boundaries: reasoning depth, 16k-token haystack scaling, and context window (`num_ctx`) squeezing
   - Elastic recurrent layer-looping (NVIDIA Dory-4B, RTX 5090 vs RTX 4070)
 - **[3-Layer Architecture & Deployment Topologies](docs/architecture.md)**:
   - Execution mechanics, lookahead policy, and failure preservation
   - Hardware sizing across CPU-only, consumer GPU, and multi-GPU setups
   - Deployment topologies to prevent KV-cache eviction
+  - Portable `CalibrationProfile`, `RankGate`/`BestOfNGate`, and `logitgate.telemetry` sinks
 - **[Mathematical Foundations & Symmetric Debiasing](docs/math_and_debiasing.md)**:
   - Proof of token and position bias cancellation in log-odds space
   - Why probability averaging fails under sigmoid saturation

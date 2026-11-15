@@ -246,8 +246,12 @@ class ASTGate(BaseGate):
         validators: Sequence[Callable[[Any], Any]] | None = None,
         normalize: bool | Callable[[Any], Any] = False,
         save_on_fail: bool | None = None,
+        telemetry_sink: Any = None,
         name: str = "ASTGate",
     ) -> None:
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
+
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         if min_length is not None and (isinstance(min_length, bool) or not isinstance(min_length, int) or min_length < 0):
             raise ConfigurationError(f"min_length must be a non-negative integer, got {min_length!r}")
         if max_length is not None and (isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 0):
@@ -281,6 +285,7 @@ class ASTGate(BaseGate):
         self.validators = combined_validators if combined_validators else None
         self.normalize = normalize
         self.save_on_fail = save_on_fail
+        self.telemetry_sink = resolved_sink
         self.name = name
         self._forbidden_res = [(p, _compile_user_pattern(p)) for p in self.forbidden_patterns or []]
         self._required_res = [(s, _compile_user_pattern(s)) for s in self.required_sections or []]
@@ -342,8 +347,17 @@ class ASTGate(BaseGate):
             traces=[trace],
         )
         from logitgate.snapshot import persist_failure_snapshot
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
 
         kw = call_kwargs or {}
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="ASTGate",
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kw,
+        )
         persist_failure_snapshot(
             verdict=verdict,
             candidate=candidate,
@@ -867,7 +881,7 @@ class ASTGate(BaseGate):
             status=DecisionStatus.PASSED,
             latency_ms=latency,
         )
-        return Verdict(
+        verdict = Verdict(
             passed=True,
             status=DecisionStatus.PASSED,
             triggered_layer=self.name,
@@ -875,6 +889,16 @@ class ASTGate(BaseGate):
             total_tokens_generated=0,
             reason="All deterministic AST and contract checks passed.",
             traces=[trace],
+        )
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        return emit_verdict_telemetry(
+            verdict,
+            candidate=orig_candidate,
+            gate_name=self.name,
+            gate_type="ASTGate",
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:

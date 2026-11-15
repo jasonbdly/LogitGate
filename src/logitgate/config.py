@@ -3,7 +3,11 @@ from __future__ import annotations
 import math
 import os
 import threading
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from logitgate.telemetry.sinks import TelemetrySink
 
 
 class _ConfigState:
@@ -17,8 +21,22 @@ class _ConfigState:
         self.num_ctx: int | None = None
         self.save_failures: bool | None = None
         self.snapshot_dir: str | None = None
+        self.telemetry_sink: TelemetrySink | Literal[False] | None = None
+        self.owned_telemetry_sink: TelemetrySink | None = None
+        self.env_telemetry_path: str | None = None
+        self.env_telemetry_sink: TelemetrySink | None = None
+
+    def close_owned_telemetry(self) -> None:
+        if self.owned_telemetry_sink is not None:
+            self.owned_telemetry_sink.close()
+            self.owned_telemetry_sink = None
+        if self.env_telemetry_sink is not None:
+            self.env_telemetry_sink.close()
+            self.env_telemetry_sink = None
+        self.env_telemetry_path = None
 
     def reset(self) -> None:
+        self.close_owned_telemetry()
         self.backend = None
         self.model = None
         self.pass_threshold = None
@@ -28,6 +46,7 @@ class _ConfigState:
         self.num_ctx = None
         self.save_failures = None
         self.snapshot_dir = None
+        self.telemetry_sink = None
 
 
 _config_lock = threading.RLock()
@@ -224,6 +243,35 @@ class _DefaultsMeta(type):
         with _config_lock:
             _state.snapshot_dir = val
 
+    @property
+    def telemetry_sink(cls) -> TelemetrySink | None:
+        return get_default_telemetry_sink()
+
+    @telemetry_sink.setter
+    def telemetry_sink(cls, val: TelemetrySink | str | Path | bool | None) -> None:
+        _set_telemetry_sink(val)
+
+
+def _set_telemetry_sink(val: TelemetrySink | str | Path | bool | None) -> None:
+    if val is None:
+        with _config_lock:
+            if _state.owned_telemetry_sink is not None:
+                _state.owned_telemetry_sink.close()
+                _state.owned_telemetry_sink = None
+            _state.telemetry_sink = None
+        return
+    from logitgate.telemetry.sinks import TelemetrySink, resolve_telemetry_sink
+
+    owns_new = isinstance(val, (str, Path))
+    resolved = resolve_telemetry_sink(val)
+    with _config_lock:
+        if _state.owned_telemetry_sink is not None and _state.owned_telemetry_sink is not resolved:
+            _state.owned_telemetry_sink.close()
+            _state.owned_telemetry_sink = None
+        _state.telemetry_sink = resolved
+        if owns_new and isinstance(resolved, TelemetrySink):
+            _state.owned_telemetry_sink = resolved
+
 
 class LogitGateDefaults(metaclass=_DefaultsMeta):
     """Global configuration defaults for LogitGate."""
@@ -239,6 +287,7 @@ def configure(
     num_ctx: int | None = None,
     save_failures: bool | None = None,
     snapshot_dir: str | None = None,
+    telemetry_sink: TelemetrySink | str | Path | bool | None = None,
 ) -> None:
     """Configures process-wide defaults for LogitGate gates and backends.
 
@@ -253,6 +302,8 @@ def configure(
         num_ctx: Optional context-window size (``>= 1``) forwarded to local backends.
         save_failures: Automatically persist replayable snapshots on failed verdicts.
         snapshot_dir: Directory path where failure snapshots are written.
+        telemetry_sink: Optional process-wide `TelemetrySink` instance, JSONL file path,
+            or ``False`` to suppress environment-configured telemetry.
 
     Raises:
         ConfigurationError: If any supplied threshold, temperature, boolean flag, or
@@ -267,31 +318,54 @@ def configure(
     val_ctx = None if num_ctx is None else _validate_num_ctx("num_ctx", num_ctx)
     val_save = None if save_failures is None else _validate_bool("save_failures", save_failures)
 
-    with _config_lock:
-        eff_pass = val_pass if val_pass is not None else (_state.pass_threshold if _state.pass_threshold is not None else 0.85)
-        eff_fail = val_fail if val_fail is not None else (_state.fail_threshold if _state.fail_threshold is not None else 0.20)
-        if (val_pass is not None or val_fail is not None) and eff_pass <= eff_fail:
-            raise ConfigurationError(
-                f"pass_threshold ({eff_pass}) must be strictly greater than fail_threshold ({eff_fail})"
-            )
-        if backend is not None:
-            _state.backend = backend
-        if model is not None:
-            _state.model = model
-        if val_pass is not None:
-            _state.pass_threshold = val_pass
-        if val_fail is not None:
-            _state.fail_threshold = val_fail
-        if val_temp is not None:
-            _state.logit_temperature = val_temp
-        if val_auto is not None:
-            _state.auto_calibrate = val_auto
-        if val_ctx is not None:
-            _state.num_ctx = val_ctx
-        if val_save is not None:
-            _state.save_failures = val_save
-        if snapshot_dir is not None:
-            _state.snapshot_dir = snapshot_dir
+    owns_new_sink = False
+    resolved_sink: TelemetrySink | Literal[False] | None = None
+    if telemetry_sink is not None:
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
+
+        owns_new_sink = isinstance(telemetry_sink, (str, Path))
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
+
+    try:
+        with _config_lock:
+            eff_pass = val_pass if val_pass is not None else (_state.pass_threshold if _state.pass_threshold is not None else 0.85)
+            eff_fail = val_fail if val_fail is not None else (_state.fail_threshold if _state.fail_threshold is not None else 0.20)
+            if (val_pass is not None or val_fail is not None) and eff_pass <= eff_fail:
+                raise ConfigurationError(
+                    f"pass_threshold ({eff_pass}) must be strictly greater than fail_threshold ({eff_fail})"
+                )
+            if backend is not None:
+                _state.backend = backend
+            if model is not None:
+                _state.model = model
+            if val_pass is not None:
+                _state.pass_threshold = val_pass
+            if val_fail is not None:
+                _state.fail_threshold = val_fail
+            if val_temp is not None:
+                _state.logit_temperature = val_temp
+            if val_auto is not None:
+                _state.auto_calibrate = val_auto
+            if val_ctx is not None:
+                _state.num_ctx = val_ctx
+            if val_save is not None:
+                _state.save_failures = val_save
+            if snapshot_dir is not None:
+                _state.snapshot_dir = snapshot_dir
+            if telemetry_sink is not None:
+                if (
+                    _state.owned_telemetry_sink is not None
+                    and _state.owned_telemetry_sink is not resolved_sink
+                ):
+                    _state.owned_telemetry_sink.close()
+                    _state.owned_telemetry_sink = None
+                _state.telemetry_sink = resolved_sink
+                if owns_new_sink and resolved_sink is not False and resolved_sink is not None:
+                    _state.owned_telemetry_sink = resolved_sink
+    except BaseException:
+        if owns_new_sink and resolved_sink is not False and resolved_sink is not None:
+            resolved_sink.close()
+        raise
 
 
 def reset_config() -> None:
@@ -376,3 +450,30 @@ def get_default_snapshot_dir() -> str:
 def get_default_auto_calibrate() -> bool:
     """Resolves default lazy auto-calibration flag via configure() or LOGITGATE_AUTO_CALIBRATE."""
     return LogitGateDefaults.auto_calibrate
+
+
+def get_default_telemetry_sink() -> TelemetrySink | None:
+    """Resolves default `TelemetrySink` via `configure()` or ``LOGITGATE_TELEMETRY_PATH``."""
+    if _state.telemetry_sink is None and "LOGITGATE_TELEMETRY_PATH" not in os.environ:
+        return None
+    with _config_lock:
+        if _state.telemetry_sink is False:
+            return None
+        if _state.telemetry_sink is not None:
+            return _state.telemetry_sink
+        env_raw = os.environ.get("LOGITGATE_TELEMETRY_PATH")
+        if env_raw is None or not env_raw.strip():
+            return None
+        env_path = env_raw.strip()
+        if _state.env_telemetry_sink is not None and _state.env_telemetry_path == env_path:
+            return _state.env_telemetry_sink
+        if _state.env_telemetry_sink is not None:
+            _state.env_telemetry_sink.close()
+            _state.env_telemetry_sink = None
+            _state.env_telemetry_path = None
+        from logitgate.telemetry.sinks import JsonlTelemetrySink
+
+        sink = JsonlTelemetrySink(env_path)
+        _state.env_telemetry_path = env_path
+        _state.env_telemetry_sink = sink
+        return sink

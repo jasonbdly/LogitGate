@@ -174,11 +174,14 @@ class RankGate(BaseGate):
         save_on_fail: bool | None = None,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
+        telemetry_sink: Any = None,
         name: str = "RankGate",
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         loaded_profile = resolve_calibration_profile(profile)
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         if not isinstance(rubric, str) or not rubric.strip():
             raise ConfigurationError("rubric cannot be empty or whitespace")
         try:
@@ -262,6 +265,7 @@ class RankGate(BaseGate):
         self.max_positional_bias = effective_max_bias
         self.save_on_fail = effective_save_on_fail
         self.warm_prefix = effective_warm_prefix
+        self.telemetry_sink = resolved_sink
         self.name = name
 
     def _ensure_calibrated(self) -> None:
@@ -684,6 +688,19 @@ class RankGate(BaseGate):
         )
 
     def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="RankGate",
+            rubric=self.rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
+        )
         if verdict.passed:
             return verdict
         return persist_failure_snapshot(
@@ -990,12 +1007,16 @@ class BestOfNGate(BaseGate):
         save_on_fail: bool | None = None,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
+        telemetry_sink: Any = None,
         name: str = "BestOfNGate",
     ) -> None:
+        from logitgate.telemetry.sinks import resolve_telemetry_sink
+
         if pre_gate is not None and not isinstance(pre_gate, BaseGate):
             raise ConfigurationError(f"pre_gate must be a BaseGate or None, got {type(pre_gate).__name__}")
         if post_gate is not None and not isinstance(post_gate, BaseGate):
             raise ConfigurationError(f"post_gate must be a BaseGate or None, got {type(post_gate).__name__}")
+        resolved_sink = resolve_telemetry_sink(telemetry_sink)
         effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
         self.rank_gate = RankGate(
             rubric=rubric,
@@ -1013,6 +1034,7 @@ class BestOfNGate(BaseGate):
             save_on_fail=False,
             warm_prefix=warm_prefix,
             profile=profile,
+            telemetry_sink=False,
             name=name,
         )
         self.pre_gate = pre_gate
@@ -1022,6 +1044,7 @@ class BestOfNGate(BaseGate):
         self.rubric = self.rank_gate.rubric
         self.profile = self.rank_gate.profile
         self.save_on_fail = effective_save_on_fail
+        self.telemetry_sink = resolved_sink
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -1039,6 +1062,19 @@ class BestOfNGate(BaseGate):
         return cfg
 
     def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="BestOfNGate",
+            rubric=self.rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=kwargs,
+        )
         if verdict.passed:
             return verdict
         return persist_failure_snapshot(
@@ -1239,7 +1275,7 @@ class BestOfNGate(BaseGate):
         )
 
     def _build_rank_kwargs(self, call_kwargs: Mapping[str, Any]) -> dict[str, Any]:
-        rk: dict[str, Any] = {"save_on_fail": False}
+        rk: dict[str, Any] = {"save_on_fail": False, "_suppress_telemetry": True}
         if "context" in call_kwargs:
             rk["context"] = call_kwargs["context"]
         return rk
@@ -1248,7 +1284,10 @@ class BestOfNGate(BaseGate):
         entries = _normalize_candidates(candidate)
         t0 = time.perf_counter()
         pre_verdicts = (
-            [self.pre_gate.evaluate(cand, save_on_fail=False) for _, cand in entries]
+            [
+                self.pre_gate.evaluate(cand, save_on_fail=False, _suppress_telemetry=True)
+                for _, cand in entries
+            ]
             if self.pre_gate is not None
             else None
         )
@@ -1273,14 +1312,16 @@ class BestOfNGate(BaseGate):
         winner_cand = entries[winner_idx][1]
 
         if self.post_gate is not None:
-            post_v = self.post_gate.evaluate(winner_cand, save_on_fail=False)
+            post_v = self.post_gate.evaluate(
+                winner_cand, save_on_fail=False, _suppress_telemetry=True
+            )
             final_v = self._merge_post_verdict(entries, base_v.choice, winner_idx, base_v, post_v, kwargs, t0)
             return self._handle_failure_snapshot(candidate, final_v, **kwargs)
 
         norm_out = kwargs.get("_normalized_out")
         if isinstance(norm_out, list):
             norm_out.append(winner_cand)
-        return base_v
+        return self._handle_failure_snapshot(candidate, base_v, **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         entries = _normalize_candidates(candidate)
@@ -1288,7 +1329,10 @@ class BestOfNGate(BaseGate):
         pre_verdicts = (
             list(
                 await asyncio.gather(
-                    *[self.pre_gate.aevaluate(cand, save_on_fail=False) for _, cand in entries]
+                    *[
+                        self.pre_gate.aevaluate(cand, save_on_fail=False, _suppress_telemetry=True)
+                        for _, cand in entries
+                    ]
                 )
             )
             if self.pre_gate is not None
@@ -1315,14 +1359,16 @@ class BestOfNGate(BaseGate):
         winner_cand = entries[winner_idx][1]
 
         if self.post_gate is not None:
-            post_v = await self.post_gate.aevaluate(winner_cand, save_on_fail=False)
+            post_v = await self.post_gate.aevaluate(
+                winner_cand, save_on_fail=False, _suppress_telemetry=True
+            )
             final_v = self._merge_post_verdict(entries, base_v.choice, winner_idx, base_v, post_v, kwargs, t0)
             return self._handle_failure_snapshot(candidate, final_v, **kwargs)
 
         norm_out = kwargs.get("_normalized_out")
         if isinstance(norm_out, list):
             norm_out.append(winner_cand)
-        return base_v
+        return self._handle_failure_snapshot(candidate, base_v, **kwargs)
 
     def select(self, candidates: Any, **kwargs: Any) -> BestOfNResult:
         """Evaluates ``candidates`` through pre-filter, ranking, and post-check, returning `BestOfNResult`."""
