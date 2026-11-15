@@ -77,6 +77,8 @@ Follow standard industry Git practices (Conventional Commits, 50/72 formatting, 
   - **Body:** Wrap lines at 72 characters. Explain **why** the change is necessary (the root cause, trade-off, or motivation), not a mechanical bullet-by-bullet inventory repeating the code diff. If a commit requires a long list of unrelated bullets to describe, it is not atomic and must be split into separate commits before committing.
 - **Pure Release Commits (`chore(release)`):**
   - `chore(release): bump version to X.Y.Z` commits must only modify the 5 synchronized metadata files (`pyproject.toml`, `src/logitgate/__init__.py`, `CITATION.cff`, `README.md`, `CHANGELOG.md`). All functional changes must be committed in their own vertical commits beforehand.
+- **Major Release Blocker (`v1.0.0` / `X.0.0` Gate):**
+  - Never bump LogitGate to `1.0.0` (or increment the major SemVer digit `X.y.z -> (X+1).0.0`), promote the PyPI Trove classifier to `Development Status :: 5 - Production/Stable`, pass `--allow-major-bump` to `verify_release.py`, or create/push any major `vX.0.0` Git tag (`X >= 1`) without **explicit, unambiguous user instruction specifically authorizing that major release in the current turn**. Generic approvals ("proceed", "continue the roadmap", "what's next") never authorize a major SemVer jump; keep all milestones in `0.x` (`0.13.0`, `0.14.0`, etc.) until explicitly told otherwise.
 - **Immutable Published History:**
   - Never amend, rebase, or force-push commits or tags that have already been pushed to `origin/main`.
 - **Deterministic Subprocess Timeouts:**

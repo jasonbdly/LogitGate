@@ -498,3 +498,54 @@ def test_v0120_audit_remediations_security_math_and_io(tmp_path: Path) -> None:
     d_small, p_small = compute_ks_two_sample([0.1, 0.2], [0.8, 0.9])
     assert d_small == 1.0
     assert p_small > 0.05
+
+
+def test_major_release_blocker_policy(tmp_path: Path) -> None:
+    import importlib.util
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / ".agents" / "skills" / "logitgate-release" / "scripts" / "verify_release.py"
+    spec = importlib.util.spec_from_file_location("verify_release", script_path)
+    assert spec is not None and spec.loader is not None
+    verify_release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verify_release)
+
+    # Create an isolated repo fixture at 0.12.0
+    (tmp_path / "src" / "logitgate").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "logitgate"\nversion = "0.12.0"\nclassifiers = [\n    "Development Status :: 4 - Beta",\n]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "logitgate" / "__init__.py").write_text('__version__ = "0.12.0"\n', encoding="utf-8")
+    (tmp_path / "CITATION.cff").write_text('version: 0.12.0\ndate-released: "2026-11-15"\n', encoding="utf-8")
+    (tmp_path / "README.md").write_text("  version = {0.12.0},\n", encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [0.12.0] - 2026-11-15\n\n- Current release notes entry.\n\n## [0.11.0] - 2026-11-15\n\n- Prior notes.\n",
+        encoding="utf-8",
+    )
+
+    # 1. Major jump (0.12.0 -> 1.0.0) is blocked by default in bump_version
+    with pytest.raises(RuntimeError, match="MAJOR RELEASE BLOCKED"):
+        verify_release.bump_version(tmp_path, "1.0.0")
+
+    # 2. Manual major edit in CHANGELOG/metadata is also caught by validate_major_version_policy
+    with pytest.raises(RuntimeError, match="MAJOR RELEASE BLOCKED"):
+        verify_release.validate_major_version_policy(tmp_path, "1.0.0")
+
+    # 3. Pre-1.0 version with 5 - Production/Stable classifier is rejected
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "logitgate"\nversion = "0.12.0"\nclassifiers = [\n    "Development Status :: 5 - Production/Stable",\n]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="MAJOR RELEASE POLICY VIOLATION"):
+        verify_release.validate_major_version_policy(tmp_path, "0.12.0")
+
+    # 4. Minor 0.x bump (0.12.0 -> 0.13.0) succeeds cleanly with 4 - Beta
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "logitgate"\nversion = "0.12.0"\nclassifiers = [\n    "Development Status :: 4 - Beta",\n]\n',
+        encoding="utf-8",
+    )
+    verify_release.validate_major_version_policy(tmp_path, "0.13.0")
+    # 5. Explicit allow_major_bump=True permits 1.0.0 when authorized
+    verify_release.validate_major_version_policy(tmp_path, "1.0.0", allow_major_bump=True)
+

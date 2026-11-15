@@ -49,6 +49,9 @@ uv run pytest
 
 ### Step 2: Atomic Version Bump
 
+> **MAJOR RELEASE BLOCKER (`v1.0.0` / `X.0.0`):**
+> `verify_release.py` mechanically blocks any major SemVer increment (`0.x.y -> 1.0.0` or `X.y.z -> (X+1).0.0`) and any `Development Status :: 5 - Production/Stable` classifier while on `0.x`. **NEVER** pass `--allow-major-bump`, manually edit files to a new major version, or tag `v1.0.0` / `vX.0.0` unless the user has explicitly and specifically requested cutting that exact major version in the current turn. Generic roadmap or "proceed" approvals never authorize a major release; default to `0.(Y+1).0` or `0.Y.(Z+1)`.
+
 Use the helper script to bump all 5 version locations simultaneously:
 
 ```bash

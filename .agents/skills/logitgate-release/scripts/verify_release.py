@@ -114,9 +114,58 @@ def get_dirty_non_release_files(root: Path) -> list[str]:
     return dirty_non_release
 
 
-def bump_version(root: Path, new_version: str) -> None:
-    if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", new_version):
-        raise ValueError(f"Invalid semver version: '{new_version}' (expected X.Y.Z)")
+def _parse_major(version: str) -> int:
+    m = re.match(r"^(\d+)\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$", version.strip())
+    if not m:
+        raise ValueError(f"Invalid semver version: '{version}' (expected X.Y.Z)")
+    return int(m.group(1))
+
+
+def validate_major_version_policy(
+    root: Path,
+    target_version: str,
+    *,
+    previous_version: str | None = None,
+    allow_major_bump: bool = False,
+) -> None:
+    """Enforces the repository major-release gate (blocks 0.x -> 1.0.0 / X -> X+1 unless explicitly opted in)."""
+    target_major = _parse_major(target_version)
+
+    pyproject_text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    if target_major == 0 and "Development Status :: 5 - Production/Stable" in pyproject_text:
+        raise RuntimeError(
+            f"MAJOR RELEASE POLICY VIOLATION: Version {target_version} is pre-1.0 (0.x), "
+            "but pyproject.toml declares 'Development Status :: 5 - Production/Stable'."
+        )
+
+    baseline = previous_version
+    if baseline is None:
+        changelog_text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+        headers = re.findall(r"^##\s*\[([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+)\]", changelog_text, re.MULTILINE)
+        for hdr in headers:
+            if hdr != target_version:
+                baseline = hdr
+                break
+
+    if baseline is not None:
+        prev_major = _parse_major(baseline)
+        if target_major > prev_major and not allow_major_bump:
+            raise RuntimeError(
+                f"MAJOR RELEASE BLOCKED: Refusing major SemVer jump ({baseline} -> {target_version}) "
+                "without --allow-major-bump. Major releases (such as v1.0.0) require explicit user "
+                "authorization in the current turn; use the next 0.x minor/patch version instead."
+            )
+
+
+def bump_version(root: Path, new_version: str, *, allow_major_bump: bool = False) -> None:
+    _parse_major(new_version)
+    current_versions = get_versions(root)
+    validate_major_version_policy(
+        root,
+        new_version,
+        previous_version=current_versions["pyproject.toml"],
+        allow_major_bump=allow_major_bump,
+    )
 
     dirty_non_release = get_dirty_non_release_files(root)
     if dirty_non_release:
@@ -231,13 +280,20 @@ def run_command(cmd: list[str], cwd: Path, desc: str) -> bool:
     return True
 
 
-def run_full_check(root: Path) -> bool:
+def run_full_check(root: Path, *, allow_major_bump: bool = False) -> bool:
     print("=== Step 1: Checking Version Synchronization & Changelog Notes ===")
     synced, info = check_sync(root)
     if not synced:
         print(f"FAIL: Version mismatch detected!\n{info}")
         return False
     print(f"  ✓ All 5 metadata locations synchronized at version {info}")
+
+    try:
+        validate_major_version_policy(root, info, allow_major_bump=allow_major_bump)
+    except RuntimeError as exc:
+        print(f"FAIL: {exc}")
+        return False
+    print("  ✓ Major SemVer release policy verified")
 
     changelog_text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     notes_pattern = rf"## \[{re.escape(info)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
@@ -307,12 +363,17 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="Verify all 5 version locations are synchronized")
     parser.add_argument("--bump", type=str, metavar="VERSION", help="Bump version across all 5 files to VERSION (e.g. 0.3.1)")
     parser.add_argument("--full-check", action="store_true", help="Run full pre-flight verification (version sync + ruff + mypy + pytest + build)")
+    parser.add_argument(
+        "--allow-major-bump",
+        action="store_true",
+        help="Explicitly authorize a major SemVer jump (e.g. 0.x -> 1.0.0); ONLY pass when the user explicitly requests that major release.",
+    )
 
     args = parser.parse_args()
     root = find_repo_root()
 
     if args.bump:
-        bump_version(root, args.bump)
+        bump_version(root, args.bump, allow_major_bump=args.allow_major_bump)
         synced, info = check_sync(root)
         if not synced:
             print(f"Error: Version sync failed after bump: {info}", file=sys.stderr)
@@ -321,11 +382,16 @@ def main() -> int:
         return 0
 
     if args.full_check:
-        return 0 if run_full_check(root) else 1
+        return 0 if run_full_check(root, allow_major_bump=args.allow_major_bump) else 1
 
     # Default to --check
     synced, info = check_sync(root)
     if synced:
+        try:
+            validate_major_version_policy(root, info, allow_major_bump=args.allow_major_bump)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         print(f"LogitGate version is synchronized: {info}")
         for file, ver in get_versions(root).items():
             print(f"  ✓ {file:28s} {ver}")
