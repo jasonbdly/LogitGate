@@ -203,7 +203,7 @@ def __getattr__(name: str) -> Any:
 def __dir__() -> list[str]:
     return sorted({*globals(), *_LAZY_INTEGRATIONS})
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = [
     "KNOWN_BINARY_MODEL_TEMPERATURES",

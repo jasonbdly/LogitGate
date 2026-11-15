@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.0] - 2026-11-15
+
+### Added
+- **Online & Offline Telemetry Drift Detection (`logitgate.telemetry.drift`):** Added `DriftSeverity`, `DriftRecommendedAction`, `DriftReport`, Cochran/Jeffreys finite-sample `compute_psi()`, SciPy-free exact two-pointer Stephens-adjusted `compute_ks_two_sample()`, multi-signal `detect_telemetry_drift()` (combining symmetric log-odds PSI/KS, escalation-rate delta, positional-bias delta, and decisive Layer-1 vs. Layer-2 teacher disagreement rate), and thread-safe sliding-window `RollingDriftMonitor(TelemetrySink)` (re-exported at `logitgate` and `logitgate.telemetry`) with `privacy="omit_candidate"`, automatic initial baseline capture or fixed reference windows, `on_drift` alerting, and cooldown-gated `AdaptiveConformalController.apply_drift_boost()` coupling.
+- **Gibbs–Candès Adaptive Conformal Control (`logitgate.calibration.adaptive`):** Added `AdaptiveConformalController`, `AdaptiveStepRecord`, `AdaptiveConformalSummary`, and `AdaptiveFeedbackMode` (`"explicit"` and `"cascade_audit"`, re-exported at `logitgate` and `logitgate.calibration`) for distribution-free online selective risk control under arbitrary covariate and adversarial shifts. Adjusts symmetric log-odds abstention cutoffs (`theta_{t+1} = max(min_theta, theta_t + gamma * (err_t - alpha))`) with a protective Split-A conformal floor (`min_theta=0.0`), linear saturation abstention (`abstain_theta=8.0` -> `force_ambiguous=True`), `.to_profile()`, and dynamic `VerdictCache` threshold fingerprinting.
+- **Zero-Human-Label Cascade Shadow Auditing & Drift CLI:** Wired `adaptive_controller` across `LogitGate`, `MultiRubricGate`, and `Cascade` (autonomous `feedback_mode="cascade_audit"` shadow-auditing of fast-path Layer-1 decisions via Tier-2 `JudgeGate` with Horvitz–Thompson inverse-propensity error weighting `1/p` and teacher verdict override), alongside `logitgate telemetry drift <input_path> --reference <ref_path> [--psi-moderate] [--psi-severe] [--ks-alpha] [--fail-on-drift] [--json]`.
+
+### Fixed
+- **Privacy Mode Documentation Sync:** Synchronized `PrivacyMode` literal names (`full`, `redact_pii`, `hash_candidate`, `metrics_only`) in `docs/architecture.md`.
+
 ## [0.9.0] - 2026-11-15
 
 ### Added
