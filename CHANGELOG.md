@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.0] - 2026-11-15
+
+### Added
+- **Weight-Free BYO Contrastive Anchor Bank & `<1 KB` Logit Meta-Calibrator (`logitgate.distill`):** Added `AnchorExemplar`, `ContrastiveAnchorPair`, `DistilledAnchorBank`, `resolve_anchor_bank()`, `FEATURE_NAMES`, `LogitFeatureVector`, `extract_logit_features()`, `LogitMetaCalibrator`, `fit_meta_calibrator()`, `afit_meta_calibrator()`, `resolve_meta_calibrator()`, `DistillationBundle`, `compile_distillation_bundle()`, `acompile_distillation_bundle()`, and `resolve_distillation_bundle()` (re-exported at `logitgate` and `logitgate.distill`). `DistilledAnchorBank` discovers natural counterfactual `(PASS, FAIL)` minimal pairs per rubric via lexical overlap, injects slot-neutral `[CALIBRATION ANCHORS]` inside the shared static KV-cache prefix (`compile_binary_prompt` / `compile_batch_binary_prompt`), and gates injection via Szymkiewicz–Simpson rubric token overlap (`min_rubric_overlap=0.25`, `exclude_exact=True`) so out-of-domain rubrics abstain cleanly. `LogitMetaCalibrator` fits L2-regularized Newton–Raphson logistic regression with an unpenalized intercept and monotonicity floor (`w_sym >= 0.05`) over 5 first-token features plus stratified 5-fold out-of-fold split-conformal threshold calibration (including 0-LLM-call fitting from `DistillationRecord` logs and automatic `unanchored_meta_calibrator` OOD fallback).
+- **Architecture-Agnostic Open-Weights PEFT LoRA Compiler (`logitgate[distill]`):** Added `LoRADistillConfig`, `SymmetricLoRAExample`, `LoRADistillManifest`, `HuggingFaceLogitBackend`, `prepare_symmetric_lora_examples()`, `emit_deployment_manifests()`, and `train_distillation_lora()` using PEFT `target_modules="all-linear"` with loss masked strictly onto the single first decision token across `2x` symmetric (`A/B` + `B/A`) examples across CausalLM families (`Llama`, `Qwen2`, `Gemma2`, `Mistral`, `Phi`), emitting `Modelfile.ollama`, `serve_vllm.sh`, and `serve_llamacpp.sh`, plus `LlamaCppBackend(lora_path=..., lora_scale=...)` support.
+- **Gate, Adaptive Conformal, Cache, Benchmark, & CLI Distillation Wiring:** Wired `anchor_bank`, `meta_calibrator`, and `distillation_bundle` across `LogitGate`, `MultiRubricGate`, `AdaptiveConformalController`, `VerdictCache` fingerprinting (`gate_cache_fingerprint` and `_backend_fingerprint`), `run_benchmark()`, `logitgate distill compile`, `logitgate distill train-lora`, and `--bundle` on `logitgate eval`, `logitgate benchmark`, and `logitgate stream`.
+
 ## [0.10.0] - 2026-11-15
 
 ### Added
