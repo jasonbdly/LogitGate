@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import abc
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import AsyncIterable, Awaitable, Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from logitgate.models import Verdict
 
 if TYPE_CHECKING:
     from logitgate.cascade import Cascade
+    from logitgate.streaming import AsyncGuardedStream, GuardedStream
+
+_T_Stream = TypeVar("_T_Stream")
 
 EscalationPolicy = Literal["on_ambiguous_or_fail", "on_ambiguous_only", "adjudicate", "always"]
 """When a generative (tier 2) gate runs inside a `Cascade`, relative to the upstream verdict.
@@ -136,6 +139,22 @@ class BaseGate(abc.ABC):
             node_mapping=node_mapping,
         )
 
+    def guard_stream(
+        self, source: Iterable[_T_Stream], **guard_kwargs: Any
+    ) -> GuardedStream[_T_Stream]:
+        """Wraps a synchronous chunk stream with `StreamGuard` using this gate."""
+        from logitgate.streaming import guard_stream
+
+        return guard_stream(source, self, **guard_kwargs)
+
+    def aguard_stream(
+        self, source: AsyncIterable[_T_Stream], **guard_kwargs: Any
+    ) -> AsyncGuardedStream[_T_Stream]:
+        """Wraps an asynchronous chunk stream with `StreamGuard` using this gate."""
+        from logitgate.streaming import aguard_stream
+
+        return aguard_stream(source, self, **guard_kwargs)
+
     def __call__(self, candidate: Any, **kwargs: Any) -> Verdict:
         """Evaluates the candidate artifact synchronously (callable shorthand for `evaluate`)."""
         return self.evaluate(candidate, **kwargs)
@@ -151,12 +170,14 @@ class BaseGate(abc.ABC):
             eff_sink = (
                 self.telemetry_sink if self.telemetry_sink is not None else other.telemetry_sink
             )
+            eff_cache = self.cache if self.cache is not None else other.cache
             return Cascade(
                 gates=list(self.gates) + list(other.gates),
                 name=self.name,
                 fuse_logits=self.fuse_logits,
                 prior_weight=self.prior_weight,
                 telemetry_sink=eff_sink,
+                cache=eff_cache,
             )
         if isinstance(self, Cascade):
             return Cascade(
@@ -165,6 +186,7 @@ class BaseGate(abc.ABC):
                 fuse_logits=self.fuse_logits,
                 prior_weight=self.prior_weight,
                 telemetry_sink=self.telemetry_sink,
+                cache=self.cache,
             )
         if isinstance(other, Cascade):
             return Cascade(
@@ -172,6 +194,7 @@ class BaseGate(abc.ABC):
                 fuse_logits=other.fuse_logits,
                 prior_weight=other.prior_weight,
                 telemetry_sink=other.telemetry_sink,
+                cache=other.cache,
             )
         return Cascade(gates=[self, other])
 

@@ -175,6 +175,7 @@ class RankGate(BaseGate):
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
         name: str = "RankGate",
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
@@ -242,6 +243,9 @@ class RankGate(BaseGate):
                 loaded_profile,
                 binary=False,
             )
+            from logitgate.cache import resolve_verdict_cache
+
+            resolved_cache = resolve_verdict_cache(cache)
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
@@ -266,6 +270,7 @@ class RankGate(BaseGate):
         self.save_on_fail = effective_save_on_fail
         self.warm_prefix = effective_warm_prefix
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
 
     def _ensure_calibrated(self) -> None:
@@ -687,8 +692,36 @@ class RankGate(BaseGate):
             call_kwargs=call_kwargs,
         )
 
-    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+    def _handle_failure_snapshot(
+        self,
+        candidate: Any,
+        verdict: Verdict,
+        *,
+        _entries: Sequence[tuple[str, Any]] | None = None,
+        _is_cache_hit: bool = False,
+        **kwargs: Any,
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        call_kw = kwargs
+        if _is_cache_hit:
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            call_kw = {**kwargs, "telemetry_tags": merged_tags}
+        else:
+            has_win = bool(verdict.passed and verdict.choice is not None and _entries is not None)
+            win_cand = dict(_entries)[verdict.choice] if (has_win and _entries is not None and verdict.choice is not None) else None
+            store_cached_verdict(
+                self,
+                candidate,
+                verdict,
+                gate_cache=self.cache,
+                call_kwargs=kwargs,
+                has_normalized=has_win,
+                normalized_artifact=win_cand,
+            )
 
         emit_verdict_telemetry(
             verdict,
@@ -699,7 +732,7 @@ class RankGate(BaseGate):
             model=self.model,
             backend=self.backend,
             gate_sink=self.telemetry_sink,
-            call_kwargs=kwargs,
+            call_kwargs=call_kw,
         )
         if verdict.passed:
             return verdict
@@ -756,10 +789,19 @@ class RankGate(BaseGate):
         return self.context
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         entries = _normalize_candidates(candidate)
         eff_mode = self._resolve_effective_mode(len(entries))
         eff_ctx = self._effective_context(kwargs)
         self._ensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
 
@@ -767,7 +809,7 @@ class RankGate(BaseGate):
             prompts = self._build_pair_prompts(entries[0][1], entries[1][1], effective_context=eff_ctx, nonce=nonce)
             top_list = [self.backend.query_top_logprobs(p, top_k=10, allowed_tokens=["A", "B"]) for p in prompts]
             verdict = self._compute_pairwise_verdict(entries, top_list, t0, kwargs)
-            return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+            return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
         if eff_mode == "round_robin":
             n = len(entries)
@@ -779,14 +821,14 @@ class RankGate(BaseGate):
                 )
             top_list = [self.backend.query_top_logprobs(p, top_k=10, allowed_tokens=["A", "B"]) for p in rr_prompts]
             verdict = self._compute_round_robin_verdict(entries, pairs, top_list, t0, kwargs)
-            return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+            return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
         if eff_mode == "listwise":
             slot_keys, prompts, perms = self._build_listwise_prompts(entries, effective_context=eff_ctx, nonce=nonce)
             top_k = max(10, 2 * len(slot_keys))
             top_list = [self.backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=slot_keys) for p in prompts]
             verdict = self._compute_listwise_verdict(entries, slot_keys, perms, top_list, t0, kwargs)
-            return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+            return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
         # tournament
         active = list(range(len(entries)))
@@ -825,13 +867,22 @@ class RankGate(BaseGate):
             t0,
             kwargs,
         )
-        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+        return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         entries = _normalize_candidates(candidate)
         eff_mode = self._resolve_effective_mode(len(entries))
         eff_ctx = self._effective_context(kwargs)
         await self._aensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
         warm = _resolve_warm_prefix(self.warm_prefix, self.backend)
@@ -842,7 +893,7 @@ class RankGate(BaseGate):
                 prompts, allowed_tokens=["A", "B"], top_k=10, warm_first=warm
             )
             verdict = self._compute_pairwise_verdict(entries, top_list, t0, kwargs)
-            return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+            return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
         if eff_mode == "round_robin":
             n = len(entries)
@@ -856,7 +907,7 @@ class RankGate(BaseGate):
                 rr_prompts, allowed_tokens=["A", "B"], top_k=10, warm_first=warm
             )
             verdict = self._compute_round_robin_verdict(entries, pairs, top_list, t0, kwargs)
-            return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+            return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
         if eff_mode == "listwise":
             slot_keys, prompts, perms = self._build_listwise_prompts(entries, effective_context=eff_ctx, nonce=nonce)
@@ -865,7 +916,7 @@ class RankGate(BaseGate):
                 prompts, allowed_tokens=slot_keys, top_k=top_k, warm_first=warm
             )
             verdict = self._compute_listwise_verdict(entries, slot_keys, perms, top_list, t0, kwargs)
-            return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+            return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
         # tournament
         active = list(range(len(entries)))
@@ -913,7 +964,7 @@ class RankGate(BaseGate):
             t0,
             kwargs,
         )
-        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+        return self._handle_failure_snapshot(candidate, verdict, _entries=entries, **kwargs)
 
     @staticmethod
     def _to_result(entries: list[tuple[str, Any]], verdict: Verdict) -> BestOfNResult:
@@ -1008,8 +1059,10 @@ class BestOfNGate(BaseGate):
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
         name: str = "BestOfNGate",
     ) -> None:
+        from logitgate.cache import resolve_verdict_cache
         from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         if pre_gate is not None and not isinstance(pre_gate, BaseGate):
@@ -1017,26 +1070,34 @@ class BestOfNGate(BaseGate):
         if post_gate is not None and not isinstance(post_gate, BaseGate):
             raise ConfigurationError(f"post_gate must be a BaseGate or None, got {type(post_gate).__name__}")
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
-        effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
-        self.rank_gate = RankGate(
-            rubric=rubric,
-            backend=backend,
-            model=model,
-            mode=mode,
-            context=context,
-            symmetric_debiasing=symmetric_debiasing,
-            permutation_mode=permutation_mode,
-            query_first=query_first,
-            logit_temperature=logit_temperature,
-            min_confidence=min_confidence,
-            min_margin=min_margin,
-            max_positional_bias=max_positional_bias,
-            save_on_fail=False,
-            warm_prefix=warm_prefix,
-            profile=profile,
-            telemetry_sink=False,
-            name=name,
-        )
+        owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+        try:
+            effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
+            resolved_cache = resolve_verdict_cache(cache)
+            self.rank_gate = RankGate(
+                rubric=rubric,
+                backend=backend,
+                model=model,
+                mode=mode,
+                context=context,
+                symmetric_debiasing=symmetric_debiasing,
+                permutation_mode=permutation_mode,
+                query_first=query_first,
+                logit_temperature=logit_temperature,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_positional_bias=max_positional_bias,
+                save_on_fail=False,
+                warm_prefix=warm_prefix,
+                profile=profile,
+                telemetry_sink=False,
+                cache=False,
+                name=name,
+            )
+        except BaseException:
+            if owns_sink and resolved_sink not in (None, False):
+                resolved_sink.close()  # type: ignore[union-attr]
+            raise
         self.pre_gate = pre_gate
         self.post_gate = post_gate
         self.backend = self.rank_gate.backend
@@ -1045,7 +1106,20 @@ class BestOfNGate(BaseGate):
         self.profile = self.rank_gate.profile
         self.save_on_fail = effective_save_on_fail
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
+
+    def _ensure_calibrated(self) -> None:
+        self.rank_gate._ensure_calibrated()
+        for child in (self.pre_gate, self.post_gate):
+            if child is not None and callable(getattr(child, "_ensure_calibrated", None)):
+                child._ensure_calibrated()  # type: ignore[attr-defined]
+
+    async def _aensure_calibrated(self) -> None:
+        await self.rank_gate._aensure_calibrated()
+        for child in (self.pre_gate, self.post_gate):
+            if child is not None and callable(getattr(child, "_aensure_calibrated", None)):
+                await child._aensure_calibrated()  # type: ignore[attr-defined]
 
     def replay_config(self) -> dict[str, Any]:
         cfg = self.rank_gate.replay_config()
@@ -1061,8 +1135,36 @@ class BestOfNGate(BaseGate):
                 cfg["post_gate_config"] = post_cfg
         return cfg
 
-    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+    def _handle_failure_snapshot(
+        self,
+        candidate: Any,
+        verdict: Verdict,
+        *,
+        _entries: Sequence[tuple[str, Any]] | None = None,
+        _is_cache_hit: bool = False,
+        **kwargs: Any,
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        call_kw = kwargs
+        if _is_cache_hit:
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            call_kw = {**kwargs, "telemetry_tags": merged_tags}
+        else:
+            has_win = bool(verdict.passed and verdict.choice is not None and _entries is not None)
+            win_cand = dict(_entries)[verdict.choice] if (has_win and _entries is not None and verdict.choice is not None) else None
+            store_cached_verdict(
+                self,
+                candidate,
+                verdict,
+                gate_cache=self.cache,
+                call_kwargs=kwargs,
+                has_normalized=has_win,
+                normalized_artifact=win_cand,
+            )
 
         emit_verdict_telemetry(
             verdict,
@@ -1073,7 +1175,7 @@ class BestOfNGate(BaseGate):
             model=self.model,
             backend=self.backend,
             gate_sink=self.telemetry_sink,
-            call_kwargs=kwargs,
+            call_kwargs=call_kw,
         )
         if verdict.passed:
             return verdict
@@ -1275,17 +1377,53 @@ class BestOfNGate(BaseGate):
         )
 
     def _build_rank_kwargs(self, call_kwargs: Mapping[str, Any]) -> dict[str, Any]:
-        rk: dict[str, Any] = {"save_on_fail": False, "_suppress_telemetry": True}
+        rk: dict[str, Any] = {
+            "save_on_fail": False,
+            "_suppress_telemetry": True,
+            "_bypass_cache": True,
+        }
         if "context" in call_kwargs:
             rk["context"] = call_kwargs["context"]
         return rk
 
+    def _has_active_top_cache(self, call_kwargs: Mapping[str, Any]) -> bool:
+        if call_kwargs.get("_bypass_cache"):
+            return False
+        call_c = call_kwargs.get("cache")
+        if call_c is False:
+            return False
+        if call_c is not None:
+            return True
+        if self.cache is False:
+            return False
+        if self.cache is not None:
+            return True
+        from logitgate.config import get_default_verdict_cache
+
+        return get_default_verdict_cache() is not None
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         entries = _normalize_candidates(candidate)
+        self._ensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
+        has_top_cache = self._has_active_top_cache(kwargs)
         t0 = time.perf_counter()
         pre_verdicts = (
             [
-                self.pre_gate.evaluate(cand, save_on_fail=False, _suppress_telemetry=True)
+                self.pre_gate.evaluate(
+                    cand,
+                    save_on_fail=False,
+                    _suppress_telemetry=True,
+                    _bypass_cache=has_top_cache,
+                )
                 for _, cand in entries
             ]
             if self.pre_gate is not None
@@ -1296,7 +1434,7 @@ class BestOfNGate(BaseGate):
         )
         if short_circuit is not None:
             if not short_circuit.passed:
-                return self._handle_failure_snapshot(candidate, short_circuit, **kwargs)
+                return self._handle_failure_snapshot(candidate, short_circuit, _entries=entries, **kwargs)
             base_v = short_circuit
         else:
             rank_input: Any = {k: cand for k, cand in survivors}
@@ -1305,7 +1443,7 @@ class BestOfNGate(BaseGate):
                 entries, survivors, rejected_keys, rank_v, pre_traces, pre_tokens, t0
             )
             if not base_v.passed:
-                return self._handle_failure_snapshot(candidate, base_v, **kwargs)
+                return self._handle_failure_snapshot(candidate, base_v, _entries=entries, **kwargs)
 
         assert base_v.choice is not None
         winner_idx = next(idx for idx, (k, _) in enumerate(entries) if k == base_v.choice)
@@ -1313,24 +1451,43 @@ class BestOfNGate(BaseGate):
 
         if self.post_gate is not None:
             post_v = self.post_gate.evaluate(
-                winner_cand, save_on_fail=False, _suppress_telemetry=True
+                winner_cand,
+                save_on_fail=False,
+                _suppress_telemetry=True,
+                _bypass_cache=has_top_cache,
             )
             final_v = self._merge_post_verdict(entries, base_v.choice, winner_idx, base_v, post_v, kwargs, t0)
-            return self._handle_failure_snapshot(candidate, final_v, **kwargs)
+            return self._handle_failure_snapshot(candidate, final_v, _entries=entries, **kwargs)
 
         norm_out = kwargs.get("_normalized_out")
         if isinstance(norm_out, list):
             norm_out.append(winner_cand)
-        return self._handle_failure_snapshot(candidate, base_v, **kwargs)
+        return self._handle_failure_snapshot(candidate, base_v, _entries=entries, **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         entries = _normalize_candidates(candidate)
+        await self._aensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
+        has_top_cache = self._has_active_top_cache(kwargs)
         t0 = time.perf_counter()
         pre_verdicts = (
             list(
                 await asyncio.gather(
                     *[
-                        self.pre_gate.aevaluate(cand, save_on_fail=False, _suppress_telemetry=True)
+                        self.pre_gate.aevaluate(
+                            cand,
+                            save_on_fail=False,
+                            _suppress_telemetry=True,
+                            _bypass_cache=has_top_cache,
+                        )
                         for _, cand in entries
                     ]
                 )
@@ -1343,7 +1500,7 @@ class BestOfNGate(BaseGate):
         )
         if short_circuit is not None:
             if not short_circuit.passed:
-                return self._handle_failure_snapshot(candidate, short_circuit, **kwargs)
+                return self._handle_failure_snapshot(candidate, short_circuit, _entries=entries, **kwargs)
             base_v = short_circuit
         else:
             rank_input: Any = {k: cand for k, cand in survivors}
@@ -1352,7 +1509,7 @@ class BestOfNGate(BaseGate):
                 entries, survivors, rejected_keys, rank_v, pre_traces, pre_tokens, t0
             )
             if not base_v.passed:
-                return self._handle_failure_snapshot(candidate, base_v, **kwargs)
+                return self._handle_failure_snapshot(candidate, base_v, _entries=entries, **kwargs)
 
         assert base_v.choice is not None
         winner_idx = next(idx for idx, (k, _) in enumerate(entries) if k == base_v.choice)
@@ -1360,15 +1517,18 @@ class BestOfNGate(BaseGate):
 
         if self.post_gate is not None:
             post_v = await self.post_gate.aevaluate(
-                winner_cand, save_on_fail=False, _suppress_telemetry=True
+                winner_cand,
+                save_on_fail=False,
+                _suppress_telemetry=True,
+                _bypass_cache=has_top_cache,
             )
             final_v = self._merge_post_verdict(entries, base_v.choice, winner_idx, base_v, post_v, kwargs, t0)
-            return self._handle_failure_snapshot(candidate, final_v, **kwargs)
+            return self._handle_failure_snapshot(candidate, final_v, _entries=entries, **kwargs)
 
         norm_out = kwargs.get("_normalized_out")
         if isinstance(norm_out, list):
             norm_out.append(winner_cand)
-        return self._handle_failure_snapshot(candidate, base_v, **kwargs)
+        return self._handle_failure_snapshot(candidate, base_v, _entries=entries, **kwargs)
 
     def select(self, candidates: Any, **kwargs: Any) -> BestOfNResult:
         """Evaluates ``candidates`` through pre-filter, ranking, and post-check, returning `BestOfNResult`."""

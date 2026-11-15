@@ -309,6 +309,7 @@ class JudgeGate(BaseGate):
         *,
         profile: CalibrationProfile | str | Path | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
         from logitgate.telemetry.sinks import resolve_telemetry_sink
@@ -347,6 +348,9 @@ class JudgeGate(BaseGate):
                 loaded_profile,
                 binary=False,
             )
+            from logitgate.cache import resolve_verdict_cache
+
+            resolved_cache = resolve_verdict_cache(cache)
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
@@ -368,6 +372,7 @@ class JudgeGate(BaseGate):
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.save_on_fail = save_on_fail
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
         self._probe_gate: LogitGate | None = None
 
@@ -597,6 +602,7 @@ class JudgeGate(BaseGate):
                     logit_temperature=self.logit_temperature,
                     save_on_fail=False,
                     telemetry_sink=False,
+                    cache=False,
                 )
             return self._probe_gate
 
@@ -625,7 +631,7 @@ class JudgeGate(BaseGate):
         if probe is not None:
             try:
                 probed = self._from_probe(
-                    probe.evaluate(cleaned, _suppress_telemetry=True), cleaned
+                    probe.evaluate(cleaned, _suppress_telemetry=True, _bypass_cache=True), cleaned
                 )
             except (ValueError, RuntimeError, OSError, httpx.HTTPError, BackendError):
                 probed = None
@@ -646,7 +652,8 @@ class JudgeGate(BaseGate):
         if probe is not None:
             try:
                 probed = self._from_probe(
-                    await probe.aevaluate(cleaned, _suppress_telemetry=True), cleaned
+                    await probe.aevaluate(cleaned, _suppress_telemetry=True, _bypass_cache=True),
+                    cleaned,
                 )
             except (ValueError, RuntimeError, OSError, httpx.HTTPError, BackendError):
                 probed = None
@@ -662,6 +669,61 @@ class JudgeGate(BaseGate):
         if self.think is not None and "think" not in gen_kwargs:
             gen_kwargs["think"] = self.think
         return prompt, gen_kwargs
+
+    def _finalize_verdict(
+        self,
+        verdict: Verdict,
+        *,
+        candidate: Any,
+        rubric_override: str | None,
+        call_kwargs: dict[str, Any],
+        _is_cache_hit: bool = False,
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
+        from logitgate.snapshot import persist_failure_snapshot
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        cache_kw = (
+            {**call_kwargs, "rubric_override": rubric_override}
+            if rubric_override is not None
+            else call_kwargs
+        )
+        tel_kw = call_kwargs
+        if _is_cache_hit:
+            raw_tags = call_kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            tel_kw = {**call_kwargs, "telemetry_tags": merged_tags}
+        else:
+            store_cached_verdict(
+                self, candidate, verdict, gate_cache=self.cache, call_kwargs=cache_kw
+            )
+
+        eff_rubric = self.rubric or rubric_override
+        emit_verdict_telemetry(
+            verdict,
+            candidate=candidate,
+            gate_name=self.name,
+            gate_type="JudgeGate",
+            rubric=eff_rubric,
+            model=self.model,
+            backend=self.backend,
+            gate_sink=self.telemetry_sink,
+            call_kwargs=tel_kw,
+            teacher_model=self.model,
+            teacher_passed=verdict.passed,
+        )
+        persist_failure_snapshot(
+            verdict=verdict,
+            candidate=candidate,
+            save_on_fail=call_kwargs.get("save_on_fail", self.save_on_fail),
+            test_name=call_kwargs.get("test_name"),
+            snapshot_dir=call_kwargs.get("snapshot_dir"),
+            gate_type="JudgeGate",
+            gate_config=self.replay_config(),
+            rubric=eff_rubric,
+        )
+        return verdict
 
     def _build_verdict(
         self,
@@ -709,36 +771,34 @@ class JudgeGate(BaseGate):
             reason=text,
             traces=[trace],
         )
-        from logitgate.snapshot import persist_failure_snapshot
-        from logitgate.telemetry.sinks import emit_verdict_telemetry
-
-        eff_rubric = self.rubric or rubric_override
-        emit_verdict_telemetry(
+        return self._finalize_verdict(
             verdict,
             candidate=candidate,
-            gate_name=self.name,
-            gate_type="JudgeGate",
-            rubric=eff_rubric,
-            model=self.model,
-            backend=self.backend,
-            gate_sink=self.telemetry_sink,
+            rubric_override=rubric_override,
             call_kwargs=kw,
-            teacher_model=self.model,
-            teacher_passed=passed,
+            _is_cache_hit=False,
         )
-        persist_failure_snapshot(
-            verdict=verdict,
-            candidate=candidate,
-            save_on_fail=kw.get("save_on_fail", self.save_on_fail),
-            test_name=kw.get("test_name"),
-            snapshot_dir=kw.get("snapshot_dir"),
-            gate_type="JudgeGate",
-            gate_config=self.replay_config(),
-            rubric=eff_rubric,
-        )
-        return verdict
 
     def evaluate(self, candidate: Any, rubric_override: str | None = None, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
+        self._ensure_calibrated()
+        lookup_kw = (
+            {**kwargs, "rubric_override": rubric_override}
+            if rubric_override is not None
+            else kwargs
+        )
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=lookup_kw
+        )
+        if hit is not None:
+            return self._finalize_verdict(
+                hit,
+                candidate=candidate,
+                rubric_override=rubric_override,
+                call_kwargs=kwargs,
+                _is_cache_hit=True,
+            )
         t0 = time.perf_counter()
         prompt, gen_kwargs = self._prepare(candidate, rubric_override, kwargs)
         text, tokens = self.backend.generate(prompt, max_tokens=self.max_tokens, **gen_kwargs)
@@ -755,6 +815,25 @@ class JudgeGate(BaseGate):
         )
 
     async def aevaluate(self, candidate: Any, rubric_override: str | None = None, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
+        await self._aensure_calibrated()
+        lookup_kw = (
+            {**kwargs, "rubric_override": rubric_override}
+            if rubric_override is not None
+            else kwargs
+        )
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=lookup_kw
+        )
+        if hit is not None:
+            return self._finalize_verdict(
+                hit,
+                candidate=candidate,
+                rubric_override=rubric_override,
+                call_kwargs=kwargs,
+                _is_cache_hit=True,
+            )
         t0 = time.perf_counter()
         prompt, gen_kwargs = self._prepare(candidate, rubric_override, kwargs)
         text, tokens = await self.backend.agenerate(prompt, max_tokens=self.max_tokens, **gen_kwargs)

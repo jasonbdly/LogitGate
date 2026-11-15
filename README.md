@@ -455,6 +455,45 @@ with tempfile.TemporaryDirectory() as tmp:
     assert recal_profile.guarantee_holds and recal_profile.fail_threshold < recal_profile.pass_threshold
 ```
 
+### Mid-Stream Token Guardrails (`StreamGuard` / `guard_stream`)
+Verify synchronous or asynchronous LLM token streams (`str`, OpenAI `ChatCompletionChunk`, or Ollama dicts) incrementally at clause-aligned character/chunk strides, cancelling the upstream generator immediately via `.close()` / `await .aclose()` on policy violations (`delivery="optimistic"` for zero-buffering TTFT, or `delivery="buffered"` for zero-leakage verified window release):
+
+```python
+from logitgate import LogitGate, StreamAbortedError, StubBackend, guard_stream
+
+gate = LogitGate("Does the response avoid disclosing API secret keys?", backend=StubBackend(default_prob=0.95))
+
+chunks = ["For security reasons, ", "support agents never share API secret keys over chat."]
+stream = guard_stream(
+    chunks,
+    gate,
+    min_chars=20,
+    stride_chars=32,
+    consecutive_failures=1,
+    delivery="buffered",
+)
+emitted = "".join(stream)
+assert stream.summary is not None and stream.summary.passed
+```
+
+### Content-Addressed Verdict Caching (`VerdictCache`)
+Deduplicate repeated `(gate_config, rubric, model, calibration_profile, candidate)` evaluations in `<0.15 ms` via a thread-safe bounded in-memory LRU and optional `0o600` WAL-mode SQLite store (`cache=VerdictCache(...)`, `configure(cache="verdicts.sqlite3")`, or `LOGITGATE_CACHE_PATH`), while automatically skipping `AMBIGUOUS` abstentions (`cache_ambiguous=False`) and bypassing the cache during `VerdictSnapshot.replay()` / `explain()`:
+
+```python
+import tempfile
+from pathlib import Path
+from logitgate import LogitGate, StubBackend, VerdictCache
+
+with tempfile.TemporaryDirectory() as tmp:
+    with VerdictCache(path=Path(tmp) / "verdicts.sqlite3", max_entries=1024) as cache:
+        gate = LogitGate("Uses parameterized SQL", backend=StubBackend(default_prob=0.95), cache=cache)
+        v1 = gate.evaluate("SELECT id FROM users WHERE id = ?")
+        v2 = gate.evaluate("SELECT id FROM users WHERE id = ?")
+        assert v1.passed == v2.passed
+        assert v2.traces[0].metadata.get("cache_hit") is True
+        assert cache.stats().hits == 1
+```
+
 ### Benchmark Confounder & Cross-Split Leakage Auditing (`v0.8.1`)
 Audit calibration and benchmark datasets in **0 LLM calls** for Pass-vs-Fail length confounders (`length_auroc`), rubric-blind unigram shortcuts (`lexical_loo_accuracy`), split-conformal sample-power floors (`n >= 39`/class for `alpha = 0.05`), and cross-split leakage (`check_split_leakage` via exact and word-3-gram Jaccard shingle indexing):
 
@@ -511,8 +550,9 @@ logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:14b" -
 logitgate rank --rubric "Clean, idiomatic Python" --file draft_a.py --file draft_b.py --ast-syntax --verify-winner --json
 logitgate rank --rubric "Accurate summary" --candidates-json drafts.json --mode round_robin --backend "ollama://localhost:11434/gemma4:e4b"
 
-# Stream structured JSONL verdict telemetry, inspect summaries, recalibrate offline (0 LLM calls), or export SFT/DPO data
-logitgate eval --rubric "Safe SQL" --file query.sql --telemetry-out verdicts.jsonl
+# Stream-verify candidate chunks mid-generation and cache verdicts to SQLite
+logitgate stream --rubric "No secret keys" --file reply.txt --chunk-size 32 --delivery buffered --cache verdicts.sqlite3 --json
+logitgate eval --rubric "Safe SQL" --file query.sql --cache verdicts.sqlite3 --telemetry-out verdicts.jsonl
 logitgate telemetry summary verdicts.jsonl --json
 logitgate telemetry recalibrate verdicts.jsonl --alpha 0.10 --output recalibrated_profile.json
 logitgate telemetry export verdicts.jsonl --format sft_jsonl --output student_sft.jsonl
@@ -531,6 +571,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Zero-token preference ranking (`RankGate`) & contract-filtered `BestOfNGate` pools
   - Production JSONL telemetry micro-overhead & zero-call offline distillation/recalibration
   - Deconfounded `2x2` counterfactual OOD suite (`OOD-96`) & domain-disjoint conformal transfer (`Split A -> Split B`)
+  - Mid-stream token guardrails (`StreamGuard`) & content-addressed `VerdictCache` (`>5,200x` SQLite / `>6,100x` LRU speedup)
   - Falsification boundaries: reasoning depth, 16k-token haystack scaling, and context window (`num_ctx`) squeezing
   - Elastic recurrent layer-looping (NVIDIA Dory-4B, RTX 5090 vs RTX 4070)
 - **[3-Layer Architecture & Deployment Topologies](docs/architecture.md)**:

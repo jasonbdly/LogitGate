@@ -247,11 +247,20 @@ class ASTGate(BaseGate):
         normalize: bool | Callable[[Any], Any] = False,
         save_on_fail: bool | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
         name: str = "ASTGate",
     ) -> None:
+        from logitgate.cache import resolve_verdict_cache
         from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
+        owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+        try:
+            resolved_cache = resolve_verdict_cache(cache)
+        except BaseException:
+            if owns_sink and resolved_sink not in (None, False):
+                resolved_sink.close()  # type: ignore[union-attr]
+            raise
         if min_length is not None and (isinstance(min_length, bool) or not isinstance(min_length, int) or min_length < 0):
             raise ConfigurationError(f"min_length must be a non-negative integer, got {min_length!r}")
         if max_length is not None and (isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 0):
@@ -286,6 +295,7 @@ class ASTGate(BaseGate):
         self.normalize = normalize
         self.save_on_fail = save_on_fail
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
         self._forbidden_res = [(p, _compile_user_pattern(p)) for p in self.forbidden_patterns or []]
         self._required_res = [(s, _compile_user_pattern(s)) for s in self.required_sections or []]
@@ -346,10 +356,18 @@ class ASTGate(BaseGate):
             reason=err,
             traces=[trace],
         )
+        from logitgate.cache import store_cached_verdict
         from logitgate.snapshot import persist_failure_snapshot
         from logitgate.telemetry.sinks import emit_verdict_telemetry
 
         kw = call_kwargs or {}
+        store_cached_verdict(
+            self,
+            candidate,
+            verdict,
+            gate_cache=self.cache,
+            call_kwargs=kw,
+        )
         emit_verdict_telemetry(
             verdict,
             candidate=candidate,
@@ -504,6 +522,40 @@ class ASTGate(BaseGate):
         return candidate
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            from logitgate.snapshot import persist_failure_snapshot
+            from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            hit_kwargs = {**kwargs, "telemetry_tags": merged_tags}
+            emit_verdict_telemetry(
+                hit,
+                candidate=candidate,
+                gate_name=self.name,
+                gate_type="ASTGate",
+                gate_sink=self.telemetry_sink,
+                call_kwargs=hit_kwargs,
+            )
+            if not hit.passed:
+                failure_code = hit.traces[0].failure_code if hit.traces else None
+                persist_failure_snapshot(
+                    verdict=hit,
+                    candidate=candidate,
+                    save_on_fail=bool(kwargs.get("save_on_fail", self.save_on_fail)),
+                    test_name=kwargs.get("test_name"),
+                    snapshot_dir=kwargs.get("snapshot_dir"),
+                    gate_type="ASTGate",
+                    gate_config={"name": self.name, "failure_code": failure_code},
+                )
+            return hit
+
         t0 = time.perf_counter()
         orig_candidate = candidate
         raw_text_without_think = (
@@ -859,21 +911,24 @@ class ASTGate(BaseGate):
                         candidate=orig_candidate, call_kwargs=kwargs,
                     )
 
+        if (
+            self.normalize is True
+            and raw_text_without_think is not None
+            and self.required_sections
+            and not self.syntax
+            and self.json_schema is None
+            and not self.acyclic_dag
+            and not self.validators
+        ):
+            normalized_val: Any = raw_text_without_think.strip()
+        elif extracted_json_span is not None and isinstance(candidate, str):
+            normalized_val = extracted_json_span
+        else:
+            normalized_val = candidate
+
+        has_norm = bool(self.normalize) or normalized_val is not orig_candidate
         if isinstance(norm_out := kwargs.get("_normalized_out"), list):
-            if (
-                self.normalize is True
-                and raw_text_without_think is not None
-                and self.required_sections
-                and not self.syntax
-                and self.json_schema is None
-                and not self.acyclic_dag
-                and not self.validators
-            ):
-                norm_out.append(raw_text_without_think.strip())
-            elif extracted_json_span is not None and isinstance(candidate, str):
-                norm_out.append(extracted_json_span)
-            else:
-                norm_out.append(candidate)
+            norm_out.append(normalized_val)
 
         latency = (time.perf_counter() - t0) * 1000.0
         trace = LayerTrace(
@@ -890,8 +945,18 @@ class ASTGate(BaseGate):
             reason="All deterministic AST and contract checks passed.",
             traces=[trace],
         )
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
 
+        store_cached_verdict(
+            self,
+            orig_candidate,
+            verdict,
+            gate_cache=self.cache,
+            call_kwargs=kwargs,
+            has_normalized=has_norm,
+            normalized_artifact=normalized_val if has_norm else None,
+        )
         return emit_verdict_telemetry(
             verdict,
             candidate=orig_candidate,

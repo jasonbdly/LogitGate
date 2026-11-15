@@ -8,6 +8,11 @@ exceptions also subclass standard Python built-ins (such as `ValueError` or
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from logitgate.models import Verdict
+
 
 class LogitGateError(Exception):
     """Base exception for all LogitGate errors."""
@@ -56,3 +61,42 @@ class TelemetryWarning(UserWarning):
 
 class ContractViolationError(LogitGateError, ValueError):
     """Raised when an AST or ContractGate encounters an unrecoverable structural violation."""
+
+
+class CacheWarning(UserWarning):
+    """Emitted when a persistent VerdictCache encounters a non-fatal storage warning."""
+
+
+class StreamAbortedError(LogitGateError, RuntimeError):
+    """Raised when `StreamGuard` aborts a token stream due to a failing guardrail check.
+
+    Attributes:
+        verdict: The `Verdict` that triggered the stream termination.
+        partial_text: Full accumulated stream text observed up to the abort point.
+        yielded_text: Text already delivered downstream before termination (empty or shorter
+            than ``partial_text`` in ``delivery='buffered'`` mode).
+        chunk_index: Zero-based index of the chunk at which the abort occurred.
+        is_final: ``True`` if aborted during the end-of-stream check rather than mid-stream.
+    """
+
+    def __init__(
+        self,
+        verdict: Verdict,
+        *,
+        partial_text: str,
+        yielded_text: str = "",
+        chunk_index: int = 0,
+        is_final: bool = False,
+        message: str | None = None,
+    ) -> None:
+        stage = "final" if is_final else "mid-stream"
+        detail = verdict.reason or verdict.status.value
+        msg = message or (
+            f"Stream aborted at chunk {chunk_index} ({stage}, {len(partial_text)} chars): {detail}"
+        )
+        super().__init__(msg)
+        self.verdict = verdict
+        self.partial_text = partial_text
+        self.yielded_text = yielded_text
+        self.chunk_index = chunk_index
+        self.is_final = is_final

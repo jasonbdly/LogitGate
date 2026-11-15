@@ -33,6 +33,8 @@ EXCLUDED_INTERNAL_KWARGS: frozenset[str] = frozenset(
         "_suppress_telemetry",
         "telemetry_sink",
         "telemetry_tags",
+        "cache",
+        "_bypass_cache",
     }
 )
 

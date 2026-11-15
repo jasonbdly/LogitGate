@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from logitgate.cache import VerdictCache
     from logitgate.telemetry.sinks import TelemetrySink
 
 
@@ -25,6 +26,10 @@ class _ConfigState:
         self.owned_telemetry_sink: TelemetrySink | None = None
         self.env_telemetry_path: str | None = None
         self.env_telemetry_sink: TelemetrySink | None = None
+        self.cache: VerdictCache | Literal[False] | None = None
+        self.owned_cache: VerdictCache | None = None
+        self.env_cache_path: str | None = None
+        self.env_cache: VerdictCache | None = None
 
     def close_owned_telemetry(self) -> None:
         if self.owned_telemetry_sink is not None:
@@ -35,8 +40,18 @@ class _ConfigState:
             self.env_telemetry_sink = None
         self.env_telemetry_path = None
 
+    def close_owned_cache(self) -> None:
+        if self.owned_cache is not None:
+            self.owned_cache.close()
+            self.owned_cache = None
+        if self.env_cache is not None:
+            self.env_cache.close()
+            self.env_cache = None
+        self.env_cache_path = None
+
     def reset(self) -> None:
         self.close_owned_telemetry()
+        self.close_owned_cache()
         self.backend = None
         self.model = None
         self.pass_threshold = None
@@ -47,6 +62,7 @@ class _ConfigState:
         self.save_failures = None
         self.snapshot_dir = None
         self.telemetry_sink = None
+        self.cache = None
 
 
 _config_lock = threading.RLock()
@@ -251,6 +267,35 @@ class _DefaultsMeta(type):
     def telemetry_sink(cls, val: TelemetrySink | str | Path | bool | None) -> None:
         _set_telemetry_sink(val)
 
+    @property
+    def cache(cls) -> VerdictCache | None:
+        return get_default_verdict_cache()
+
+    @cache.setter
+    def cache(cls, val: VerdictCache | str | Path | Literal[False] | None) -> None:
+        _set_verdict_cache(val)
+
+
+def _set_verdict_cache(val: VerdictCache | str | Path | Literal[False] | None) -> None:
+    if val is None:
+        with _config_lock:
+            if _state.owned_cache is not None:
+                _state.owned_cache.close()
+                _state.owned_cache = None
+            _state.cache = None
+        return
+    from logitgate.cache import VerdictCache, resolve_verdict_cache
+
+    owns_new = isinstance(val, (str, Path))
+    resolved = resolve_verdict_cache(val)
+    with _config_lock:
+        if _state.owned_cache is not None and _state.owned_cache is not resolved:
+            _state.owned_cache.close()
+            _state.owned_cache = None
+        _state.cache = resolved
+        if owns_new and isinstance(resolved, VerdictCache):
+            _state.owned_cache = resolved
+
 
 def _set_telemetry_sink(val: TelemetrySink | str | Path | bool | None) -> None:
     if val is None:
@@ -288,6 +333,7 @@ def configure(
     save_failures: bool | None = None,
     snapshot_dir: str | None = None,
     telemetry_sink: TelemetrySink | str | Path | bool | None = None,
+    cache: VerdictCache | str | Path | Literal[False] | None = None,
 ) -> None:
     """Configures process-wide defaults for LogitGate gates and backends.
 
@@ -304,6 +350,8 @@ def configure(
         snapshot_dir: Directory path where failure snapshots are written.
         telemetry_sink: Optional process-wide `TelemetrySink` instance, JSONL file path,
             or ``False`` to suppress environment-configured telemetry.
+        cache: Optional process-wide `VerdictCache` instance, SQLite file path, or ``False``
+            to suppress environment-configured caching.
 
     Raises:
         ConfigurationError: If any supplied threshold, temperature, boolean flag, or
@@ -325,6 +373,19 @@ def configure(
 
         owns_new_sink = isinstance(telemetry_sink, (str, Path))
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
+
+    owns_new_cache = False
+    resolved_cache: VerdictCache | Literal[False] | None = None
+    if cache is not None:
+        try:
+            from logitgate.cache import resolve_verdict_cache
+
+            owns_new_cache = isinstance(cache, (str, Path))
+            resolved_cache = resolve_verdict_cache(cache)
+        except BaseException:
+            if owns_new_sink and resolved_sink is not False and resolved_sink is not None:
+                resolved_sink.close()
+            raise
 
     try:
         with _config_lock:
@@ -362,9 +423,18 @@ def configure(
                 _state.telemetry_sink = resolved_sink
                 if owns_new_sink and resolved_sink is not False and resolved_sink is not None:
                     _state.owned_telemetry_sink = resolved_sink
+            if cache is not None:
+                if _state.owned_cache is not None and _state.owned_cache is not resolved_cache:
+                    _state.owned_cache.close()
+                    _state.owned_cache = None
+                _state.cache = resolved_cache
+                if owns_new_cache and resolved_cache is not False and resolved_cache is not None:
+                    _state.owned_cache = resolved_cache
     except BaseException:
         if owns_new_sink and resolved_sink is not False and resolved_sink is not None:
             resolved_sink.close()
+        if owns_new_cache and resolved_cache is not False and resolved_cache is not None:
+            resolved_cache.close()
         raise
 
 
@@ -477,3 +547,30 @@ def get_default_telemetry_sink() -> TelemetrySink | None:
         _state.env_telemetry_path = env_path
         _state.env_telemetry_sink = sink
         return sink
+
+
+def get_default_verdict_cache() -> VerdictCache | None:
+    """Resolves default `VerdictCache` via `configure()` or ``LOGITGATE_CACHE_PATH``."""
+    if _state.cache is None and "LOGITGATE_CACHE_PATH" not in os.environ:
+        return None
+    with _config_lock:
+        if _state.cache is False:
+            return None
+        if _state.cache is not None:
+            return _state.cache
+        env_raw = os.environ.get("LOGITGATE_CACHE_PATH")
+        if env_raw is None or not env_raw.strip():
+            return None
+        env_path = env_raw.strip()
+        if _state.env_cache is not None and _state.env_cache_path == env_path:
+            return _state.env_cache
+        if _state.env_cache is not None:
+            _state.env_cache.close()
+            _state.env_cache = None
+            _state.env_cache_path = None
+        from logitgate.cache import VerdictCache
+
+        cache = VerdictCache(path=env_path)
+        _state.env_cache_path = env_path
+        _state.env_cache = cache
+        return cache

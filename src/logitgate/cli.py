@@ -98,6 +98,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Optional JSONL path to append structured verdict telemetry",
     )
     eval_parser.add_argument(
+        "--cache",
+        type=str,
+        default=None,
+        help="Optional SQLite VerdictCache path (or 'memory' for in-process LRU)",
+    )
+    eval_parser.add_argument(
         "--json",
         action="store_true",
         help="Output verdict and traces in JSON format",
@@ -260,6 +266,12 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Path to a CalibrationProfile JSON file for LogitGate / cascade modes",
+    )
+    bench_parser.add_argument(
+        "--cache",
+        type=str,
+        default=None,
+        help="Optional SQLite VerdictCache path (or 'memory' for in-process LRU across repeats)",
     )
     bench_parser.add_argument(
         "--audit-only",
@@ -452,6 +464,127 @@ def create_parser() -> argparse.ArgumentParser:
         help="Keep duplicate (rubric, candidate) escalations during fitting",
     )
     tel_recal.add_argument("--json", action="store_true", help="Output CalibrationProfile as JSON")
+
+    stream_parser = subparsers.add_parser(
+        "stream",
+        help="Verify a token/text stream mid-generation with StreamGuard early abort or buffered delivery",
+    )
+    stream_parser.add_argument(
+        "--rubric",
+        required=True,
+        help="Evaluation rubric verified periodically against the growing stream prefix",
+    )
+    stream_parser.add_argument(
+        "--candidate",
+        type=str,
+        default=None,
+        help="Candidate text to simulate streaming in chunks",
+    )
+    stream_parser.add_argument(
+        "--file",
+        type=str,
+        default=None,
+        help="Path to file to stream in chunks (falls back to stdin when piped)",
+    )
+    stream_parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=48,
+        help="Simulated chunk size in characters (default: 48)",
+    )
+    stream_parser.add_argument(
+        "--min-chars",
+        type=int,
+        default=80,
+        help="Minimum accumulated characters before first mid-stream check (default: 80)",
+    )
+    stream_parser.add_argument(
+        "--stride-chars",
+        type=int,
+        default=160,
+        help="Character stride between consecutive mid-stream checks (default: 160)",
+    )
+    stream_parser.add_argument(
+        "--delivery",
+        choices=("optimistic", "buffered"),
+        default="optimistic",
+        help="Chunk delivery strategy: 'optimistic' (zero-buffer) or 'buffered' (zero-leakage)",
+    )
+    stream_parser.add_argument(
+        "--consecutive-failures",
+        type=int,
+        default=1,
+        help="Consecutive failing checkpoints required before aborting mid-stream (default: 1)",
+    )
+    stream_parser.add_argument(
+        "--no-clause-boundary",
+        action="store_true",
+        help="Disable clause/sentence boundary alignment for mid-stream checks",
+    )
+    stream_parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Pass probability threshold",
+    )
+    stream_parser.add_argument(
+        "--fail-threshold",
+        type=float,
+        default=None,
+        help="Fail probability threshold",
+    )
+    stream_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Optional CalibrationProfile JSON path",
+    )
+    stream_parser.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="Backend specifier (defaults to LOGITGATE_BACKEND or stub://default)",
+    )
+    stream_parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Optional model name for backend",
+    )
+    stream_parser.add_argument(
+        "--judge-backend",
+        type=str,
+        default=None,
+        help="Optional Tier-2 JudgeGate backend specifier for cascaded final verification",
+    )
+    stream_parser.add_argument(
+        "--judge-model",
+        type=str,
+        default=None,
+        help="Optional Tier-2 JudgeGate model name",
+    )
+    stream_parser.add_argument(
+        "--cache",
+        type=str,
+        default=None,
+        help="Optional SQLite VerdictCache path (or 'memory' for in-process LRU)",
+    )
+    stream_parser.add_argument(
+        "--telemetry-out",
+        type=str,
+        default=None,
+        help="Optional JSONL path to append structured stream telemetry",
+    )
+    stream_parser.add_argument(
+        "--quiet-stream",
+        action="store_true",
+        help="Suppress printing yielded text before summary output",
+    )
+    stream_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output StreamGuardSummary and yielded text in JSON format",
+    )
 
     return parser
 
@@ -979,6 +1112,11 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
         sys.stderr.write(line + "\n")
 
     try:
+        cache_arg: Any = (
+            True
+            if getattr(args, "cache", None) == "memory"
+            else (args.cache if getattr(args, "cache", None) is not None else False)
+        )
         report = run_benchmark(
             cases,
             backend=args.backend,
@@ -992,6 +1130,7 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             judge_think=args.judge_think,
             cascade_trigger=args.cascade_trigger,
             profile=args.profile,
+            cache=cache_arg,
             dataset_label=label,
             progress=None if (args.quiet or args.json) else progress,
         )
@@ -1028,10 +1167,20 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             sys.stderr.write("Error: Either --candidate or --file must be specified.\n")
             return EXIT_FAILED
 
+    from logitgate.cache import VerdictCache
     from logitgate.telemetry.sinks import JsonlTelemetrySink
 
     sink = JsonlTelemetrySink(args.telemetry_out) if getattr(args, "telemetry_out", None) else None
+    raw_cache_arg = getattr(args, "cache", None)
+    cache_obj: VerdictCache | None = None
     try:
+        if raw_cache_arg is not None:
+            cache_obj = (
+                VerdictCache()
+                if raw_cache_arg == "memory"
+                else VerdictCache(path=raw_cache_arg)
+            )
+        has_ast = bool(args.ast_syntax or getattr(args, "normalize", False))
         logit_gate = LogitGate(
             rubric=args.rubric,
             backend=args.backend,
@@ -1039,17 +1188,23 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             pass_threshold=args.threshold,
             fail_threshold=args.fail_threshold,
             profile=args.profile,
-            telemetry_sink=sink if not (args.ast_syntax or getattr(args, "normalize", False)) else None,
+            telemetry_sink=sink if not has_ast else None,
+            cache=cache_obj if not has_ast else False,
         )
         try:
             evaluator: Cascade | LogitGate
-            if args.ast_syntax or getattr(args, "normalize", False):
+            if has_ast:
                 evaluator = Cascade(
                     [
-                        ASTGate(syntax=args.ast_syntax, normalize=getattr(args, "normalize", False)),
+                        ASTGate(
+                            syntax=args.ast_syntax,
+                            normalize=getattr(args, "normalize", False),
+                            cache=False,
+                        ),
                         logit_gate,
                     ],
                     telemetry_sink=sink,
+                    cache=cache_obj,
                 )
             else:
                 evaluator = logit_gate
@@ -1058,6 +1213,8 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         finally:
             logit_gate.backend.close()
     finally:
+        if cache_obj is not None:
+            cache_obj.close()
         if sink is not None:
             sink.close()
 
@@ -1318,6 +1475,127 @@ def _cmd_telemetry(args: argparse.Namespace) -> int:
     return EXIT_FAILED
 
 
+def _cmd_stream(args: argparse.Namespace) -> int:
+    import json
+
+    from logitgate.cache import VerdictCache
+    from logitgate.gates.judge_gate import JudgeGate
+    from logitgate.streaming import StreamGuard
+    from logitgate.telemetry.sinks import JsonlTelemetrySink
+
+    if args.chunk_size < 1:
+        sys.stderr.write("Error: --chunk-size must be >= 1\n")
+        return EXIT_FAILED
+
+    raw_text: str | None = None
+    if args.file is not None:
+        try:
+            with open(args.file, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            sys.stderr.write(f"Error reading file '{args.file}': {sanitize_terminal_text(str(e))}\n")
+            return EXIT_FAILED
+    elif args.candidate is not None:
+        raw_text = args.candidate
+    elif not sys.stdin.isatty():
+        try:
+            raw_text = sys.stdin.read()
+        except (OSError, UnicodeDecodeError) as e:
+            sys.stderr.write(f"Error reading stdin: {sanitize_terminal_text(str(e))}\n")
+            return EXIT_FAILED
+    else:
+        sys.stderr.write("Error: Either --candidate, --file, or piped stdin must be provided.\n")
+        return EXIT_FAILED
+
+    chunks = [
+        raw_text[i : i + args.chunk_size]
+        for i in range(0, len(raw_text), args.chunk_size)
+    ] if raw_text else []
+
+    sink = JsonlTelemetrySink(args.telemetry_out) if getattr(args, "telemetry_out", None) else None
+    cache_obj: VerdictCache | None = None
+    judge_gate: JudgeGate | None = None
+    try:
+        if args.cache is not None:
+            cache_obj = VerdictCache() if args.cache == "memory" else VerdictCache(path=args.cache)
+        has_judge = bool(args.judge_backend or args.judge_model)
+        logit_gate = LogitGate(
+            rubric=args.rubric,
+            backend=args.backend,
+            model=args.model,
+            pass_threshold=args.threshold,
+            fail_threshold=args.fail_threshold,
+            profile=args.profile,
+            save_on_fail=False,
+            telemetry_sink=sink if not has_judge else False,
+            cache=cache_obj if not has_judge else False,
+        )
+        try:
+            target_gate: Cascade | LogitGate
+            if has_judge:
+                judge_gate = JudgeGate(
+                    rubric=None,
+                    backend=args.judge_backend or args.backend,
+                    model=args.judge_model or args.model,
+                    trigger="on_ambiguous_only",
+                    save_on_fail=False,
+                    telemetry_sink=False,
+                    cache=False,
+                )
+                target_gate = Cascade(
+                    [logit_gate, judge_gate],
+                    telemetry_sink=sink,
+                    cache=cache_obj,
+                )
+            else:
+                target_gate = logit_gate
+
+            guard = StreamGuard(
+                target_gate,
+                min_chars=args.min_chars,
+                stride_chars=args.stride_chars,
+                clause_boundary=not args.no_clause_boundary,
+                consecutive_failures=args.consecutive_failures,
+                delivery=args.delivery,
+                raise_on_abort=False,
+                telemetry_sink=sink,
+            )
+            stream_handle = guard.stream(chunks)
+            yielded_parts = list(stream_handle)
+            summary = stream_handle.summary
+            assert summary is not None
+        finally:
+            if judge_gate is not None:
+                judge_gate.backend.close()
+            logit_gate.backend.close()
+    finally:
+        if cache_obj is not None:
+            cache_obj.close()
+        if sink is not None:
+            sink.close()
+
+    yielded_text = "".join(yielded_parts)
+    if args.json:
+        payload = {
+            **summary.to_dict(),
+            "yielded_text": yielded_text,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        if not args.quiet_stream and yielded_text:
+            print(sanitize_terminal_text(yielded_text))
+            print("-" * 60)
+        status_label = "PASSED" if summary.passed else ("ABORTED_MID_STREAM" if summary.aborted_mid_stream else "FAILED")
+        print(f"Stream Status: {status_label}")
+        print(f"Delivery Mode: {args.delivery}")
+        print(f"Chunks: {summary.chunks_yielded}/{summary.total_chunks_seen} yielded ({summary.chars_yielded}/{summary.chars_seen} chars)")
+        print(f"Checks Executed: {summary.checks_executed} ({summary.total_gate_latency_ms:.2f}ms total gate latency)")
+        if summary.final_verdict and summary.final_verdict.reason:
+            print(f"Reason: {sanitize_terminal_text(summary.final_verdict.reason)}")
+
+    return EXIT_OK if summary.passed else EXIT_FAILED
+
+
 _COMMANDS: dict[str, Any] = {
     "eval": _cmd_eval,
     "calibrate": _cmd_calibrate,
@@ -1325,6 +1603,7 @@ _COMMANDS: dict[str, Any] = {
     "benchmark": _cmd_benchmark,
     "rank": _cmd_rank,
     "telemetry": _cmd_telemetry,
+    "stream": _cmd_stream,
 }
 
 

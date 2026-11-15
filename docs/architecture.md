@@ -148,3 +148,37 @@ Production deployments need continuous observability over fast-path rates, abste
   - `DistillationSink` (with bounded SHA-256 `(rubric, candidate)` deduplication) and offline `load_distillation_records()` classify escalated evaluations into four discrepancy buckets: `false_accept_caught`, `false_reject_overturned`, `polarity_flip` ($L_{\text{fwd}} \cdot L_{\text{rev}} < 0$), and `ambiguous_resolved`.
   - Because `TelemetryRecord` and `DistillationRecord` preserve raw Layer-1 `(student_forward_log_odds, student_reverse_log_odds)` alongside `teacher_passed`, `recalibrate_from_telemetry()` fits an updated temperature + split-conformal `CalibrationProfile` in **milliseconds with zero LLM calls** (best paired with a periodic full-audit shadow burn-in sample so non-conformity scores remain exchangeable across the full input distribution).
   - `export_distillation_dataset()` compiles collected discrepancies into `"calibration_jsonl"` (compatible directly with `logitgate calibrate --dataset`), `"sft_jsonl"` (`2x` symmetric `A/B` + `B/A` swapped prompt/completion pairs so LoRA fine-tuning never re-introduces positional slot bias), or `"dpo_jsonl"` preference triples.
+
+---
+
+## Mid-Stream Token Guardrails (`StreamGuard`, `guard_stream`, `aguard_stream`)
+
+Post-hoc verification waits for an upstream generator to emit 100% of its tokens before running a check — wasting downstream generation compute on early violations and either delaying time-to-first-token (TTFT) by the entire response duration or leaking violating tokens to the client. `StreamGuard` (`logitgate.streaming`) wraps synchronous (`Iterable`) and asynchronous (`AsyncIterable`) token streams (`str`, OpenAI `ChatCompletionChunk`, Ollama dicts, or custom `chunk_extractor`):
+
+- **Clause-Aligned Stride Scheduling & Exact-Prefix Final Deduplication**:
+  - Checkpoints fire once `chars_seen >= min_chars` and `chars_delta >= stride_chars` (or `chunks_delta >= stride_chunks`), waiting up to `max_wait_chars` for a natural clause terminator (`.`, `!`, `?`, `;`, `:`, `\n`, `}`, `]`) when `clause_boundary=True` to avoid evaluating mid-identifier or mid-negation fragments.
+  - If the final stream chunk already triggered a checkpoint at `chars_seen`, `final_check=True` reuses that `Verdict` without issuing a redundant backend call.
+- **Conformal Layer-1 Prefix Checks vs. Hysteresis (`consecutive_failures`)**:
+  - Calibrated standalone `LogitGate` naturally maps incomplete or ambiguous prefixes into its `(fail_threshold, pass_threshold)` `AMBIGUOUS` band (`0.0%` false-alarm mid-stream abort rate on `streaming_trajectories_32.json` even at `consecutive_failures=1`), aborting only when a prefix decisively enters `<= fail_threshold`.
+  - When wrapping a `Cascade(LogitGate >> JudgeGate)` directly around a stream, incomplete prefixes that score `AMBIGUOUS` at Layer 1 escalate to Layer 2 mid-sentence; setting `consecutive_failures=2` applies two-strike hysteresis so transient prefix ambiguity resolves cleanly once the completing clause arrives.
+- **Delivery Modes & Upstream Generator Cancellation**:
+  - `delivery="optimistic"` yields chunks immediately (`0` buffering latency) and cancels the upstream generator via `.close()` / `await .aclose()` (`close_upstream_on_abort=True`) as soon as a violation triggers, saving **44%–51%** of downstream generated characters on early-onset violations.
+  - `delivery="buffered"` holds unverified chunks in a bounded window (`max_buffer_chars=1_048_576`) and flushes them **only** when a checkpoint returns `verdict.passed == True` (`fail_streak == 0`), holding across both `FAILED` strikes and `AMBIGUOUS` uncertainty bands to guarantee **zero violating-character leakage (`0.0%`)** upon abort.
+  - Single-record stream telemetry (`emit_verdict_telemetry` with `stream_guard=True`, `aborted_mid_stream`, `abort_chunk_index`, and `stream_checks`) emits once per stream while suppressing intermediate probe spam.
+
+---
+
+## Deterministic Content-Addressed Verdict Caching (`VerdictCache`)
+
+Repeated evaluations in CI suites, RAG regression harnesses, `MultiRubricGate` reruns, and agent retry loops often re-verify identical `(gate, candidate)` pairs. `VerdictCache` (`logitgate.cache`) provides sub-`0.15 ms` content-addressed memoization across `ASTGate`, `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `RankGate`, `BestOfNGate`, `JudgeGate`, and `Cascade`:
+
+- **Secret-Free Canonical Fingerprinting (`lgcache:v1:<sha256>`)**:
+  - Keys hash the gate class, routing traits, rubric/question/options/context (including call-time `rubric_override` on `JudgeGate` and `context` overrides on `RankGate`/`BestOfNGate`), calibrated temperature and thresholds (`CalibrationProfile` values excluding timestamps), backend protocol/model/options/LoRA adapter (stripping `api_key` and auth headers), and canonicalized candidate payload.
+  - `Cascade` stabilizes any pending lazy BYO calibration on child gates *before* computing the composite key and passes `_bypass_cache=True` to child gates sharing the top-level cache so each evaluation writes one composite entry without double-storing child stages.
+- **Safety Invariants (`cache_ambiguous=False`, `_normalized_out` Preservation, Replay Bypass)**:
+  - `DecisionStatus.AMBIGUOUS` abstentions are **not cached** by default (`cache_ambiguous=False`) so transient uncertainty or uncalibrated abstentions never lock out downstream escalation.
+  - Normalized artifacts produced by `ASTGate(normalize=True)` or `RankGate`/`BestOfNGate` winner selection are persisted alongside the `Verdict` so `Cascade` pipelines (`ASTGate(normalize=True) >> LogitGate` and `BestOfNGate >> LogitGate`) preserve exact `_normalized_out` semantics across both RAM and SQLite reloads.
+  - `VerdictSnapshot.replay()` / `explain()` and `run_benchmark()` warmups pass `_bypass_cache=True` automatically so live diagnostic replays are never short-circuited by cached verdicts.
+- **Thread-Safe LRU + Hardened WAL-Mode SQLite Persistence**:
+  - Combines an in-process `RLock`-guarded `OrderedDict` LRU (`max_entries`, optional `ttl_seconds`) with an optional `0o600` WAL-mode SQLite backing store (`O_NOFOLLOW` symlink rejection, `256 MiB` existing-file cap, and `max_disk_entries` FIFO/expiry pruning), sustaining **`>6,100` evaluations/sec** across 8 threads (`~0.11 ms` RAM hit, `~0.14 ms` cold-RAM SQLite reload hit).
+

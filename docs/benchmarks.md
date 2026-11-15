@@ -656,7 +656,56 @@ Evaluated across `24` stratified OOD items (`1` complete `2x2` quad from each of
 
 ---
 
-### 11. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 11. Mid-Stream Token Guardrails (`StreamGuard`) & Content-Addressed `VerdictCache` (`v0.9.0`)
+
+#### A. Mid-Stream Verification Across `streaming_trajectories_32.json` (`4` Trajectory Archetypes)
+
+Evaluated across [`benchmarks/data/streaming_trajectories_32.json`](../benchmarks/data/streaming_trajectories_32.json) (`32` streams sub-tokenized into `~18`-char SSE deltas across 4 balanced 8-item classes: `clean_throughout`, `false_alarm_prefix_resolved_safely` where early tokens quote prohibited code/clinical/SQL strings before prohibiting them, `early_onset_violation`, and `late_onset_pivot_violation`). All models use their pre-fitted **Split-A (`cal_distill_80.json`, `alpha = 0.05`) `CalibrationProfile`** with fixed, untuned guard parameters (`min_chars=40, stride_chars=48, max_wait_chars=72, clause_boundary=True`):
+
+| Model & Gate Architecture | Streaming Regime | Overall Acc (`N=32`) | False-Alarm Mid-Abort (`N=8`) | Early-Violation Mid-Abort (`N=8`) | Early Upstream Char Savings | Violating Char Leak Rate | Checks / Stream | Mean Gate Latency |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`gemma4:e4b` `LogitGate`** (RTX 4070) | Post-Hoc Full Stream | `29/32 (90.6%)` | `0.0%` | `0.0%` | `0.0%` | `0.0%` *(100% wait)* | `1.00` | `164.3 ms` |
+| | `StreamGuard` (`optimistic`, `k=1`) | `29/32 (90.6%)` | **`0.0%`** | **`100.0%`** | **`44.5%`** | `60.1%` | `2.28` | `347.8 ms` (`169.0 ms` early) |
+| | `StreamGuard` (`optimistic`, `k=2`) | `29/32 (90.6%)` | **`0.0%`** | `62.5%` | `8.4%` | `93.7%` | `2.62` | `404.8 ms` |
+| | **`StreamGuard` (`buffered`, `k=1`)** | **`29/32 (90.6%)`** | **`0.0%`** | **`100.0%`** | **`44.5%`** | **`0.0%` (`0/1,613`)** | `2.25` | `344.5 ms` (`167.5 ms` early) |
+| **`gemma4:e4b >> gemma4:26b` `Cascade`** | Post-Hoc Full Stream | **`32/32 (100.0%)`** | `0.0%` | `0.0%` | `0.0%` | `0.0%` *(100% wait)* | `1.00` | `244.4 ms` |
+| | `StreamGuard` (`optimistic`, `k=1`) | `26/32 (81.2%)` | `37.5%` | `100.0%` | `51.3%` | `42.9%` | `1.78` | `773.3 ms` |
+| | **`StreamGuard` (`optimistic`, `k=2`)** | **`31/32 (96.9%)`** | **`12.5%`** | `62.5%` | `8.4%` | `93.1%` | `2.56` | `1,103.9 ms` |
+| | `StreamGuard` (`buffered`, `k=1`) | `26/32 (81.2%)` | `37.5%` | `100.0%` | `44.5%` | `1.9%` | `1.81` | `789.7 ms` |
+| **`qwen2.5:14b` `LogitGate`** (RTX 4070) | Post-Hoc Full Stream | **`30/32 (93.8%)`** | `0.0%` | `0.0%` | `0.0%` | `0.0%` *(100% wait)* | `1.00` | `178.2 ms` |
+| | `StreamGuard` (`optimistic`, `k=1`) | **`30/32 (93.8%)`** | **`0.0%`** | **`100.0%`** | **`51.3%`** | `56.4%` | `2.28` | `387.8 ms` |
+| | `StreamGuard` (`optimistic`, `k=2`) | **`30/32 (93.8%)`** | **`0.0%`** | `75.0%` | `9.1%` | `93.1%` | `2.59` | `442.3 ms` |
+| | **`StreamGuard` (`buffered`, `k=1`)** | `29/32 (90.6%)` | **`0.0%`** | **`100.0%`** | **`51.3%`** | **`0.0%` (`0/1,613`)** | `2.28` | `388.4 ms` |
+| **`qwen2.5:14b >> gemma4:26b` `Cascade`** | Post-Hoc Full Stream | **`32/32 (100.0%)`** | `0.0%` | `0.0%` | `0.0%` | `0.0%` *(100% wait)* | `1.00` | `270.5 ms` |
+| | `StreamGuard` (`optimistic`, `k=1`) | `26/32 (81.2%)` | `37.5%` | `100.0%` | `51.3%` | `42.9%` | `1.78` | `815.6 ms` |
+| | **`StreamGuard` (`optimistic`, `k=2`)** | **`32/32 (100.0%)`** | **`0.0%`** | `75.0%` | `9.1%` | `92.6%` | `2.56` | `1,118.9 ms` |
+| | `StreamGuard` (`buffered`, `k=1`) | `26/32 (81.2%)` | `37.5%` | `100.0%` | `51.3%` | **`0.0%` (`0/1,613`)** | `1.78` | `771.4 ms` (`166.7 ms` early) |
+
+*Key empirical findings:*
+- **Conformal Abstention Prevents Mid-Sentence False Alarms at Layer 1:** On standalone conformal `LogitGate` (`gemma4:e4b` and `qwen2.5:14b`), suspicious-looking incomplete prefixes (`false_alarm_prefix_resolved_safely`) land inside the `(tau_reject, tau_accept)` `AMBIGUOUS` band rather than `<= tau_reject`, producing **`0.0%` (`0/8`) false-alarm mid-stream aborts** even at `consecutive_failures=1` while catching **`100.0%` (`8/8`) of `early_onset_violation` streams** at the first checkpoint (`~168 ms`) and cancelling **`44.5%–51.3%`** of downstream token generation via `.close()`.
+- **Why Hysteresis (`k=2`) Matters for Generative Cascades:** When `Cascade(LogitGate >> JudgeGate)` runs on incomplete mid-stream prefixes with `k=1`, Layer-1 `AMBIGUOUS` escalates truncated half-clauses to `JudgeGate`, which rejects `37.5%` of false-alarm prefixes prematurely. Raising `consecutive_failures=2` restores **`96.9%` (`31/32`)** accuracy on `gemma4:e4b >> gemma4:26b` and **`100.0%` (`32/32`, `0.0%` false-alarm aborts)** on `qwen2.5:14b >> gemma4:26b`.
+- **Zero-Leakage Verified Window Delivery (`delivery="buffered"`):** Holding pending chunks across `AMBIGUOUS` checkpoints until a `PASSED` verification flushes them eliminates **`100%` of violating-character leakage (`0 / 1,613` chars leaked)** on standalone `LogitGate` (`gemma4:e4b` and `qwen2.5:14b`) and `qwen2.5:14b >> gemma4:26b` while retaining full **`44.5%–51.3%`** upstream generation cancellation on early violations.
+
+#### B. Content-Addressed `VerdictCache` Latency, Disk Reload, & Concurrency (`OOD-96`)
+
+Evaluated across all `96` unseen items of [`ood_generalization_96.json`](../benchmarks/data/ood_generalization_96.json) on `Cascade(gemma4:e4b [Split-A alpha=0.05] >> gemma4:26b)` (`95/96 = 99.0%` accuracy):
+
+| Pass / Regime (`N = 96` Items) | Mean Latency | Median Latency | p95 Latency | Total Wall Time | Exact Verdict Parity | Speedup vs. Cold Live | Backend Calls / Saved Compute |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Pass 1: Cold Live GPU Cascade** (populates `VerdictCache`) | `705.85 ms` | `194.39 ms` | `1,764.54 ms` | `67.76 s` | Baseline (`95/96` acc) | `1.0x` | `96` misses -> `96` puts |
+| **Pass 2: Warm In-Memory `OrderedDict` LRU** | **`0.1142 ms`** | **`0.1046 ms`** | **`0.1570 ms`** | **`0.0110 s`** | **`96/96 (100.0%)`** | **`6,180.8x`** | **`0` calls** (`67.70 s` & `6,662` tok saved) |
+| **Pass 3: Cold-RAM / Warm SQLite WAL Reload** (new instance) | **`0.1352 ms`** | **`0.1277 ms`** | **`0.1866 ms`** | **`0.0130 s`** | **`96/96 (100.0%)`** | **`5,220.8x`** | **`0` calls** (`96/96` disk hits) |
+| **Pass 4: 8-Thread Concurrent Read Stress** (`768` evals) | `0.1620 ms/8` | — | — | `0.1244 s` | `768/768` hits | **`6,174.9 evals/s`** | **`0` calls** |
+
+#### C. Pure-CPU `StreamGuard` & `VerdictCache` Validation (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`)
+
+Evaluated across `16` stratified streaming trajectories (`4` per archetype) with `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `[]`):
+- **Pure-CPU `StreamGuard(delivery="buffered", k=1)` (`qwen2.5-coder:3b >> gemma4:26b`):** **`100.0%` (`4/4`) mid-stream abort rate** and **`48.9%` upstream generated-character savings** on `early_onset_violation` (`1,884.9 ms` mean gate latency vs. `2,577.6 ms` post-hoc full stream), **`0.0%` (`0 / 862`) violating-character leakage** across all violating trajectories, and `14/16 (87.5%)` overall accuracy (`16/16` post-hoc).
+- **Pure-CPU `LogitGate` `cache_ambiguous=False` Safety:** Across the `16` full candidates on standalone CPU `LogitGate(qwen2.5-coder:3b)`, `VerdictCache` persisted the `5/16` decisive (`PASSED`/`FAILED`) verdicts to SQLite (reloading in `<0.15 ms`, saving `8.71 s` of CPU compute) while intentionally declining to cache the `11/16` `AMBIGUOUS` abstentions so uncertain inputs remain eligible for downstream escalation.
+
+---
+
+### 12. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

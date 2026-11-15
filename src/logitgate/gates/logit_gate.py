@@ -349,6 +349,7 @@ class LogitGate(BaseGate):
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
         from logitgate.telemetry.sinks import resolve_telemetry_sink
@@ -438,6 +439,9 @@ class LogitGate(BaseGate):
                 loaded_profile,
                 binary=True,
             )
+            from logitgate.cache import resolve_verdict_cache
+
+            resolved_cache = resolve_verdict_cache(cache)
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
@@ -460,6 +464,7 @@ class LogitGate(BaseGate):
         self.max_positional_bias = bias_val
         self.warm_prefix = effective_warm_prefix
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -492,8 +497,22 @@ class LogitGate(BaseGate):
             config["model"] = model
         return config
 
-    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+    def _handle_failure_snapshot(
+        self, candidate: Any, verdict: Verdict, *, _is_cache_hit: bool = False, **kwargs: Any
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        call_kw = kwargs
+        if _is_cache_hit:
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            call_kw = {**kwargs, "telemetry_tags": merged_tags}
+        else:
+            store_cached_verdict(
+                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
+            )
 
         emit_verdict_telemetry(
             verdict,
@@ -504,7 +523,7 @@ class LogitGate(BaseGate):
             model=self.model,
             backend=self.backend,
             gate_sink=self.telemetry_sink,
-            call_kwargs=kwargs,
+            call_kwargs=call_kw,
         )
         if verdict.passed:
             return verdict
@@ -701,7 +720,16 @@ class LogitGate(BaseGate):
             self._needs_lazy_calibration = False
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         self._ensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
         forward, reverse = self._binary_prompts(candidate, boundary_nonce=nonce)
@@ -710,7 +738,16 @@ class LogitGate(BaseGate):
         return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         await self._aensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
         top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate, boundary_nonce=nonce))
@@ -883,6 +920,14 @@ class MultiRubricGate(BaseGate):
     def telemetry_sink(self) -> Any:
         return self._gate.telemetry_sink
 
+    @property
+    def cache(self) -> Any:
+        return self._gate.cache
+
+    @cache.setter
+    def cache(self, val: Any) -> None:
+        self._gate.cache = val
+
     def __repr__(self) -> str:
         return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
 
@@ -943,8 +988,27 @@ class MultiRubricGate(BaseGate):
             "fail_fast": self.fail_fast,
         }
 
-    def _snapshot(self, candidate: Any, verdict: Verdict, kwargs: dict[str, Any]) -> Verdict:
+    def _snapshot(
+        self,
+        candidate: Any,
+        verdict: Verdict,
+        kwargs: dict[str, Any],
+        *,
+        _is_cache_hit: bool = False,
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        call_kw = kwargs
+        if _is_cache_hit:
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            call_kw = {**kwargs, "telemetry_tags": merged_tags}
+        else:
+            store_cached_verdict(
+                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
+            )
 
         emit_verdict_telemetry(
             verdict,
@@ -955,7 +1019,7 @@ class MultiRubricGate(BaseGate):
             model=self.model,
             backend=self.backend,
             gate_sink=self.telemetry_sink,
-            call_kwargs=kwargs,
+            call_kwargs=call_kw,
         )
         if verdict.passed:
             return verdict
@@ -970,10 +1034,26 @@ class MultiRubricGate(BaseGate):
         )
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
+        self._gate._ensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._snapshot(candidate, hit, kwargs, _is_cache_hit=True)
         t0 = time.perf_counter()
         return self._snapshot(candidate, self._aggregate(self.evaluate_each(candidate), t0), kwargs)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
+        await self._gate._aensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._snapshot(candidate, hit, kwargs, _is_cache_hit=True)
         t0 = time.perf_counter()
         return self._snapshot(candidate, self._aggregate(await self.aevaluate_each(candidate), t0), kwargs)
 
@@ -1025,6 +1105,7 @@ class ChoiceGate(BaseGate):
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
         from logitgate.telemetry.sinks import resolve_telemetry_sink
@@ -1090,6 +1171,9 @@ class ChoiceGate(BaseGate):
                 loaded_profile,
                 binary=False,
             )
+            from logitgate.cache import resolve_verdict_cache
+
+            resolved_cache = resolve_verdict_cache(cache)
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
@@ -1112,6 +1196,7 @@ class ChoiceGate(BaseGate):
         self.save_on_fail = effective_save_on_fail
         self.warm_prefix = effective_warm_prefix
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -1143,8 +1228,22 @@ class ChoiceGate(BaseGate):
             config["model"] = model
         return config
 
-    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+    def _handle_failure_snapshot(
+        self, candidate: Any, verdict: Verdict, *, _is_cache_hit: bool = False, **kwargs: Any
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        call_kw = kwargs
+        if _is_cache_hit:
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            call_kw = {**kwargs, "telemetry_tags": merged_tags}
+        else:
+            store_cached_verdict(
+                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
+            )
 
         emit_verdict_telemetry(
             verdict,
@@ -1155,7 +1254,7 @@ class ChoiceGate(BaseGate):
             model=self.model,
             backend=self.backend,
             gate_sink=self.telemetry_sink,
-            call_kwargs=kwargs,
+            call_kwargs=call_kw,
         )
         if verdict.passed:
             return verdict
@@ -1335,7 +1434,16 @@ class ChoiceGate(BaseGate):
             self._needs_lazy_calibration = False
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         self._ensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
@@ -1350,7 +1458,16 @@ class ChoiceGate(BaseGate):
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         await self._aensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
@@ -1431,6 +1548,7 @@ class ScoreGate(BaseGate):
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         telemetry_sink: Any = None,
+        cache: Any = None,
     ) -> None:
         from logitgate.calibration.profile import resolve_calibration_profile
         from logitgate.telemetry.sinks import resolve_telemetry_sink
@@ -1522,6 +1640,9 @@ class ScoreGate(BaseGate):
                 loaded_profile,
                 binary=False,
             )
+            from logitgate.cache import resolve_verdict_cache
+
+            resolved_cache = resolve_verdict_cache(cache)
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
@@ -1545,6 +1666,7 @@ class ScoreGate(BaseGate):
         self.warm_prefix = effective_warm_prefix
         self.save_on_fail = effective_save_on_fail
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
         self.name = name
 
     def replay_config(self) -> dict[str, Any]:
@@ -1577,8 +1699,22 @@ class ScoreGate(BaseGate):
             config["model"] = model
         return config
 
-    def _handle_failure_snapshot(self, candidate: Any, verdict: Verdict, **kwargs: Any) -> Verdict:
+    def _handle_failure_snapshot(
+        self, candidate: Any, verdict: Verdict, *, _is_cache_hit: bool = False, **kwargs: Any
+    ) -> Verdict:
+        from logitgate.cache import store_cached_verdict
         from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        call_kw = kwargs
+        if _is_cache_hit:
+            raw_tags = kwargs.get("telemetry_tags")
+            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+            merged_tags["cache_hit"] = True
+            call_kw = {**kwargs, "telemetry_tags": merged_tags}
+        else:
+            store_cached_verdict(
+                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
+            )
 
         emit_verdict_telemetry(
             verdict,
@@ -1589,7 +1725,7 @@ class ScoreGate(BaseGate):
             model=self.model,
             backend=self.backend,
             gate_sink=self.telemetry_sink,
-            call_kwargs=kwargs,
+            call_kwargs=call_kw,
         )
         if verdict.passed:
             return verdict
@@ -1727,7 +1863,16 @@ class ScoreGate(BaseGate):
             self._needs_lazy_calibration = False
 
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         self._ensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
         top_k = max(10, 2 * len(tokens))
@@ -1744,7 +1889,16 @@ class ScoreGate(BaseGate):
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import lookup_cached_verdict
+
         await self._aensure_calibrated()
+        hit = lookup_cached_verdict(
+            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+        )
+        if hit is not None:
+            return self._handle_failure_snapshot(
+                candidate, hit, _is_cache_hit=True, **kwargs
+            )
         t0 = time.perf_counter()
         tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
         top_k = max(10, 2 * len(tokens))

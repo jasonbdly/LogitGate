@@ -316,6 +316,7 @@ def run_benchmark(
     judge_think: bool = False,
     cascade_trigger: EscalationPolicy = "on_ambiguous_only",
     profile: CalibrationProfile | str | Path | None = None,
+    cache: Any = False,
     dataset_label: str = "builtin",
     progress: Callable[[str], None] | None = None,
 ) -> BenchmarkReport:
@@ -341,6 +342,7 @@ def run_benchmark(
         ValueError: If parameters are out of valid bounds.
         TypeError: If a requested generative mode lacks a ``GenerativeBackend``.
     """
+    from logitgate.cache import VerdictCache, resolve_verdict_cache
     from logitgate.calibration.profile import resolve_calibration_profile
 
     if not cases:
@@ -356,6 +358,13 @@ def run_benchmark(
         raise ValueError(f"judge_max_tokens must be >= 1, got {judge_max_tokens!r}")
 
     resolved_profile = resolve_calibration_profile(profile)
+    owns_cache = not isinstance(cache, VerdictCache) and cache not in (None, False)
+    resolved_cache = (
+        VerdictCache()
+        if cache is True
+        else resolve_verdict_cache(cache)
+    )
+    owns_cache = owns_cache or (cache is True)
     needs_logit = any(m in ("logit", "cascade") for m in modes)
     needs_generative = any(m in ("judge", "cascade") for m in modes)
 
@@ -462,6 +471,7 @@ def run_benchmark(
                     max_tokens=judge_max_tokens,
                     think=effective_think,
                     profile=judge_profile,
+                    cache=resolved_cache,
                 )
             logit = LogitGate(
                 rubric=rubric,
@@ -469,6 +479,7 @@ def run_benchmark(
                 model=effective_model,
                 save_on_fail=False,
                 profile=resolved_profile,
+                cache=resolved_cache if mode == "logit" else False,
             )
             if mode == "logit":
                 return logit
@@ -480,16 +491,23 @@ def run_benchmark(
                 max_tokens=judge_max_tokens,
                 think=effective_think,
                 profile=judge_profile,
+                cache=False,
             )
-            return logit >> judge
+            from logitgate.cascade import Cascade
+
+            return Cascade([logit, judge], cache=resolved_cache)
 
         stats = {mode: ModeStats(mode) for mode in modes}
+        cache_summary: dict[str, Any] | None = None
         for mode in modes:
             if cases:
                 for w_idx in range(warmup):
                     w_case = cases[w_idx % len(cases)]
                     build(mode, w_case.rubric).evaluate(
-                        w_case.candidate, save_on_fail=False, _suppress_telemetry=True
+                        w_case.candidate,
+                        save_on_fail=False,
+                        _suppress_telemetry=True,
+                        _bypass_cache=True,
                     )
             for rep in range(repeat):
                 for idx, case in enumerate(cases):
@@ -510,7 +528,11 @@ def run_benchmark(
                     s.judge_skipped.append(generate_calls == 0)
                     if progress is not None:
                         progress(f"{mode:<8} rep {rep + 1}/{repeat} case {idx + 1}/{len(cases)} {elapsed_ms:9.1f} ms")
+        if isinstance(resolved_cache, VerdictCache):
+            cache_summary = resolved_cache.stats().to_dict()
     finally:
+        if owns_cache and isinstance(resolved_cache, VerdictCache):
+            resolved_cache.close()
         if owns_judge_backend and resolved_judge is not None and resolved_judge is not resolved:
             resolved_judge.close()
         if owns_backend and resolved is not None:
@@ -550,6 +572,8 @@ def run_benchmark(
             "target_risk_alpha": resolved_profile.target_risk_alpha,
             "guarantee_holds": resolved_profile.guarantee_holds,
         }
+    if cache_summary is not None:
+        metadata["cache"] = cache_summary
     return BenchmarkReport(metadata=metadata, modes=stats)
 
 

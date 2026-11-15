@@ -192,7 +192,9 @@ class Cascade(BaseGate):
         fuse_logits: bool = True,
         prior_weight: float = 0.30,
         telemetry_sink: Any = None,
+        cache: Any = None,
     ) -> None:
+        from logitgate.cache import resolve_verdict_cache
         from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         if not gates:
@@ -210,11 +212,35 @@ class Cascade(BaseGate):
         if not math.isfinite(pw) or not (0.0 <= pw <= 1.0):
             raise ConfigurationError(f"prior_weight must be between 0.0 and 1.0, got {prior_weight!r}")
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
+        owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+        try:
+            resolved_cache = resolve_verdict_cache(cache)
+        except BaseException:
+            if owns_sink and resolved_sink not in (None, False):
+                resolved_sink.close()  # type: ignore[union-attr]
+            raise
         self.gates = list(gates)
         self.name = name
         self.fuse_logits = fuse_logits
         self.prior_weight = pw
         self.telemetry_sink = resolved_sink
+        self.cache = resolved_cache
+
+    def _effective_cache(self) -> Any:
+        if self.cache is not None:
+            return self.cache
+        from logitgate.cache import VerdictCache
+
+        all_false = True
+        for g in self.gates:
+            c = getattr(g, "cache", None)
+            if isinstance(c, VerdictCache):
+                return c
+            if c is not False:
+                all_false = False
+        if all_false:
+            return False
+        return None
 
     def _effective_telemetry_sink(self) -> Any:
         if self.telemetry_sink is not None:
@@ -245,7 +271,78 @@ class Cascade(BaseGate):
         pipeline_repr = " >> ".join(repr(g) for g in self.gates)
         return f"Cascade([{pipeline_repr}])"
 
+    def _ensure_children_calibrated_sync(self) -> None:
+        for g in self.gates:
+            ensure_fn = getattr(g, "_ensure_calibrated", None)
+            if callable(ensure_fn):
+                ensure_fn()
+            inner = getattr(g, "_gate", None)
+            if inner is not None and callable(getattr(inner, "_ensure_calibrated", None)):
+                inner._ensure_calibrated()
+
+    async def _aensure_children_calibrated_async(self) -> None:
+        for g in self.gates:
+            aensure_fn = getattr(g, "_aensure_calibrated", None)
+            if callable(aensure_fn):
+                await aensure_fn()
+            inner = getattr(g, "_gate", None)
+            if inner is not None and callable(getattr(inner, "_aensure_calibrated", None)):
+                await inner._aensure_calibrated()
+
+    def _finalize_cache_hit(
+        self, hit: Verdict, orig_candidate: Any, kwargs: dict[str, Any]
+    ) -> Verdict:
+        from logitgate.telemetry.sinks import emit_verdict_telemetry
+
+        eff_rubric = next(
+            (
+                r
+                for g in self.gates
+                if isinstance(r := (getattr(g, "rubric", None) or getattr(g, "question", None)), str)
+                and r
+            ),
+            None,
+        )
+        primary_backend: Any = None
+        primary_model: str | None = None
+        for g in self.gates:
+            g_backend = getattr(g, "backend", None)
+            if g.layer_tier >= TIER_LOGIT and g_backend is not None:
+                primary_backend = g_backend
+                primary_model = getattr(g, "model", None)
+                break
+        raw_tags = kwargs.get("telemetry_tags")
+        merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+        merged_tags["cache_hit"] = True
+        hit_kwargs = {**kwargs, "telemetry_tags": merged_tags}
+        emit_verdict_telemetry(
+            hit,
+            candidate=orig_candidate,
+            gate_name=self.name,
+            gate_type="Cascade",
+            rubric=eff_rubric,
+            model=primary_model,
+            backend=primary_backend,
+            gate_sink=self._effective_telemetry_sink(),
+            call_kwargs=hit_kwargs,
+        )
+        return self._persist_failure(hit, orig_candidate, eff_rubric, kwargs)
+
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import _resolve_active_cache, lookup_cached_verdict
+
+        eff_cache = self._effective_cache()
+        active_cache, owns_temp = _resolve_active_cache(eff_cache, kwargs)
+        if active_cache is not None:
+            if owns_temp:
+                active_cache.close()
+            self._ensure_children_calibrated_sync()
+            hit = lookup_cached_verdict(
+                self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
+            )
+            if hit is not None:
+                return self._finalize_cache_hit(hit, candidate, kwargs)
+
         pipeline = self._pipeline(candidate, kwargs)
         try:
             request = next(pipeline)
@@ -262,6 +359,20 @@ class Cascade(BaseGate):
                 return done.value
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+        from logitgate.cache import _resolve_active_cache, lookup_cached_verdict
+
+        eff_cache = self._effective_cache()
+        active_cache, owns_temp = _resolve_active_cache(eff_cache, kwargs)
+        if active_cache is not None:
+            if owns_temp:
+                active_cache.close()
+            await self._aensure_children_calibrated_async()
+            hit = lookup_cached_verdict(
+                self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
+            )
+            if hit is not None:
+                return self._finalize_cache_hit(hit, candidate, kwargs)
+
         pipeline = self._pipeline(candidate, kwargs)
         try:
             request = next(pipeline)
@@ -276,8 +387,18 @@ class Cascade(BaseGate):
                 return done.value
 
     def _pipeline(self, candidate: Any, kwargs: dict[str, Any]) -> _Pipeline:
+        from logitgate.cache import _resolve_active_cache, store_cached_verdict
+
         t0 = time.perf_counter()
-        gate_kwargs = {**kwargs, "save_on_fail": False, "_suppress_telemetry": True}
+        orig_candidate = candidate
+        eff_cache = self._effective_cache()
+        active_top_cache, owns_top_temp = _resolve_active_cache(eff_cache, kwargs)
+        if owns_top_temp and active_top_cache is not None:
+            active_top_cache.close()
+        has_top_cache = active_top_cache is not None
+
+        child_base_kwargs = {k: v for k, v in kwargs.items() if k != "cache"}
+        gate_kwargs = {**child_base_kwargs, "save_on_fail": False, "_suppress_telemetry": True}
         traces: list[LayerTrace] = []
         tokens = 0
         rubric: str | None = None  # inherited by generative gates without their own rubric
@@ -299,6 +420,19 @@ class Cascade(BaseGate):
                 total_tokens_generated=tokens,
                 traces=traces,
             )
+            has_norm = candidate is not orig_candidate
+            caller_norm_box = kwargs.get("_normalized_out")
+            if has_norm and isinstance(caller_norm_box, list):
+                caller_norm_box.append(candidate)
+            store_cached_verdict(
+                self,
+                orig_candidate,
+                verdict,
+                gate_cache=eff_cache,
+                call_kwargs=kwargs,
+                has_normalized=has_norm,
+                normalized_artifact=candidate if has_norm else None,
+            )
             from logitgate.telemetry.sinks import emit_verdict_telemetry
 
             eff_rubric = rubric or next(
@@ -312,7 +446,7 @@ class Cascade(BaseGate):
             )
             emit_verdict_telemetry(
                 verdict,
-                candidate=candidate,
+                candidate=orig_candidate,
                 gate_name=self.name,
                 gate_type="Cascade",
                 rubric=eff_rubric,
@@ -325,7 +459,7 @@ class Cascade(BaseGate):
                 teacher_model=teacher_model,
                 teacher_passed=raw_teacher_passed,
             )
-            return self._persist_failure(verdict, candidate, rubric, kwargs, replay_cfg=replay_cfg)
+            return self._persist_failure(verdict, orig_candidate, rubric, kwargs, replay_cfg=replay_cfg)
 
         for i, gate in enumerate(self.gates):
             if gate.layer_tier >= TIER_GENERATIVE:
@@ -353,10 +487,16 @@ class Cascade(BaseGate):
                         f"escalation_policy='{policy}'): {upstream.reason}",
                     ))
 
-                verdict = yield gate, candidate, {
+                gen_step_kwargs = {
                     **gate_kwargs,
                     "rubric_override": rubric if rubric is not None else gate_kwargs.get("rubric_override"),
                 }
+                if has_top_cache and (
+                    getattr(gate, "cache", None) is None
+                    or getattr(gate, "cache", None) is active_top_cache
+                ):
+                    gen_step_kwargs["_bypass_cache"] = True
+                verdict = yield gate, candidate, gen_step_kwargs
                 escalated = True
                 raw_teacher_passed = verdict.passed
                 jg_backend = getattr(gate, "backend", None)
@@ -476,7 +616,13 @@ class Cascade(BaseGate):
                 continue
 
             norm_box: list[Any] = []
-            verdict = yield gate, candidate, {**gate_kwargs, "_normalized_out": norm_box}
+            step_kwargs = {**gate_kwargs, "_normalized_out": norm_box}
+            if has_top_cache and (
+                getattr(gate, "cache", None) is None
+                or getattr(gate, "cache", None) is active_top_cache
+            ):
+                step_kwargs["_bypass_cache"] = True
+            verdict = yield gate, candidate, step_kwargs
             if gate.layer_tier >= TIER_LOGIT:
                 g_backend = getattr(gate, "backend", None)
                 g_model = (
