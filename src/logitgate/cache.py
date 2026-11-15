@@ -245,6 +245,10 @@ def gate_cache_fingerprint(gate: BaseGate) -> dict[str, Any]:
     if profile is not None:
         fp["profile"] = _profile_fingerprint(profile)
 
+    aci = getattr(gate, "adaptive_controller", None)
+    if aci is not None and hasattr(aci, "cache_fingerprint"):
+        fp["adaptive_controller"] = _canonicalize_value(aci.cache_fingerprint())
+
     replay = gate.replay_config()
     if replay is not None:
         fp["replay"] = _canonicalize_value(replay)

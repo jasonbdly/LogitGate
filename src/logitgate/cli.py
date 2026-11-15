@@ -465,6 +465,43 @@ def create_parser() -> argparse.ArgumentParser:
     )
     tel_recal.add_argument("--json", action="store_true", help="Output CalibrationProfile as JSON")
 
+    tel_drift = tel_sub.add_parser(
+        "drift",
+        help="Detect covariate, calibration, and teacher-disagreement drift between two telemetry JSONL logs",
+    )
+    tel_drift.add_argument("input_path", type=str, help="Path to current evaluation telemetry JSONL file")
+    tel_drift.add_argument(
+        "--reference",
+        "-r",
+        required=True,
+        type=str,
+        help="Path to baseline reference telemetry JSONL file",
+    )
+    tel_drift.add_argument(
+        "--psi-moderate",
+        type=float,
+        default=0.10,
+        help="Moderate Population Stability Index (PSI) threshold (default: 0.10)",
+    )
+    tel_drift.add_argument(
+        "--psi-severe",
+        type=float,
+        default=0.25,
+        help="Severe Population Stability Index (PSI) threshold (default: 0.25)",
+    )
+    tel_drift.add_argument(
+        "--ks-alpha",
+        type=float,
+        default=0.01,
+        help="Two-sample Kolmogorov-Smirnov p-value threshold (default: 0.01)",
+    )
+    tel_drift.add_argument(
+        "--fail-on-drift",
+        action="store_true",
+        help="Exit with code 1 when drift_detected is True (for CI/monitoring gates)",
+    )
+    tel_drift.add_argument("--json", action="store_true", help="Output DriftReport as JSON")
+
     stream_parser = subparsers.add_parser(
         "stream",
         help="Verify a token/text stream mid-generation with StreamGuard early abort or buffered delivery",
@@ -1371,6 +1408,7 @@ def _cmd_telemetry(args: argparse.Namespace) -> int:
     import json
 
     from logitgate.telemetry import (
+        detect_telemetry_drift,
         export_distillation_dataset,
         recalibrate_from_telemetry,
         summarize_telemetry,
@@ -1471,7 +1509,42 @@ def _cmd_telemetry(args: argparse.Namespace) -> int:
             print("=" * 60)
         return EXIT_OK
 
-    sys.stderr.write("Error: Specify a telemetry subcommand: summary, export, or recalibrate.\n")
+    if sub == "drift":
+        report = detect_telemetry_drift(
+            args.reference,
+            args.input_path,
+            psi_moderate=args.psi_moderate,
+            psi_severe=args.psi_severe,
+            ks_alpha=args.ks_alpha,
+        )
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print("=" * 60)
+            print("LOGITGATE TELEMETRY DRIFT REPORT")
+            print("=" * 60)
+            print(f"Reference Source:          {sanitize_terminal_text(str(args.reference))} (n={report.reference_count})")
+            print(f"Current Source:            {sanitize_terminal_text(str(args.input_path))} (n={report.current_count})")
+            print(f"Drift Detected:            {report.drift_detected} (severity={report.severity.upper()})")
+            print(f"Recommended Action:        {report.recommended_action}")
+            print(f"Log-Odds PSI / KS p-val:   {report.psi_log_odds:.4f} / {report.ks_log_odds_p_value:.6f} (D={report.ks_log_odds_statistic:.4f})")
+            print(f"Escalation Rate (Ref/Cur): {report.ref_escalation_rate:.2%} -> {report.cur_escalation_rate:.2%} ({report.escalation_rate_delta:+.2%})")
+            print(f"Mean Pos Bias (Ref/Cur):   {report.ref_mean_pos_bias:.4f} -> {report.cur_mean_pos_bias:.4f} ({report.pos_bias_delta:+.4f})")
+            if report.teacher_disagreement_rate is not None:
+                print(
+                    f"Teacher Disagreement Rate: {report.teacher_disagreement_rate:.2%} "
+                    f"(n={report.observed_teacher_count})"
+                )
+            if report.reasons:
+                print("Triggers:")
+                for reason in report.reasons:
+                    print(f"  - {sanitize_terminal_text(reason)}")
+            print("=" * 60)
+        return EXIT_FAILED if (args.fail_on_drift and report.drift_detected) else EXIT_OK
+
+    sys.stderr.write(
+        "Error: Specify a telemetry subcommand: summary, export, recalibrate, or drift.\n"
+    )
     return EXIT_FAILED
 
 

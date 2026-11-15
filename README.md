@@ -494,6 +494,43 @@ with tempfile.TemporaryDirectory() as tmp:
         assert cache.stats().hits == 1
 ```
 
+### Online Drift Detection & Adaptive Conformal Control (`v0.10.0`)
+Monitor production telemetry streams for covariate, calibration, and teacher-disagreement shifts (`RollingDriftMonitor`, `detect_telemetry_drift`, PSI, and exact two-sample KS statistics), and dynamically adapt Layer-1 selective conformal bands on non-stationary or adversarial streams via Gibbs–Candès `AdaptiveConformalController` (either with delayed labels via `.observe()` or **zero-human-label** Horvitz–Thompson shadow teacher auditing inside `Cascade`):
+
+```python
+from logitgate import (
+    AdaptiveConformalController,
+    Cascade,
+    JudgeGate,
+    LogitGate,
+    RollingDriftMonitor,
+    StubBackend,
+)
+
+# Zero-label online adaptation: Cascade shadow-audits 25% of fast-paths via Layer-2 JudgeGate
+aci = AdaptiveConformalController(
+    pass_threshold=0.85,
+    fail_threshold=0.20,
+    target_risk_alpha=0.05,
+    step_size=1.5,
+    audit_sample_rate=0.25,
+)
+drift_monitor = RollingDriftMonitor(
+    baseline_window=30,
+    current_window=30,
+    check_every=10,
+    adaptive_controller=aci,
+    drift_boost_theta=1.0,
+)
+
+l1 = LogitGate("Is the SQL query parameterized?", backend=StubBackend(default_prob=0.92), adaptive_controller=aci)
+l2 = JudgeGate(backend=StubBackend(diagnostic_text="[VERDICT: PASS]"), trigger="on_ambiguous_only")
+pipeline = Cascade([l1, l2], telemetry_sink=drift_monitor)
+
+verdict = pipeline.evaluate("SELECT id FROM accounts WHERE id = :id")
+assert verdict.passed and aci.summary().total_steps == 1
+```
+
 ### Benchmark Confounder & Cross-Split Leakage Auditing (`v0.8.1`)
 Audit calibration and benchmark datasets in **0 LLM calls** for Pass-vs-Fail length confounders (`length_auroc`), rubric-blind unigram shortcuts (`lexical_loo_accuracy`), split-conformal sample-power floors (`n >= 39`/class for `alpha = 0.05`), and cross-split leakage (`check_split_leakage` via exact and word-3-gram Jaccard shingle indexing):
 
@@ -554,6 +591,7 @@ logitgate rank --rubric "Accurate summary" --candidates-json drafts.json --mode 
 logitgate stream --rubric "No secret keys" --file reply.txt --chunk-size 32 --delivery buffered --cache verdicts.sqlite3 --json
 logitgate eval --rubric "Safe SQL" --file query.sql --cache verdicts.sqlite3 --telemetry-out verdicts.jsonl
 logitgate telemetry summary verdicts.jsonl --json
+logitgate telemetry drift current_verdicts.jsonl --reference baseline_verdicts.jsonl --fail-on-drift --json
 logitgate telemetry recalibrate verdicts.jsonl --alpha 0.10 --output recalibrated_profile.json
 logitgate telemetry export verdicts.jsonl --format sft_jsonl --output student_sft.jsonl
 ```
@@ -572,6 +610,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Production JSONL telemetry micro-overhead & zero-call offline distillation/recalibration
   - Deconfounded `2x2` counterfactual OOD suite (`OOD-96`) & domain-disjoint conformal transfer (`Split A -> Split B`)
   - Mid-stream token guardrails (`StreamGuard`) & content-addressed `VerdictCache` (`>5,200x` SQLite / `>6,100x` LRU speedup)
+  - Online drift detection (`RollingDriftMonitor`) & Gibbs–Candès Adaptive Conformal Control (`AdaptiveConformalController`) across 4-regime distribution shifts
   - Falsification boundaries: reasoning depth, 16k-token haystack scaling, and context window (`num_ctx`) squeezing
   - Elastic recurrent layer-looping (NVIDIA Dory-4B, RTX 5090 vs RTX 4070)
 - **[3-Layer Architecture & Deployment Topologies](docs/architecture.md)**:

@@ -36,6 +36,14 @@ def _should_escalate(
     return True  # AMBIGUOUS: this is exactly what the generative layer exists for.
 
 
+def _has_active_cascade_audit(gates: Sequence[BaseGate]) -> bool:
+    for g in gates:
+        aci = getattr(g, "adaptive_controller", None)
+        if aci is not None and getattr(aci, "feedback_mode", None) == "cascade_audit":
+            return True
+    return False
+
+
 def _verdict_fields(source: Verdict, **overrides: Any) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "passed": source.passed,
@@ -336,12 +344,13 @@ class Cascade(BaseGate):
         if active_cache is not None:
             if owns_temp:
                 active_cache.close()
-            self._ensure_children_calibrated_sync()
-            hit = lookup_cached_verdict(
-                self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
-            )
-            if hit is not None:
-                return self._finalize_cache_hit(hit, candidate, kwargs)
+            if not _has_active_cascade_audit(self.gates):
+                self._ensure_children_calibrated_sync()
+                hit = lookup_cached_verdict(
+                    self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
+                )
+                if hit is not None:
+                    return self._finalize_cache_hit(hit, candidate, kwargs)
 
         pipeline = self._pipeline(candidate, kwargs)
         try:
@@ -366,12 +375,13 @@ class Cascade(BaseGate):
         if active_cache is not None:
             if owns_temp:
                 active_cache.close()
-            await self._aensure_children_calibrated_async()
-            hit = lookup_cached_verdict(
-                self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
-            )
-            if hit is not None:
-                return self._finalize_cache_hit(hit, candidate, kwargs)
+            if not _has_active_cascade_audit(self.gates):
+                await self._aensure_children_calibrated_async()
+                hit = lookup_cached_verdict(
+                    self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
+                )
+                if hit is not None:
+                    return self._finalize_cache_hit(hit, candidate, kwargs)
 
         pipeline = self._pipeline(candidate, kwargs)
         try:
@@ -424,15 +434,16 @@ class Cascade(BaseGate):
             caller_norm_box = kwargs.get("_normalized_out")
             if has_norm and isinstance(caller_norm_box, list):
                 caller_norm_box.append(candidate)
-            store_cached_verdict(
-                self,
-                orig_candidate,
-                verdict,
-                gate_cache=eff_cache,
-                call_kwargs=kwargs,
-                has_normalized=has_norm,
-                normalized_artifact=candidate if has_norm else None,
-            )
+            if not _has_active_cascade_audit(self.gates):
+                store_cached_verdict(
+                    self,
+                    orig_candidate,
+                    verdict,
+                    gate_cache=eff_cache,
+                    call_kwargs=kwargs,
+                    has_normalized=has_norm,
+                    normalized_artifact=candidate if has_norm else None,
+                )
             from logitgate.telemetry.sinks import emit_verdict_telemetry
 
             eff_rubric = rubric or next(
@@ -467,31 +478,55 @@ class Cascade(BaseGate):
                 if rubric is None and isinstance(gate_rubric, str) and gate_rubric:
                     rubric = gate_rubric
                 policy = gate.escalation_policy
-                if not _should_escalate(policy, upstream_gate, upstream):
+                upstream_aci = (
+                    getattr(upstream_gate, "adaptive_controller", None)
+                    if upstream_gate is not None
+                    else None
+                )
+                is_cascade_audit = (
+                    upstream_aci is not None
+                    and upstream is not None
+                    and getattr(upstream_aci, "feedback_mode", None) == "cascade_audit"
+                )
+                normal_escalate = _should_escalate(policy, upstream_gate, upstream)
+                shadow_audited = False
+                audit_sampling_prob = 1.0
+                if not normal_escalate:
                     assert upstream is not None and upstream_gate is not None
-                    fast_pathed = True
-                    if upstream.passed:
-                        outcome = _verdict_fields(
+                    if is_cascade_audit and upstream_aci is not None and upstream_aci.should_audit_fast_path():
+                        shadow_audited = True
+                        audit_sampling_prob = float(upstream_aci.audit_sample_rate)
+                    else:
+                        if is_cascade_audit and upstream_aci is not None:
+                            upstream_aci.record_cascade_outcome(
+                                l1_status=upstream.status,
+                                teacher_passed=None,
+                                sampling_prob=float(upstream_aci.audit_sample_rate),
+                                audited_fast_path=False,
+                            )
+                        fast_pathed = True
+                        if upstream.passed:
+                            outcome = _verdict_fields(
+                                upstream,
+                                triggered_layer=upstream_gate.name,
+                                reason=f"Fast-path pass at {upstream_gate.name} "
+                                f"({gate.name} skipped): {upstream.reason}",
+                            )
+                            continue
+                        return conclude(_verdict_fields(
                             upstream,
+                            passed=False,
+                            status=DecisionStatus.FAILED,
                             triggered_layer=upstream_gate.name,
-                            reason=f"Fast-path pass at {upstream_gate.name} "
-                            f"({gate.name} skipped): {upstream.reason}",
-                        )
-                        continue
-                    return conclude(_verdict_fields(
-                        upstream,
-                        passed=False,
-                        status=DecisionStatus.FAILED,
-                        triggered_layer=upstream_gate.name,
-                        reason=f"Decisive failure at {upstream_gate.name} ({gate.name} skipped, "
-                        f"escalation_policy='{policy}'): {upstream.reason}",
-                    ))
+                            reason=f"Decisive failure at {upstream_gate.name} ({gate.name} skipped, "
+                            f"escalation_policy='{policy}'): {upstream.reason}",
+                        ))
 
                 gen_step_kwargs = {
                     **gate_kwargs,
                     "rubric_override": rubric if rubric is not None else gate_kwargs.get("rubric_override"),
                 }
-                if has_top_cache and (
+                if (has_top_cache or is_cascade_audit) and (
                     getattr(gate, "cache", None) is None
                     or getattr(gate, "cache", None) is active_top_cache
                 ):
@@ -499,6 +534,13 @@ class Cascade(BaseGate):
                 verdict = yield gate, candidate, gen_step_kwargs
                 escalated = True
                 raw_teacher_passed = verdict.passed
+                if is_cascade_audit and upstream is not None and upstream_aci is not None:
+                    upstream_aci.record_cascade_outcome(
+                        l1_status=upstream.status,
+                        teacher_passed=verdict.passed,
+                        sampling_prob=audit_sampling_prob,
+                        audited_fast_path=shadow_audited,
+                    )
                 jg_backend = getattr(gate, "backend", None)
                 teacher_model = (
                     getattr(gate, "model", None)
@@ -510,66 +552,84 @@ class Cascade(BaseGate):
                 if primary_model is None and teacher_model is not None:
                     primary_model = teacher_model
                 traces.extend(verdict.traces)
+                if shadow_audited and traces:
+                    last_meta = dict(traces[-1].metadata or {})
+                    last_meta["shadow_audit"] = True
+                    traces[-1] = traces[-1].model_copy(update={"metadata": last_meta})
                 tokens += verdict.total_tokens_generated
 
                 passed, status = verdict.passed, verdict.status
                 overrode_judge_pass = False
-                can_override = getattr(gate, "can_override_fail", False) or policy == "adjudicate"
-                locked_upstream_fail = (
-                    upstream is not None
-                    and upstream.status == DecisionStatus.FAILED
-                    and policy == "on_ambiguous_or_fail"
-                    and not can_override
+                aci_allows_override = bool(
+                    is_cascade_audit and getattr(upstream_aci, "override_on_audit", False)
                 )
-                fused_lo: float | None = None
-                tr1_prior_lo: float | None = None
-                judge_lo_orig: float | None = None
-                if locked_upstream_fail:
-                    if verdict.passed:
-                        overrode_judge_pass = True
-                    passed, status = False, DecisionStatus.FAILED
-                    effective_prob = (
-                        upstream.probability
-                        if (upstream is not None and upstream.probability is not None)
-                        else verdict.probability
-                    )
-                elif self.fuse_logits:
-                    passed, status, effective_prob, fused_lo = fuse_escalated_verdict(
-                        upstream,
-                        verdict,
-                        prior_weight=self.prior_weight,
-                    )
-                    if fused_lo is not None and traces and upstream is not None and upstream.traces:
-                        tr1 = _select_upstream_logit_trace(upstream)
-                        tr1_prior_lo = tr1.log_odds_pass if tr1 is not None else upstream.traces[-1].log_odds_pass
-                        last_tr = traces[-1]
-                        judge_lo_orig = last_tr.log_odds_pass
-                        fused_entropy = (
-                            round(compute_shannon_entropy(effective_prob), 4)
-                            if effective_prob is not None
-                            else last_tr.shannon_entropy
-                        )
-                        traces[-1] = last_tr.model_copy(
-                            update={
-                                "status": status,
-                                "calibrated_prob": effective_prob,
-                                "log_odds_pass": fused_lo,
-                                "shannon_entropy": fused_entropy,
-                                "metadata": {
-                                    **last_tr.metadata,
-                                    "judge_log_odds": judge_lo_orig,
-                                    "fused_log_odds": fused_lo,
-                                    "prior_log_odds": tr1_prior_lo,
-                                    "prior_weight": self.prior_weight,
-                                },
-                            }
-                        )
+                if shadow_audited and not aci_allows_override and upstream is not None:
+                    passed, status = upstream.passed, upstream.status
+                    effective_prob = upstream.probability
+                    fused_lo: float | None = None
+                    tr1_prior_lo: float | None = None
+                    judge_lo_orig: float | None = None
                 else:
-                    effective_prob = (
-                        verdict.probability
-                        if verdict.probability is not None
-                        else (upstream.probability if upstream is not None else None)
+                    can_override = (
+                        getattr(gate, "can_override_fail", False)
+                        or policy == "adjudicate"
+                        or aci_allows_override
                     )
+                    locked_upstream_fail = (
+                        upstream is not None
+                        and upstream.status == DecisionStatus.FAILED
+                        and policy == "on_ambiguous_or_fail"
+                        and not can_override
+                    )
+                    fused_lo = None
+                    tr1_prior_lo = None
+                    judge_lo_orig = None
+                    if locked_upstream_fail:
+                        if verdict.passed:
+                            overrode_judge_pass = True
+                        passed, status = False, DecisionStatus.FAILED
+                        effective_prob = (
+                            upstream.probability
+                            if (upstream is not None and upstream.probability is not None)
+                            else verdict.probability
+                        )
+                    elif self.fuse_logits:
+                        passed, status, effective_prob, fused_lo = fuse_escalated_verdict(
+                            upstream,
+                            verdict,
+                            prior_weight=self.prior_weight,
+                        )
+                        if fused_lo is not None and traces and upstream is not None and upstream.traces:
+                            tr1 = _select_upstream_logit_trace(upstream)
+                            tr1_prior_lo = tr1.log_odds_pass if tr1 is not None else upstream.traces[-1].log_odds_pass
+                            last_tr = traces[-1]
+                            judge_lo_orig = last_tr.log_odds_pass
+                            fused_entropy = (
+                                round(compute_shannon_entropy(effective_prob), 4)
+                                if effective_prob is not None
+                                else last_tr.shannon_entropy
+                            )
+                            traces[-1] = last_tr.model_copy(
+                                update={
+                                    "status": status,
+                                    "calibrated_prob": effective_prob,
+                                    "log_odds_pass": fused_lo,
+                                    "shannon_entropy": fused_entropy,
+                                    "metadata": {
+                                        **last_tr.metadata,
+                                        "judge_log_odds": judge_lo_orig,
+                                        "fused_log_odds": fused_lo,
+                                        "prior_log_odds": tr1_prior_lo,
+                                        "prior_weight": self.prior_weight,
+                                    },
+                                }
+                            )
+                    else:
+                        effective_prob = (
+                            verdict.probability
+                            if verdict.probability is not None
+                            else (upstream.probability if upstream is not None else None)
+                        )
                 fused_score = (
                     (upstream.score if (upstream is not None and upstream.score is not None) else 0.0)
                     if overrode_judge_pass

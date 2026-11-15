@@ -143,7 +143,7 @@ Production deployments need continuous observability over fast-path rates, abste
   - `VerdictSnapshot.replay()` / `explain()` and `BenchmarkRunner` warmups suppress telemetry emission automatically so offline debugging and warmup probes never pollute production streams.
 - **Symlink-Hardened Rotation & Linear-Time PII Redaction**:
   - `JsonlTelemetrySink` and `DistillationSink` open log files and rotated archives (`max_bytes`, `backup_count`) under a `threading.Lock` with `os.O_NOFOLLOW` symlink checks and configurable failure isolation (`on_error="warn" | "raise" | "ignore"`).
-  - Four `PrivacyMode` levels (`"full"`, `"redact_pii"`, `"hash_candidate"`, `"metrics_only"`) sanitize candidate artifacts before disk persistence; `"redact_pii"` scrubs emails, `Bearer` headers, `sk-`/`ghp_`/`glpat-`/`AKIA` tokens, US SSNs, and Luhn-validated payment card numbers in linear $O(N)$ time without catastrophic backtracking.
+  - Four `PrivacyMode` levels (`"full"`, `"redact_pii"`, `"hash_only"`, `"omit_candidate"`) sanitize candidate artifacts before disk persistence; `"redact_pii"` scrubs emails, `Bearer` headers, `sk-`/`ghp_`/`glpat-`/`AKIA` tokens, US SSNs, and Luhn-validated payment card numbers in linear $O(N)$ time without catastrophic backtracking.
 - **Teacher-to-Student Discrepancy Mining, Zero-Call Recalibration & Dataset Export**:
   - `DistillationSink` (with bounded SHA-256 `(rubric, candidate)` deduplication) and offline `load_distillation_records()` classify escalated evaluations into four discrepancy buckets: `false_accept_caught`, `false_reject_overturned`, `polarity_flip` ($L_{\text{fwd}} \cdot L_{\text{rev}} < 0$), and `ambiguous_resolved`.
   - Because `TelemetryRecord` and `DistillationRecord` preserve raw Layer-1 `(student_forward_log_odds, student_reverse_log_odds)` alongside `teacher_passed`, `recalibrate_from_telemetry()` fits an updated temperature + split-conformal `CalibrationProfile` in **milliseconds with zero LLM calls** (best paired with a periodic full-audit shadow burn-in sample so non-conformity scores remain exchangeable across the full input distribution).
@@ -181,4 +181,21 @@ Repeated evaluations in CI suites, RAG regression harnesses, `MultiRubricGate` r
   - `VerdictSnapshot.replay()` / `explain()` and `run_benchmark()` warmups pass `_bypass_cache=True` automatically so live diagnostic replays are never short-circuited by cached verdicts.
 - **Thread-Safe LRU + Hardened WAL-Mode SQLite Persistence**:
   - Combines an in-process `RLock`-guarded `OrderedDict` LRU (`max_entries`, optional `ttl_seconds`) with an optional `0o600` WAL-mode SQLite backing store (`O_NOFOLLOW` symlink rejection, `256 MiB` existing-file cap, and `max_disk_entries` FIFO/expiry pruning), sustaining **`>6,100` evaluations/sec** across 8 threads (`~0.11 ms` RAM hit, `~0.14 ms` cold-RAM SQLite reload hit).
+
+---
+
+## Online Drift Detection & Adaptive Conformal Control (`v0.10.0`)
+
+Split conformal calibration (`fit_calibration_profile`) guarantees marginal selective Layer-1 risk $\le \alpha^*$ when deployment inputs remain exchangeable with the calibration holdout. When traffic shifts to new domains or encounters adversarial prevalence spikes, exchangeability breaks. `v0.10.0` closes that loop with two composable subsystems:
+
+- **Zero-Dependency Covariate, Score & Disagreement Drift Detection (`logitgate.telemetry.drift`)**:
+  - `compute_psi()` computes Laplace-smoothed quantile-binned Population Stability Index (`PSI < 0.10` negligible, `0.10..0.25` moderate, `>= 0.25` severe) with explicit constant-reference bin guarding, while `compute_ks_two_sample()` computes exact empirical CDF supremum distances and Stephens-adjusted Kolmogorov survival $p$-values without requiring SciPy.
+  - `detect_telemetry_drift(reference, current)` and `logitgate telemetry drift <cur.jsonl> --reference <ref.jsonl> [--fail-on-drift]` combine symmetric log-odds PSI/KS, escalation-rate shifts, positional-bias surges, and Layer-2 teacher disagreement rates into a structured `DriftReport`.
+  - `RollingDriftMonitor(TelemetrySink)` maintains `RLock`-protected baseline and sliding evaluation windows in memory (automatically scrubbing candidate text via `privacy="omit_candidate"`), firing `on_drift` callbacks and optionally applying cooldown-gated proactive band boosts (`drift_boost_theta`) to a coupled `AdaptiveConformalController`.
+- **Gibbs–Candès Adaptive Conformal Inference (`AdaptiveConformalController`)**:
+  - Maintains a scalar log-odds margin offset $\theta_t \ge \theta_{\min}$ around base cutoffs $(\tau_{\text{rej},0}, \tau_{\text{acc},0})$:
+    $$u_t = \operatorname{logit}(\tau_{\text{acc},0}) + \theta_t, \qquad \ell_t = \operatorname{logit}(\tau_{\text{rej},0}) - \theta_t, \qquad \theta_{t+1} = \max\!\left(\theta_{\min},\; \theta_t + \eta(\hat{\text{err}}_t - \alpha^*)\right)$$
+  - **Unclipped Finite-Sample Adversarial Guarantee**: Whenever $\theta_t \ge \theta_{\text{abstain}}$ (`8.0` by default), `force_ambiguous=True` causes Layer 1 (`LogitGate` / `MultiRubricGate`) to escalate every input to Layer 2 (`err_t = 0`), stepping $\theta_t$ down deterministically by $\eta \alpha^*$ per step without upper-clip bias and bounding time-averaged selective risk $\le \alpha^* + O(1/(\eta T))$ on arbitrary non-stationary streams.
+  - **Explicit vs. Autonomous Zero-Label Shadow Auditing (`cascade_audit`)**: Supports delayed ground-truth feedback (`feedback_mode="explicit"`, `controller.observe(verdict, truth)`) and autonomous zero-human-label `Cascade` adaptation (`audit_sample_rate > 0`, e.g., `0.25`), where `Cascade` shadow-audits fast-path decisions via Layer-2 `JudgeGate` with probability $p$, computes unbiased Horvitz–Thompson inverse-propensity error $\hat{\text{err}}_t = \mathbb{I}[\hat{y}_{L1} \ne y_{\text{teacher}}]/p$, overrides caught mistakes when `override_on_audit=True`, and isolates `VerdictCache` keys across threshold updates via `cache_fingerprint()`.
+
 

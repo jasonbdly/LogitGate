@@ -1,3 +1,9 @@
+from logitgate.calibration.adaptive import (
+    AdaptiveConformalController,
+    AdaptiveConformalSummary,
+    AdaptiveFeedbackMode,
+    AdaptiveStepRecord,
+)
 from logitgate.calibration.audit import (
     DatasetAuditReport,
     SplitLeakageReport,
@@ -23,6 +29,10 @@ from logitgate.calibration.profile import (
 from logitgate.exceptions import CalibrationWarning
 
 __all__ = [
+    "AdaptiveConformalController",
+    "AdaptiveConformalSummary",
+    "AdaptiveFeedbackMode",
+    "AdaptiveStepRecord",
     "CalibrationProfile",
     "CalibrationWarning",
     "ChoiceConformalThresholds",

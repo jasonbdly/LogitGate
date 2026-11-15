@@ -705,7 +705,49 @@ Evaluated across `16` stratified streaming trajectories (`4` per archetype) with
 
 ---
 
-### 12. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 12. Online Drift Detection & Adaptive Conformal Control (`v0.10.0`)
+
+#### A. Paired 120-Step Non-Stationary 4-Regime Evaluation (`drift_regimes_120.json`)
+
+Evaluated across [`benchmarks/data/drift_regimes_120.json`](../benchmarks/data/drift_regimes_120.json) (`120` ordered steps partitioned into 4 sequential 30-step regimes: **Regime 1 `stationary_in_domain`** `[0..29]` balanced code/SQL/RAG/ops, **Regime 2 `covariate_domain_shift`** `[30..59]` unseen clinical/causal/regulatory/unit domains, **Regime 3 `adversarial_hard_counterfactual_surge`** `[60..89]` `80%`-fail hard counterfactuals with inverted surface vocabulary, and **Regime 4 `stationary_recovery`** `[90..119]` return to baseline distribution). All models initialize from their pre-fitted **Split-A (`cal_distill_80.json`) `CalibrationProfile`** with fixed, untuned Gibbs–Candès parameters (`step_size=1.5, min_theta=0.0, abstain_theta=8.0, audit_sample_rate=0.25`) inside a `LogitGate >> JudgeGate(gemma4:26b)` cascade (standalone `gemma4:26b` RTX 5090 Teacher baseline: **`116/120 (96.7%)`**, `1,166.9 ms` mean / `1,101.6 ms` median latency):
+
+| Layer-1 Student (RTX 4070) | Policy (`Split-A` Initialized, Zero Test Tuning) | Overall Cascade Acc | Overall L1 Risk (`Errors / 120`) | Per-Regime L1 Selective Risk (`R1 Stat / R2 Shift / R3 Adv / R4 Recov`) | L2 Escalation + Audit Rate | Mean Cascade Latency |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b`** (`2.09 GB`, `77.3 ms` L1) | Static Split-A (`alpha = 0.10`) | `92.5%` | `4.2%` (`5/120`) | `3.3% / 10.0% / 3.3% / 0.0%` | `74.2%` | `956.9 ms` |
+| | **`ACI_Audit` (`alpha = 0.10`, `p = 0.25`, 0 labels)** | **`94.2%`** | **`3.3%` (`4/120`)** | `3.3% / 10.0% / 0.0% / 0.0%` | `92.5%` | `1,153.7 ms` |
+| | Static Split-A (`alpha = 0.05`) | `90.8%` | `5.8%` (`7/120`) | `3.3% / 16.7% / 3.3% / 0.0%` | `70.8%` | `916.6 ms` |
+| | **`ACI_Audit` (`alpha = 0.05`, `p = 0.25`, 0 labels)** | **`94.2%`** | **`3.3%` (`4/120`)** | `3.3% / 10.0% / 0.0% / 0.0%` | `95.0%` | `1,175.0 ms` |
+| **`llama3.2:3b`** (`2.33 GB`, `70.2 ms` L1) | Static Split-A (`alpha = 0.10`) | `93.3%` | `4.2%` (`5/120`) | `3.3% / 6.7% / 3.3% / 3.3%` | `74.2%` | `925.8 ms` |
+| | **`ACI_Audit` (`alpha = 0.10`, `p = 0.25`, 0 labels)** | **`95.8%`** | **`2.5%` (`3/120`)** | `3.3% / 3.3% / 0.0% / 3.3%` | `90.8%` | `1,124.2 ms` |
+| | **`ACI_Drift_Coupled` (`alpha = 0.10` + `RollingDriftMonitor`)** | **`96.7%`** | **`2.5%` (`3/120`)** | `3.3% / 3.3% / 0.0% / 3.3%` | `94.2%` | `1,159.9 ms` |
+| **`gemma4:e4b`** (`3.21 GB`, `175.9 ms` L1) | Static Split-A (`alpha = 0.10`) | `90.0%` | `9.2%` (`11/120`) | `6.7% / 13.3% / 13.3% / 3.3%` | `11.7%` | `322.1 ms` |
+| | `ACI_Explicit` (`alpha = 0.10`, oracle labels) | `91.7%` | `5.8%` (`7/120`) | `6.7% / 10.0% / 3.3% / 3.3%` | `32.5%` | `552.3 ms` |
+| | **`ACI_Audit` (`alpha = 0.10`, `p = 0.25`, 0 labels)** | **`94.2%`** | **`4.2%` (`5/120`)** | `3.3% / 10.0% / 0.0% / 3.3%` | `69.2%` | `982.8 ms` |
+| | Static / `ACI_Audit` (`alpha = 0.05`) | **`97.5%`** | **`0.8%` (`1/120`)** | `0.0% / 0.0% / 0.0% / 3.3%` | `46.7% / 63.3%` | `745.1 / 927.7 ms` |
+| **`qwen2.5:14b`** (`9.09 GB`, `188.8 ms` L1) | Static Default (`[0.20, 0.85]`, `T = 1.0`) | `94.2%` | `5.8%` (`7/120`) | `6.7% / 3.3% / 10.0% / 3.3%` | `12.5%` | `352.5 ms` |
+| | **`ACI_Audit` from Default (`p = 0.25`, 0 labels)** | **`95.8%`** | **`2.5%` (`3/120`)** | `3.3% / 3.3% / 3.3% / 0.0%` | `71.7%` | `1,033.4 ms` |
+| | Static Split-A (`alpha = 0.10`) | `94.2%` | `4.2%` (`5/120`) | `6.7% / 0.0% / 10.0% / 0.0%` | `16.7%` | `402.8 ms` |
+| | **`ACI_Audit` (`alpha = 0.10`, `p = 0.25`, 0 labels)** | **`96.7%`** | **`1.7%` (`2/120`)** | `3.3% / 0.0% / 3.3% / 0.0%` | `72.5%` | `1,043.5 ms` |
+| | **`ACI_Audit` (`alpha = 0.05`, `p = 0.25`, 0 labels)** | **`96.7%`** | **`0.8%` (`1/120`)** | `3.3% / 0.0% / 0.0% / 0.0%` | `78.3%` | `1,124.8 ms` |
+
+*Distribution-Shift Diagnostics (`compute_psi` & `compute_ks_two_sample` vs. Regime 1 Reference):*
+- **Specialization Shift vs. Generalist Invariance:** Code-specialized `qwen2.5-coder:3b` registers severe log-odds distribution shift immediately upon entering Regime 2's unseen prose domains (**`PSI = 1.3677`, `KS D = 0.5000`, `p = 0.0006`**) and Regime 3's adversarial surge (**`PSI = 2.1076`, `KS D = 0.7333`, `p < 0.0001`**), where static `alpha = 0.05` Layer-1 error spikes to `16.7%` before `ACI_Audit` cuts overall risk nearly in half (`5.8% -> 3.3%`, `0.0%` Regime-3 L1 error). Conversely, generalist `qwen2.5:14b` stays distributionally invariant across Regime 2 (`PSI = 0.0223`, `KS D = 0.1667`, `p = 0.7600`, `0.0%` L1 error) and triggers purely on Regime 3's label-prior / hard-counterfactual shift (**`PSI = 0.7109`, `KS D = 0.4667`, `p = 0.0017`**).
+- **Zero-Human-Label Risk Reduction & Stationary Recovery:** Across all four student models at `alpha = 0.10`, autonomous `feedback_mode="cascade_audit"` (`p = 0.25` Horvitz–Thompson inverse-propensity updates + teacher override on audited fast-path errors) monotonically lowers Layer-1 selective risk (`gemma4:e4b`: **`9.2% -> 4.2%`**, reducing Regime-3 adversarial L1 errors from `13.3%` to **`0.0%`**; `qwen2.5:14b`: **`4.2% -> 1.7%`**, matching standalone `26B` `96.7%` accuracy) and relaxes `theta_t` from `theta_max = 5.85` back to `0.0` during Regime 4 (`stationary_recovery`) without ever loosening past the protective Split-A conformal floor (`min_theta = 0.0`).
+
+#### B. Live Dual-GPU Uncached Wire Cascade + `RollingDriftMonitor` (`40` Steps, `gemma4:e4b >> gemma4:26b`)
+
+Executed end-to-end over live HTTP (`gemma4:e4b` `3.21 GB` on RTX 4070 + `gemma4:26b` `17.84 GB` on RTX 5090, `10` steps/regime, `RollingDriftMonitor(window_size=10, step_interval=10)` coupled to `AdaptiveConformalController`):
+- **Live Cascade Performance:** **`37/40 (92.5%)`** cascade accuracy, **`951.4 ms`** mean wire latency (`1,174.7 ms` median, `1,891.1 ms` p95, `38.05 s` total), `60.0%` Layer-2 invocation rate (abstentions + `25%` shadow audits), and **`1/40 (2.5% <= 10.0%)`** empirical Layer-1 selective risk (`3.6%` when decided).
+- **Clean Drift Alert Precision:** Cochran/Jeffreys finite-sample PSI smoothing fired **exact `severe` alerts on the two true shift windows** (`psi_log_odds = 0.7931` with `escalation_rate_delta = +0.40` on covariate shift; `psi_log_odds = 0.6712` with `pos_bias_delta = +0.5110` on adversarial surge) with zero false-positive stationary recovery alerts.
+
+#### C. Pure-CPU Adaptive Conformal & Drift Validation (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`, `24` Steps)
+
+Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `[]`) across `24` stratified steps (`6`/regime):
+- **Pure-CPU Latency & Zero Selective Risk:** `2,077.8 ms` mean / `2,044.0 ms` median Layer-1 CPU latency (`49.87 s` total), **`0/24 (0.0%)` Layer-1 selective risk** (`decided_count = 2`, `abstained_count = 22`), and immediate shift detection (`psi_log_odds = 1.0993`, `KS D = 1.0000`, `p < 0.0001`).
+
+---
+
+### 13. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

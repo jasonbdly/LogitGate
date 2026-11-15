@@ -45,6 +45,7 @@ from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
 if TYPE_CHECKING:
+    from logitgate.calibration.adaptive import AdaptiveConformalController
     from logitgate.calibration.profile import CalibrationProfile
 
 TopLogprobs = list[dict[str, Any]]
@@ -348,13 +349,22 @@ class LogitGate(BaseGate):
         *,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
+        adaptive_controller: AdaptiveConformalController | None = None,
         telemetry_sink: Any = None,
         cache: Any = None,
     ) -> None:
+        from logitgate.calibration.adaptive import AdaptiveConformalController as _ACI
         from logitgate.calibration.profile import resolve_calibration_profile
         from logitgate.telemetry.sinks import resolve_telemetry_sink
 
+        if adaptive_controller is not None and not isinstance(adaptive_controller, _ACI):
+            raise ConfigurationError(
+                f"adaptive_controller must be an AdaptiveConformalController or None, "
+                f"got {type(adaptive_controller).__name__}"
+            )
         loaded_profile = resolve_calibration_profile(profile)
+        if loaded_profile is None and adaptive_controller is not None:
+            loaded_profile = adaptive_controller.profile
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
         if preset is not None:
             if preset == "strict":
@@ -384,7 +394,11 @@ class LogitGate(BaseGate):
             else (
                 loaded_profile.pass_threshold
                 if loaded_profile is not None and loaded_profile.pass_threshold is not None
-                else default_pass
+                else (
+                    adaptive_controller.base_pass_threshold
+                    if adaptive_controller is not None
+                    else default_pass
+                )
             )
         )
         raw_fail_thresh = (
@@ -393,7 +407,11 @@ class LogitGate(BaseGate):
             else (
                 loaded_profile.fail_threshold
                 if loaded_profile is not None and loaded_profile.fail_threshold is not None
-                else default_fail
+                else (
+                    adaptive_controller.base_fail_threshold
+                    if adaptive_controller is not None
+                    else default_fail
+                )
             )
         )
         effective_sym = (
@@ -463,6 +481,7 @@ class LogitGate(BaseGate):
         self._calibration_lock = threading.Lock()
         self.max_positional_bias = bias_val
         self.warm_prefix = effective_warm_prefix
+        self.adaptive_controller = adaptive_controller
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
         self.name = name
@@ -640,6 +659,23 @@ class LogitGate(BaseGate):
         latency = (time.perf_counter() - t0) * 1000.0
         prob_rounded = round(calibrated_prob, 4)
 
+        aci = self.adaptive_controller
+        aci_theta: float | None = None
+        eff_fail_thresh = self.fail_threshold
+        eff_pass_thresh = self.pass_threshold
+        eff_fail_lo = 0.0
+        eff_pass_lo = 0.0
+        force_ambig = False
+        if aci is not None:
+            (
+                aci_theta,
+                eff_fail_thresh,
+                eff_pass_thresh,
+                eff_fail_lo,
+                eff_pass_lo,
+                force_ambig,
+            ) = aci.current_decision_state()
+
         abstained_reason: str | None = None
         if not fwd_has_target or not rev_has_target:
             status = DecisionStatus.AMBIGUOUS
@@ -653,9 +689,19 @@ class LogitGate(BaseGate):
         ):
             status = DecisionStatus.AMBIGUOUS
             abstained_reason = f"positional_bias_exceeded ({pos_bias:.4f} > {self.max_positional_bias:.4f})"
-        elif prob_rounded >= self.pass_threshold:
+        elif force_ambig:
+            status = DecisionStatus.AMBIGUOUS
+            abstained_reason = "adaptive_conformal_band_saturated"
+        elif aci is not None and aci_theta is not None and aci_theta > 0.0:
+            if prob_rounded >= eff_pass_thresh and log_odds_pass >= eff_pass_lo:
+                status = DecisionStatus.PASSED
+            elif prob_rounded <= eff_fail_thresh and log_odds_pass <= eff_fail_lo:
+                status = DecisionStatus.FAILED
+            else:
+                status = DecisionStatus.AMBIGUOUS
+        elif prob_rounded >= eff_pass_thresh:
             status = DecisionStatus.PASSED
-        elif prob_rounded <= self.fail_threshold:
+        elif prob_rounded <= eff_fail_thresh:
             status = DecisionStatus.FAILED
         else:
             status = DecisionStatus.AMBIGUOUS
@@ -666,6 +712,11 @@ class LogitGate(BaseGate):
             "log_odds_pass": round(log_odds_pass, 4),
             "shannon_entropy": round(shannon_entropy, 4),
         }
+        if aci is not None and aci_theta is not None:
+            meta["adaptive_theta"] = round(aci_theta, 4)
+            meta["adaptive_fail_threshold"] = eff_fail_thresh
+            meta["adaptive_pass_threshold"] = eff_pass_thresh
+            meta["raw_l1_status"] = status.value
         if abstained_reason is not None:
             meta["abstained_reason"] = abstained_reason
         trace = LayerTrace(
@@ -690,7 +741,7 @@ class LogitGate(BaseGate):
             triggered_layer=self.name,
             total_latency_ms=latency,
             total_tokens_generated=0,
-            reason=f"LogitGate prob={prob_rounded:.4f} (pass_thresh={self.pass_threshold}, fail_thresh={self.fail_threshold})",
+            reason=f"LogitGate prob={prob_rounded:.4f} (pass_thresh={eff_pass_thresh}, fail_thresh={eff_fail_thresh})",
             traces=[trace],
         )
 
@@ -917,6 +968,10 @@ class MultiRubricGate(BaseGate):
         return self._gate.profile
 
     @property
+    def adaptive_controller(self) -> AdaptiveConformalController | None:
+        return self._gate.adaptive_controller
+
+    @property
     def telemetry_sink(self) -> Any:
         return self._gate.telemetry_sink
 
@@ -953,6 +1008,10 @@ class MultiRubricGate(BaseGate):
             status = DecisionStatus.AMBIGUOUS
         else:
             status = DecisionStatus.PASSED
+        if self._gate.adaptive_controller is not None and traces:
+            traces[0] = traces[0].model_copy(
+                update={"metadata": {**traces[0].metadata, "raw_l1_status": status.value}}
+            )
         probs = [v.probability for v in verdicts if v.probability is not None]
         unresolved = [
             f"{v.status.value.upper()} {rubric!r} (P={v.probability:.4f})"
