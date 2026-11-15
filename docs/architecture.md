@@ -215,14 +215,14 @@ Small sub-4B Layer-1 models fail on hard counterfactual rubrics in two opposite 
 
 ---
 
-## OpenTelemetry Span Bridge & `v1.0.0` API Stability Contract
+## OpenTelemetry Span Bridge & Schema Compatibility (`v0.12.0`)
 
-`v1.0.0` promotes LogitGate to `Development Status :: 5 - Production/Stable` and completes the observability stack with `OtelSpanSink` (`logitgate.telemetry.otel`):
+`v0.12.0` extends the observability stack with `OtelSpanSink` (`logitgate.telemetry.otel`) and schema-versioned artifact contracts:
 
 - **Zero-Dependency OpenTelemetry Integration (`OtelSpanSink`)**:
   - Lazily resolves `opentelemetry.trace.get_tracer(instrumentation_name, version)` when `opentelemetry-api` (`pip install 'logitgate[otel]'`) is installed, accepts any injected `Tracer` implementing `start_as_current_span(...)` or `start_span(...)`, and degrades cleanly to a zero-overhead no-op (`is_enabled == False`) when `opentelemetry-api` is absent (`require_otel=False` default).
   - Emits strictly sanitized OpenTelemetry primitive and homogeneous-list attributes (`gen_ai.system`, `gen_ai.request.model`, `logitgate.gate.*`, `logitgate.verdict.*`, `logitgate.teacher.*`, `logitgate.layers.*`, `logitgate.candidate.sha256`, and `logitgate.tag.<key>`), omitting `None` and non-finite (`NaN`/`±inf`) values automatically.
   - Records per-layer execution traces as `"logitgate.layer"` span events (`record_layer_events=True`), optionally marks failed verdicts with `StatusCode.ERROR` (`error_on_fail=True`), defaults to `privacy="omit_candidate"` (scrubbing both raw candidate text and generative `JudgeGate` critique strings from exported spans), and supports full `with` / `async with` sink lifecycles alongside `CompositeTelemetrySink`.
-- **`1.x` Public API & Artifact Schema Stability Contract**:
-  - Top-level exports in `logitgate.__all__` (gates, backends, `Cascade`, `CalibrationProfile`, `AdaptiveConformalController`, `DistilledAnchorBank`, `LogitMetaCalibrator`, `DistillationBundle`, `StreamGuard`, `VerdictCache`, `TelemetryRecord`, `DistillationRecord`, `OtelSpanSink`, and CLI subcommands `eval`, `calibrate`, `explain`, `benchmark`, `rank`, `stream`, `telemetry`, `distill`) follow strict Semantic Versioning across `1.x`.
-  - Serialized JSON/SQLite schemas (`CalibrationProfile`, `VerdictSnapshot`, `TelemetryRecord`, `DistillationRecord`, `DistillationBundle`, and `lgcache:v1:<sha256>` cache keys) carry explicit `schema_version` fields so `1.x` minor releases preserve backward-compatible loading.
+- **Public API Surface & Artifact Schema Versioning**:
+  - Top-level exports in `logitgate.__all__` cover gates, backends, `Cascade`, `CalibrationProfile`, `AdaptiveConformalController`, `DistilledAnchorBank`, `LogitMetaCalibrator`, `DistillationBundle`, `StreamGuard`, `VerdictCache`, `TelemetryRecord`, `DistillationRecord`, `OtelSpanSink`, and CLI subcommands (`eval`, `calibrate`, `explain`, `benchmark`, `rank`, `stream`, `telemetry`, `distill`).
+  - Serialized JSON/SQLite schemas (`CalibrationProfile`, `VerdictSnapshot`, `TelemetryRecord`, `DistillationRecord`, `DistillationBundle`, and `lgcache:v1:<sha256>` cache keys) carry explicit `schema_version` fields to support backward-compatible artifact loading across releases.

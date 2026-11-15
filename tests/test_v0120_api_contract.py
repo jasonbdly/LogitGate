@@ -95,21 +95,21 @@ class _StartSpanOnlyTracer:
 
 
 # ---------------------------------------------------------------------------
-# 1. Public v1.0.0 API Stability & Packaging Contract
+# 1. Public v0.12.0 API Surface & Packaging Contract
 # ---------------------------------------------------------------------------
 
 
-def test_v100_public_api_exports_and_packaging_metadata() -> None:
+def test_v0120_public_api_exports_and_packaging_metadata() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-    assert "Development Status :: 5 - Production/Stable" in pyproject_text
+    assert "Development Status :: 4 - Beta" in pyproject_text
     assert 'otel = ["opentelemetry-api>=1.20.0"]' in pyproject_text
     assert (repo_root / "src" / "logitgate" / "py.typed").is_file()
 
     exported = logitgate.__all__
     assert len(exported) == len(set(exported)), "Duplicate symbols in logitgate.__all__"
 
-    # Required v1.0.0 surface families
+    # Required v0.12.0 surface families
     required_symbols = {
         # Gates & routing
         "ASTGate",
@@ -148,7 +148,7 @@ def test_v100_public_api_exports_and_packaging_metadata() -> None:
         "guard_stream",
         "aguard_stream",
         "VerdictCache",
-        # Telemetry, drift, & OpenTelemetry (v0.8.0 - v1.0.0)
+        # Telemetry, drift, & OpenTelemetry (v0.8.0 - v0.12.0)
         "TelemetryRecord",
         "TelemetrySink",
         "JsonlTelemetrySink",
@@ -163,7 +163,7 @@ def test_v100_public_api_exports_and_packaging_metadata() -> None:
         "compute_ks_two_sample",
     }
     missing = required_symbols - set(exported)
-    assert not missing, f"Missing core v1.0.0 symbols from __all__: {missing}"
+    assert not missing, f"Missing core v0.12.0 symbols from __all__: {missing}"
 
     dir_entries = set(dir(logitgate))
     lazy_optional = {
@@ -372,11 +372,11 @@ def test_otel_zero_dependency_noop_require_otel_and_error_policies(
 
 
 # ---------------------------------------------------------------------------
-# 3. Pre-v1.0.0 Five-Track Audit Regression Tests
+# 3. v0.12.0 Five-Track Audit Regression Tests
 # ---------------------------------------------------------------------------
 
 
-def test_v100_audit_remediations_security_math_and_io(tmp_path: Path) -> None:
+def test_v0120_audit_remediations_security_math_and_io(tmp_path: Path) -> None:
     import asyncio
     import subprocess as sp
 

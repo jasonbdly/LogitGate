@@ -595,7 +595,7 @@ leakage = check_split_leakage(
 assert leakage.is_clean and leakage.shared_domains == ()
 ```
 
-### OpenTelemetry Span Bridge (`v1.0.0`, `OtelSpanSink`)
+### OpenTelemetry Span Bridge (`v0.12.0`, `OtelSpanSink`)
 Export `LogitGate` and `Cascade` verdicts into OpenTelemetry distributed traces (`gen_ai.*` + `logitgate.*` semantic attributes and per-layer `logitgate.layer` span events) with privacy-safe candidate omission (`privacy="omit_candidate"` by default) or linear-time PII scrubbing (`privacy="redact_pii"`). `OtelSpanSink` accepts any OpenTelemetry `Tracer` (via `pip install 'logitgate[otel]'`) or duck-typed tracer, and degrades to a zero-overhead no-op when `opentelemetry-api` is not installed:
 
 ```python
@@ -709,7 +709,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Execution mechanics, lookahead policy, and failure preservation
   - Hardware sizing across CPU-only, consumer GPU, and multi-GPU setups
   - Deployment topologies to prevent KV-cache eviction
-  - Portable `CalibrationProfile`, `RankGate`/`BestOfNGate`, `logitgate.telemetry` sinks, and `OtelSpanSink` (`v1.0.0` API stability contract)
+  - Portable `CalibrationProfile`, `RankGate`/`BestOfNGate`, `logitgate.telemetry` sinks, and `OtelSpanSink` (`v0.12.0` distributed tracing bridge)
 - **[Mathematical Foundations & Symmetric Debiasing](docs/math_and_debiasing.md)**:
   - Proof of token and position bias cancellation in log-odds space
   - Why probability averaging fails under sigmoid saturation
