@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.8.0] - 2026-11-14
 
 ### Added
 - **Production Verdict Telemetry & Privacy Sinks (`logitgate.telemetry`):** Added `TelemetryRecord`, `TelemetrySummary`, `PrivacyMode` (`full`, `redact_pii`, `hash_candidate`, `metrics_only`), linear-time `redact_text()` (emails, `Bearer` headers, `sk-`/`ghp_`/`glpat-`/`AKIA` secrets, US SSNs, and Luhn-validated payment cards) and `hash_candidate()`, `TelemetrySink`, symlink-hardened thread-safe `JsonlTelemetrySink` with size-based file rotation (`max_bytes`, `backup_count`) and configurable `ErrorPolicy` (`warn`, `raise`, `ignore`), `MemoryTelemetrySink`, `CallbackTelemetrySink`, `CompositeTelemetrySink`, `load_telemetry_records()`, `summarize_telemetry()`, and `TelemetryWarning`.
