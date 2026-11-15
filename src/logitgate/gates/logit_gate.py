@@ -47,6 +47,9 @@ from logitgate.snapshot import persist_failure_snapshot
 if TYPE_CHECKING:
     from logitgate.calibration.adaptive import AdaptiveConformalController
     from logitgate.calibration.profile import CalibrationProfile
+    from logitgate.distill.anchor_bank import DistilledAnchorBank
+    from logitgate.distill.bundle import DistillationBundle
+    from logitgate.distill.meta_calibrator import LogitMetaCalibrator
 
 TopLogprobs = list[dict[str, Any]]
 
@@ -350,11 +353,17 @@ class LogitGate(BaseGate):
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         adaptive_controller: AdaptiveConformalController | None = None,
+        anchor_bank: DistilledAnchorBank | str | Path | None = None,
+        meta_calibrator: LogitMetaCalibrator | str | Path | None = None,
+        distillation_bundle: DistillationBundle | str | Path | None = None,
         telemetry_sink: Any = None,
         cache: Any = None,
     ) -> None:
         from logitgate.calibration.adaptive import AdaptiveConformalController as _ACI
         from logitgate.calibration.profile import resolve_calibration_profile
+        from logitgate.distill.anchor_bank import resolve_anchor_bank
+        from logitgate.distill.bundle import resolve_distillation_bundle
+        from logitgate.distill.meta_calibrator import resolve_meta_calibrator
         from logitgate.telemetry.sinks import resolve_telemetry_sink
 
         if adaptive_controller is not None and not isinstance(adaptive_controller, _ACI):
@@ -362,7 +371,22 @@ class LogitGate(BaseGate):
                 f"adaptive_controller must be an AdaptiveConformalController or None, "
                 f"got {type(adaptive_controller).__name__}"
             )
-        loaded_profile = resolve_calibration_profile(profile)
+        resolved_bundle = resolve_distillation_bundle(distillation_bundle)
+        resolved_anchors = resolve_anchor_bank(anchor_bank)
+        if resolved_anchors is None and resolved_bundle is not None:
+            resolved_anchors = resolved_bundle.anchor_bank
+        resolved_meta = resolve_meta_calibrator(meta_calibrator)
+        if resolved_meta is None and resolved_bundle is not None:
+            resolved_meta = resolved_bundle.meta_calibrator
+        resolved_unanchored_meta = (
+            resolved_bundle.unanchored_meta_calibrator
+            if meta_calibrator is None and resolved_bundle is not None
+            else None
+        )
+        explicit_profile = resolve_calibration_profile(profile)
+        loaded_profile = explicit_profile
+        if loaded_profile is None and resolved_bundle is not None:
+            loaded_profile = resolved_bundle.profile
         if loaded_profile is None and adaptive_controller is not None:
             loaded_profile = adaptive_controller.profile
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
@@ -392,12 +416,20 @@ class LogitGate(BaseGate):
             pass_threshold
             if pass_threshold is not None
             else (
-                loaded_profile.pass_threshold
-                if loaded_profile is not None and loaded_profile.pass_threshold is not None
+                explicit_profile.pass_threshold
+                if explicit_profile is not None and explicit_profile.pass_threshold is not None
                 else (
-                    adaptive_controller.base_pass_threshold
-                    if adaptive_controller is not None
-                    else default_pass
+                    resolved_meta.pass_threshold
+                    if resolved_meta is not None and resolved_meta.pass_threshold is not None
+                    else (
+                        loaded_profile.pass_threshold
+                        if loaded_profile is not None and loaded_profile.pass_threshold is not None
+                        else (
+                            adaptive_controller.base_pass_threshold
+                            if adaptive_controller is not None
+                            else default_pass
+                        )
+                    )
                 )
             )
         )
@@ -405,12 +437,20 @@ class LogitGate(BaseGate):
             fail_threshold
             if fail_threshold is not None
             else (
-                loaded_profile.fail_threshold
-                if loaded_profile is not None and loaded_profile.fail_threshold is not None
+                explicit_profile.fail_threshold
+                if explicit_profile is not None and explicit_profile.fail_threshold is not None
                 else (
-                    adaptive_controller.base_fail_threshold
-                    if adaptive_controller is not None
-                    else default_fail
+                    resolved_meta.fail_threshold
+                    if resolved_meta is not None and resolved_meta.fail_threshold is not None
+                    else (
+                        loaded_profile.fail_threshold
+                        if loaded_profile is not None and loaded_profile.fail_threshold is not None
+                        else (
+                            adaptive_controller.base_fail_threshold
+                            if adaptive_controller is not None
+                            else default_fail
+                        )
+                    )
                 )
             )
         )
@@ -477,11 +517,25 @@ class LogitGate(BaseGate):
         self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = needs_lazy
+        self._needs_lazy_calibration = (
+            False
+            if (resolved_meta is not None or resolved_unanchored_meta is not None)
+            else needs_lazy
+        )
+        self._explicit_thresholds = (
+            pass_threshold is not None
+            or fail_threshold is not None
+            or explicit_profile is not None
+            or preset is not None
+        )
         self._calibration_lock = threading.Lock()
         self.max_positional_bias = bias_val
         self.warm_prefix = effective_warm_prefix
         self.adaptive_controller = adaptive_controller
+        self.anchor_bank = resolved_anchors
+        self.meta_calibrator = resolved_meta
+        self.unanchored_meta_calibrator = resolved_unanchored_meta
+        self.distillation_bundle = resolved_bundle
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
         self.name = name
@@ -567,6 +621,50 @@ class LogitGate(BaseGate):
 
     # -- Prompt construction & scoring (shared by sync, async, and batch paths) ------------
 
+    def _binary_prompts_with_anchor_flag(
+        self,
+        candidate: Any,
+        rubrics: Sequence[str] | None = None,
+        rubric_index: int = 0,
+        *,
+        boundary_nonce: str | None = None,
+    ) -> tuple[str, str | None, bool]:
+        target_r = self.rubric if rubrics is None else rubrics[rubric_index]
+        anchor_str = (
+            self.anchor_bank.format_anchor_block(
+                target_r,
+                candidate,
+                boundary_nonce=boundary_nonce,
+            )
+            if self.anchor_bank is not None
+            else None
+        )
+        was_anchored = bool(anchor_str and anchor_str.strip())
+
+        def build(pass_token: str, fail_token: str) -> str:
+            if rubrics is None:
+                return compile_binary_prompt(
+                    rubric=self.rubric,
+                    candidate=candidate,
+                    pass_token=pass_token,
+                    fail_token=fail_token,
+                    query_first=self.query_first,
+                    boundary_nonce=boundary_nonce,
+                    anchor_block=anchor_str,
+                )
+            return compile_batch_binary_prompt(
+                rubrics=rubrics,
+                candidate=candidate,
+                rubric_index=rubric_index,
+                pass_token=pass_token,
+                fail_token=fail_token,
+                query_first=False,
+                boundary_nonce=boundary_nonce,
+                anchor_block=anchor_str,
+            )
+
+        return build("A", "B"), (build("B", "A") if self.symmetric_debiasing else None), was_anchored
+
     def _binary_prompts(
         self,
         candidate: Any,
@@ -580,28 +678,13 @@ class LogitGate(BaseGate):
         Forward binds A=PASS/B=FAIL, reverse binds B=PASS/A=FAIL. Both share a byte-identical
         prefix (rubric + candidate) so the second pass is mostly a KV-cache hit.
         """
-
-        def build(pass_token: str, fail_token: str) -> str:
-            if rubrics is None:
-                return compile_binary_prompt(
-                    rubric=self.rubric,
-                    candidate=candidate,
-                    pass_token=pass_token,
-                    fail_token=fail_token,
-                    query_first=self.query_first,
-                    boundary_nonce=boundary_nonce,
-                )
-            return compile_batch_binary_prompt(
-                rubrics=rubrics,
-                candidate=candidate,
-                rubric_index=rubric_index,
-                pass_token=pass_token,
-                fail_token=fail_token,
-                query_first=False,
-                boundary_nonce=boundary_nonce,
-            )
-
-        return build("A", "B"), (build("B", "A") if self.symmetric_debiasing else None)
+        fwd, rev, _ = self._binary_prompts_with_anchor_flag(
+            candidate,
+            rubrics,
+            rubric_index,
+            boundary_nonce=boundary_nonce,
+        )
+        return fwd, rev
 
     def _query(self, prompt: str) -> list[dict[str, Any]]:
         return self.backend.query_top_logprobs(prompt, top_k=10, allowed_tokens=["A", "B"])
@@ -627,6 +710,8 @@ class LogitGate(BaseGate):
         top_fwd: list[dict[str, Any]],
         top_rev: list[dict[str, Any]] | None,
         t0: float,
+        *,
+        anchored: bool = False,
     ) -> Verdict:
         """Turns first-token logprobs into a calibrated, thresholded verdict.
 
@@ -642,18 +727,37 @@ class LogitGate(BaseGate):
         l2: float | None = None
         p2: float | None = None
         pos_bias: float | None = None
+        active_mc = (
+            self.meta_calibrator
+            if anchored
+            else (self.unanchored_meta_calibrator or self.meta_calibrator)
+        )
         if top_rev is not None:
             l2, p2 = compute_binary_log_odds(top_rev, pass_token="B", fail_token="A")
-            calibrated_prob = combine_symmetric_log_odds(
-                forward_log_odds=l1,
-                reverse_log_odds=l2,
-                logit_temperature=self.logit_temperature,
-            )
             pos_bias = 0.5 * abs(l1 - l2)
-            log_odds_pass = (l1 + l2) / (2.0 * temp)
+            if active_mc is not None:
+                from logitgate.distill.meta_calibrator import extract_logit_features
+
+                feat_vec = extract_logit_features(top_fwd, top_rev)
+                log_odds_pass = active_mc.predict_log_odds(feat_vec)
+                calibrated_prob = _clamped_sigmoid(log_odds_pass)
+            else:
+                calibrated_prob = combine_symmetric_log_odds(
+                    forward_log_odds=l1,
+                    reverse_log_odds=l2,
+                    logit_temperature=self.logit_temperature,
+                )
+                log_odds_pass = (l1 + l2) / (2.0 * temp)
         else:
-            log_odds_pass = l1 / temp
-            calibrated_prob = _clamped_sigmoid(log_odds_pass)
+            if active_mc is not None:
+                from logitgate.distill.meta_calibrator import extract_logit_features
+
+                feat_vec = extract_logit_features(top_fwd, None)
+                log_odds_pass = active_mc.predict_log_odds(feat_vec)
+                calibrated_prob = _clamped_sigmoid(log_odds_pass)
+            else:
+                log_odds_pass = l1 / temp
+                calibrated_prob = _clamped_sigmoid(log_odds_pass)
 
         shannon_entropy = compute_shannon_entropy(calibrated_prob)
         latency = (time.perf_counter() - t0) * 1000.0
@@ -663,6 +767,16 @@ class LogitGate(BaseGate):
         aci_theta: float | None = None
         eff_fail_thresh = self.fail_threshold
         eff_pass_thresh = self.pass_threshold
+        if (
+            aci is None
+            and not self._explicit_thresholds
+            and active_mc is not None
+            and active_mc.pass_threshold is not None
+            and active_mc.fail_threshold is not None
+            and active_mc.pass_threshold > active_mc.fail_threshold
+        ):
+            eff_pass_thresh = active_mc.pass_threshold
+            eff_fail_thresh = active_mc.fail_threshold
         eff_fail_lo = 0.0
         eff_pass_lo = 0.0
         force_ambig = False
@@ -712,6 +826,10 @@ class LogitGate(BaseGate):
             "log_odds_pass": round(log_odds_pass, 4),
             "shannon_entropy": round(shannon_entropy, 4),
         }
+        if active_mc is not None:
+            meta["meta_calibrated"] = True
+        if self.anchor_bank is not None:
+            meta["anchored"] = anchored
         if aci is not None and aci_theta is not None:
             meta["adaptive_theta"] = round(aci_theta, 4)
             meta["adaptive_fail_threshold"] = eff_fail_thresh
@@ -783,10 +901,16 @@ class LogitGate(BaseGate):
             )
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
-        forward, reverse = self._binary_prompts(candidate, boundary_nonce=nonce)
+        forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+            candidate, boundary_nonce=nonce
+        )
         top_fwd = self._query(forward)
         top_rev = self._query(reverse) if reverse is not None else None
-        return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
+        return self._handle_failure_snapshot(
+            candidate,
+            self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored),
+            **kwargs,
+        )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
@@ -801,8 +925,15 @@ class LogitGate(BaseGate):
             )
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
-        top_fwd, top_rev = await self._aquery_pair(*self._binary_prompts(candidate, boundary_nonce=nonce))
-        return self._handle_failure_snapshot(candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs)
+        forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+            candidate, boundary_nonce=nonce
+        )
+        top_fwd, top_rev = await self._aquery_pair(forward, reverse)
+        return self._handle_failure_snapshot(
+            candidate,
+            self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored),
+            **kwargs,
+        )
 
     def evaluate_batch(
         self, candidate: Any, rubrics: Sequence[str], *, fail_fast: bool = False
@@ -826,10 +957,12 @@ class LogitGate(BaseGate):
         results = []
         for idx in range(len(rubrics)):
             t0 = time.perf_counter()
-            forward, reverse = self._binary_prompts(candidate, rubrics, idx, boundary_nonce=nonce)
+            forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+                candidate, rubrics, idx, boundary_nonce=nonce
+            )
             top_fwd = self._query(forward)
             top_rev = self._query(reverse) if reverse is not None else None
-            verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0)
+            verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
             results.append(verdict)
             if fail_fast and verdict.status == DecisionStatus.FAILED:
                 break
@@ -860,10 +993,11 @@ class LogitGate(BaseGate):
         async def _eval_single(idx: int) -> Verdict:
             async with sem:
                 t0 = time.perf_counter()
-                top_fwd, top_rev = await self._aquery_pair(
-                    *self._binary_prompts(candidate, rubrics, idx, boundary_nonce=nonce)
+                forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+                    candidate, rubrics, idx, boundary_nonce=nonce
                 )
-                return self._verdict_from_logprobs(top_fwd, top_rev, t0)
+                top_fwd, top_rev = await self._aquery_pair(forward, reverse)
+                return self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
 
         first_verdict = await _eval_single(0)
         if fail_fast:
@@ -970,6 +1104,18 @@ class MultiRubricGate(BaseGate):
     @property
     def adaptive_controller(self) -> AdaptiveConformalController | None:
         return self._gate.adaptive_controller
+
+    @property
+    def anchor_bank(self) -> DistilledAnchorBank | None:
+        return self._gate.anchor_bank
+
+    @property
+    def meta_calibrator(self) -> LogitMetaCalibrator | None:
+        return self._gate.meta_calibrator
+
+    @property
+    def distillation_bundle(self) -> DistillationBundle | None:
+        return self._gate.distillation_bundle
 
     @property
     def telemetry_sink(self) -> Any:

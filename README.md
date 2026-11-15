@@ -531,6 +531,50 @@ verdict = pipeline.evaluate("SELECT id FROM accounts WHERE id = :id")
 assert verdict.passed and aci.summary().total_steps == 1
 ```
 
+### Two-Tier BYO Teacher-to-Student Distillation (`v0.11.0`)
+Transfer Layer-2 teacher calibration and boundary discrimination into any small or closed-API Layer-1 student without domain memorization via two complementary tiers:
+- **Tier A (`DistillationBundle` = `DistilledAnchorBank` + `<1 KB` `LogitMetaCalibrator`, zero weight training, 100% BYO endpoints):** Compiles relevance-gated contrastive `(PASS, FAIL)` minimal pairs inside the static KV-cache prefix (`min_rubric_overlap=0.25`, abstaining cleanly on unseen out-of-domain rubrics) alongside a 5-feature L2-regularized logistic + 5-fold out-of-fold split-conformal calibration head (`[symmetric_log_odds, signed_slot_bias, positional_bias_magnitude, top_k_entropy, unobserved_residual_mass]`) with an unpenalized intercept that corrects systematic small-model skepticism or sycophancy.
+- **Tier B (`logitgate[distill]`, `train_distillation_lora`):** Architecture-agnostic PEFT `target_modules="all-linear"` first-token symmetric (`A/B` + `B/A`) LoRA compiler across Qwen, Llama, Gemma, Mistral, and Phi CausalLMs, emitting ready-to-run `Modelfile.ollama`, `serve_vllm.sh`, and `serve_llamacpp.sh` manifests.
+
+```python
+import tempfile
+from pathlib import Path
+from logitgate import LogitGate, StubBackend, compile_distillation_bundle
+
+split_a = [
+    {
+        "id": f"sql_{i}",
+        "rubric": "Does the SQL query parameterize all user inputs?",
+        "candidate": f"SELECT id FROM users WHERE email = :email_{i}"
+        if i % 2 == 0
+        else f"SELECT id FROM users WHERE email = '{i}'",
+        "expected": (i % 2) == 0,
+    }
+    for i in range(40)
+]
+
+with tempfile.TemporaryDirectory() as tmp:
+    student = StubBackend(default_prob=0.90)
+    bundle = compile_distillation_bundle(
+        dataset=split_a,
+        backend=student,
+        student_model="student-3b",
+        teacher_model="teacher-26b",
+        target_risk_alpha=0.10,
+    )
+    bundle_path = bundle.save(Path(tmp) / "distill_bundle.json")
+
+    gate = LogitGate(
+        "Does the SQL query parameterize all user inputs?",
+        backend=student,
+        distillation_bundle=bundle_path,
+    )
+    verdict = gate.evaluate("SELECT id FROM accounts WHERE tenant_id = :tid")
+    assert verdict.probability is not None
+    assert verdict.traces[0].metadata.get("meta_calibrated") is True
+    assert verdict.traces[0].metadata.get("anchored") is True
+```
+
 ### Benchmark Confounder & Cross-Split Leakage Auditing (`v0.8.1`)
 Audit calibration and benchmark datasets in **0 LLM calls** for Pass-vs-Fail length confounders (`length_auroc`), rubric-blind unigram shortcuts (`lexical_loo_accuracy`), split-conformal sample-power floors (`n >= 39`/class for `alpha = 0.05`), and cross-split leakage (`check_split_leakage` via exact and word-3-gram Jaccard shingle indexing):
 
@@ -594,6 +638,16 @@ logitgate telemetry summary verdicts.jsonl --json
 logitgate telemetry drift current_verdicts.jsonl --reference baseline_verdicts.jsonl --fail-on-drift --json
 logitgate telemetry recalibrate verdicts.jsonl --alpha 0.10 --output recalibrated_profile.json
 logitgate telemetry export verdicts.jsonl --format sft_jsonl --output student_sft.jsonl
+
+# Compile a portable BYO DistillationBundle (from Split-A dataset or 0-call telemetry) and apply it
+logitgate distill compile --telemetry distill_records.jsonl --alpha 0.10 --output distill_bundle.json
+logitgate distill compile --dataset benchmarks/data/cal_distill_80.json \
+    --backend "ollama://localhost:11434" --model "qwen2.5-coder:3b" --output distill_bundle.json
+logitgate eval --rubric "Safe SQL" --file query.sql --bundle distill_bundle.json
+
+# Compile an architecture-agnostic PEFT all-linear LoRA adapter + multi-runtime manifests (pip install 'logitgate[distill]')
+logitgate distill train-lora --base-model Qwen/Qwen2.5-Coder-3B-Instruct \
+    --dataset benchmarks/data/cal_distill_80.json --ollama-base qwen2.5-coder:3b --output-dir ./lora_student
 ```
 
 Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreachable or misconfigured.
@@ -611,6 +665,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Deconfounded `2x2` counterfactual OOD suite (`OOD-96`) & domain-disjoint conformal transfer (`Split A -> Split B`)
   - Mid-stream token guardrails (`StreamGuard`) & content-addressed `VerdictCache` (`>5,200x` SQLite / `>6,100x` LRU speedup)
   - Online drift detection (`RollingDriftMonitor`) & Gibbs–Candès Adaptive Conformal Control (`AdaptiveConformalController`) across 4-regime distribution shifts
+  - Two-tier BYO teacher-to-student distillation (`DistilledAnchorBank`, `<1 KB` `LogitMetaCalibrator`, relevance-gated OOD transfer, & multi-family PEFT `all-linear` LoRA compilation)
   - Falsification boundaries: reasoning depth, 16k-token haystack scaling, and context window (`num_ctx`) squeezing
   - Elastic recurrent layer-looping (NVIDIA Dory-4B, RTX 5090 vs RTX 4070)
 - **[3-Layer Architecture & Deployment Topologies](docs/architecture.md)**:

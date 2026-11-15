@@ -316,6 +316,7 @@ def run_benchmark(
     judge_think: bool = False,
     cascade_trigger: EscalationPolicy = "on_ambiguous_only",
     profile: CalibrationProfile | str | Path | None = None,
+    distillation_bundle: Any = None,
     cache: Any = False,
     dataset_label: str = "builtin",
     progress: Callable[[str], None] | None = None,
@@ -357,7 +358,10 @@ def run_benchmark(
     if judge_max_tokens is not None and (isinstance(judge_max_tokens, bool) or judge_max_tokens < 1):
         raise ValueError(f"judge_max_tokens must be >= 1, got {judge_max_tokens!r}")
 
+    from logitgate.distill.bundle import resolve_distillation_bundle
+
     resolved_profile = resolve_calibration_profile(profile)
+    resolved_bundle = resolve_distillation_bundle(distillation_bundle)
     owns_cache = not isinstance(cache, VerdictCache) and cache not in (None, False)
     resolved_cache = (
         VerdictCache()
@@ -377,7 +381,9 @@ def run_benchmark(
             owns_backend = not isinstance(backend, LogitBackend)
             resolved = resolve_logit_backend(backend, model=model)
             effective_model = model or getattr(resolved, "model", None) or getattr(resolved, "model_name", None)
-            if resolved_profile is None:
+            if resolved_profile is None and (
+                resolved_bundle is None or resolved_bundle.meta_calibrator is None
+            ):
                 _prewarm_calibration_if_needed(resolved, effective_model)
             metered: _MeteredBackend | None = _MeteredBackend(resolved, require_generative=False)
         else:
@@ -479,6 +485,7 @@ def run_benchmark(
                 model=effective_model,
                 save_on_fail=False,
                 profile=resolved_profile,
+                distillation_bundle=resolved_bundle,
                 cache=resolved_cache if mode == "logit" else False,
             )
             if mode == "logit":

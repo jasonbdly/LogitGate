@@ -747,7 +747,52 @@ Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to 
 
 ---
 
-### 13. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 13. Two-Tier BYO Teacher-to-Student Distillation (`v0.11.0`)
+
+#### A. Zero-Shot Domain-Disjoint BYO Transfer (`Split A` Teacher-Labeled -> Unseen `OOD-96`)
+
+To test whether distillation teaches transferable calibration and polarity invariants rather than domain-specific memorization, **Split A** ([`benchmarks/data/cal_distill_80.json`](../benchmarks/data/cal_distill_80.json), `80` items across `4` domains: Python, SQL, RAG summarization, support ops; `max_candidate_jaccard = 0.0147` and `0` shared domains against Split B) was adjudicated live by Teacher **`gemma4:26b` `JudgeGate`** (RTX 5090, `79/80 = 98.8%` Split-A accuracy; `94/96 = 97.9%` standalone Split-B accuracy) with **zero human ground-truth labels fed into student fitting**. Every calibration profile, `<1 KB` `LogitMetaCalibrator` (`621–627 B` JSON), `DistilledAnchorBank` (`24` pairs, `45.9 KB`), and `0`-LLM-call telemetry bundle (`15.3–19.5 ms` compile time) was fitted **strictly on Split A** and evaluated **100% zero-shot** across all `96` items (`6` unseen reasoning families) of [`benchmarks/data/ood_generalization_96.json`](../benchmarks/data/ood_generalization_96.json):
+
+| BYO Student (RTX 4070) | Regime (Fitted Strictly on Teacher-Labeled Split A) | Unseen `OOD-96` Acc (`Std / CF`) | `Hard Pos / Hard Neg` | AUROC | Brier | OOD L1 Risk (`alpha=0.10`) | Fast-Path | `Cascade` Acc |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b`** (`627 B` meta JSON) | Raw Baseline (`T = 1.0`, `[0.20, 0.85]`) | `59.4%` (`68.8% / 50.0%`) | `20.8% / 79.2%` | `0.7205` | `0.2423` | `3.1%` | `20.8%` | `94.8%` |
+| *(over-skeptical specialist)* | Split-A Scalar `CalibrationProfile` (`alpha = 0.10`) | `59.4%` (`68.8% / 50.0%`) | `20.8% / 79.2%` | `0.7203` | `0.2330` | `7.3%` | `33.3%` | `90.6%` |
+| | Forced Off-Domain Anchors (`min_rubric_overlap = 0.0`, ablation) | `63.5%` (`68.8% / 58.3%`) | **`58.3% / 58.3%`** | `0.6684` | `0.2406` | `7.3%` | `28.1%` | `90.6%` |
+| | `0`-Call Telemetry Bundle (`min_rubric_overlap = 0.0`, `15.3 ms`) | **`63.5%`** (`68.8% / 58.3%`) | `54.2% / 62.5%` | `0.6688` | `0.2418` | `10.4%` | `35.4%` | `87.5%` |
+| | **Default Relevance-Gated `DistillationBundle` (`overlap = 0.25`)** | **`61.5%`** (`70.8% / 52.1%`) | **`50.0% / 54.2%`** | `0.7144` | **`0.2382`** | `13.5%` | `40.6%` | `85.4%` |
+| **`llama3.2:3b`** (`622 B` meta JSON) | Raw Baseline (`T = 1.0`, `[0.20, 0.85]`) | `63.5%` (`70.8% / 56.2%`) | `87.5% / 25.0%` | `0.7027` | `0.2455` | `12.5%` | `45.8%` | `85.4%` |
+| *(sycophantic generalist)* | Split-A Scalar `CalibrationProfile` (`alpha = 0.10`) | `63.5%` (`70.8% / 56.2%`) | `87.5% / 25.0%` | `0.7027` | `0.2275` | `10.4%` | `39.6%` | `87.5%` |
+| | Forced Off-Domain Anchors (`min_rubric_overlap = 0.0`, ablation) | `57.3%` (`66.7% / 47.9%`) | `37.5% / 58.3%` | `0.6243` | `0.2443` | **`5.2%`** | `18.8%` | **`92.7%`** |
+| | **Default Relevance-Gated `DistillationBundle` (`overlap = 0.25`)** | **`66.7%` (`79.2% / 54.2%`)** | **`66.7% / 41.7%`** | `0.6970` | **`0.2256`** | `11.5%` | `38.5%` | `86.5%` |
+| **`gemma4:e4b`** (`621 B` meta JSON) | Raw Baseline (`T = 1.0`, `[0.20, 0.85]`) | `84.4%` (`91.7% / 77.1%`) | `79.2% / 75.0%` | `0.9355` | `0.1418` | `13.5%` | `93.8%` | `85.4%` |
+| *(reasoning-capable 4B)* | Split-A Scalar `CalibrationProfile` (`alpha = 0.10`) | `84.4%` (`91.7% / 77.1%`) | `79.2% / 75.0%` | `0.9384` | `0.1156` | `10.4%` *(>10%)* | `79.2%` | `88.5%` |
+| | Forced Off-Domain Anchors (`min_rubric_overlap = 0.0`, ablation) | `80.2%` (`89.6% / 70.8%`) | `87.5% / 54.2%` | `0.8566` | `0.1584` | **`9.4%`** | `63.5%` | `88.5%` |
+| | **Default Relevance-Gated `DistillationBundle` (`overlap = 0.25`)** | `83.3%` (`91.7% / 75.0%`) | **`83.3% / 66.7%`** | **`0.9388`** | **`0.1146`** | **`9.4%` (`<=10%`)** | **`77.1%`** | **`89.6%`** |
+
+*Key scientific findings:*
+- **Why Unpenalized Intercept + 5-Feature Meta-Calibration Beats Scalar Temperature Scaling (`T`):** Scalar temperature scaling $p = \sigma(z_{\text{sym}} / T)$ leaves every forced-binary (`p >= 0.50`) prediction unchanged (`59.4% -> 59.4%` on `qwen2.5-coder:3b`, `63.5% -> 63.5%` on `llama3.2:3b`). Fitting `<1 KB` `LogitMetaCalibrator` on Teacher-labeled Split A shifts the skewed decision boundary zero-shot across all `6` unseen domains — lifting `qwen2.5-coder:3b` `hard_positive` recall **`20.8% -> 50.0% (+29.2 pp)`**, lifting `llama3.2:3b` `hard_negative` specificity **`25.0% -> 41.7% (+16.7 pp, overall +3.2 pp)`**, and improving `gemma4:e4b` Brier **`0.1418 -> 0.1146 (-19.2%)`** while bringing OOD Layer-1 selective error inside target `alpha = 0.10` (**`9.4% <= 10.0%`**, `Cascade` accuracy **`85.4% -> 89.6%`**).
+- **In-Rubric Gain vs. Off-Domain Few-Shot Pollution (`min_rubric_overlap = 0.25`):** On **in-rubric Split A** (`5`-fold out-of-fold with `exclude_exact=True`), matched `[CALIBRATION ANCHORS]` raise OOF AUROC on both `qwen2.5-coder:3b` (**`0.6936 -> 0.7283`**) and `gemma4:e4b` (**`0.9531 -> 0.9637`**). Conversely, force-injecting SQL/Python anchors (`min_rubric_overlap = 0.0`) into unrelated clinical and statistical `max_tokens=1` prompts distracts general instruction models (`gemma4:e4b` AUROC `0.9355 -> 0.8566`, `llama3.2:3b` `0.7027 -> 0.6243`) and inflates prompt-prefill latency. Gating anchor injection via Szymkiewicz–Simpson rubric token overlap (`min_rubric_overlap = 0.25` default) achieves **`100%` (`80/80`) in-rubric recall** and **`100%` (`96/96`) unseen-OOD abstention**, routing OOD rubrics automatically to `unanchored_meta_calibrator` with zero extra prompt tokens.
+
+#### B. Tier-B Architecture-Agnostic PEFT `all-linear` LoRA Compiler (`logitgate[distill]`)
+
+Evaluated across `3` distinct HuggingFace `CausalLM` model families on the `160` symmetric (`A/B` + `B/A`) first-token Teacher-labeled Split-A examples using **one identical `LoRADistillConfig(rank=8, lora_alpha=16, target_modules="all-linear")`** (zero model-specific layer names):
+
+| CausalLM Family | Auto-Hooked Linear Projections (`target_modules="all-linear"`) | Trainable / Total Params | Adapter `.safetensors` | First-Token Loss (`Init -> Final`) | Compile Wall Time | Multi-Runtime Exports Verified |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **`LlamaForCausalLM`** | `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj` | `16,384 / 123,200` (`13.30%`) | `67.41 KB` | `5.4926 -> 4.6367` (**`-15.6%`**) | `3.04 s` | `Modelfile.ollama`, `serve_vllm.sh`, `serve_llamacpp.sh`, post-LoRA bundle |
+| **`Qwen2ForCausalLM`** | `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj` | `16,384 / 123,456` (`13.27%`) | `67.41 KB` | `5.4863 -> 4.6537` (**`-15.2%`**) | `2.56 s` | `Modelfile.ollama`, `serve_vllm.sh`, `serve_llamacpp.sh`, post-LoRA bundle |
+| **`MistralForCausalLM`** | `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj` | `16,384 / 123,200` (`13.30%`) | `67.41 KB` | `5.4801 -> 4.6875` (**`-14.5%`**) | `2.61 s` | `Modelfile.ollama`, `serve_vllm.sh`, `serve_llamacpp.sh`, post-LoRA bundle |
+
+#### C. Pure-CPU Execution (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`, Stratified `OOD-24`)
+
+Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `{'gpu0': [], 'gpu1': []}`) across `24` stratified unseen OOD items (`6` domains × `4` variants):
+- **Raw Baseline (`T = 1.0`):** `70.8%` accuracy (`50.0%` `hard_positive`), `4.2%` Layer-1 selective error, `2,020.2 ms` mean / `1,957.6 ms` median CPU latency.
+- **Forced Off-Domain Anchors (`min_rubric_overlap = 0.0`, ablation):** `58.3%` accuracy, **`5,278.4 ms` mean CPU latency (`2.61x` slower)** due to off-domain prompt-prefill tokens.
+- **Default Relevance-Gated `DistillationBundle` (`min_rubric_overlap = 0.25`):** **`75.0%` accuracy (`+4.2 pp`, lifting `hard_positive` `50.0% -> 83.3%`)**, **`8.3% <= 10.0%`** Layer-1 selective error (`91.7%` `Cascade` accuracy), and **`1,987.8 ms` mean / `1,919.9 ms` median CPU latency** (`0` prompt-bloat overhead).
+
+---
+
+### 14. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

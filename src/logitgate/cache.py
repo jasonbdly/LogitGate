@@ -173,6 +173,7 @@ def _backend_fingerprint(backend: Any, gate_model: str | None = None) -> dict[st
     lora_path = getattr(raw, "lora_path", None)
     if lora_path:
         fp["lora_path"] = str(lora_path)
+        fp["lora_scale"] = round(float(getattr(raw, "lora_scale", 1.0)), 6)
     return fp
 
 
@@ -248,6 +249,18 @@ def gate_cache_fingerprint(gate: BaseGate) -> dict[str, Any]:
     aci = getattr(gate, "adaptive_controller", None)
     if aci is not None and hasattr(aci, "cache_fingerprint"):
         fp["adaptive_controller"] = _canonicalize_value(aci.cache_fingerprint())
+
+    anchor_bank = getattr(gate, "anchor_bank", None)
+    if anchor_bank is not None and hasattr(anchor_bank, "cache_fingerprint"):
+        fp["anchor_bank"] = _canonicalize_value(anchor_bank.cache_fingerprint())
+
+    meta_cal = getattr(gate, "meta_calibrator", None)
+    if meta_cal is not None and hasattr(meta_cal, "cache_fingerprint"):
+        fp["meta_calibrator"] = _canonicalize_value(meta_cal.cache_fingerprint())
+
+    unanch_meta = getattr(gate, "unanchored_meta_calibrator", None)
+    if unanch_meta is not None and hasattr(unanch_meta, "cache_fingerprint"):
+        fp["unanchored_meta_calibrator"] = _canonicalize_value(unanch_meta.cache_fingerprint())
 
     replay = gate.replay_config()
     if replay is not None:

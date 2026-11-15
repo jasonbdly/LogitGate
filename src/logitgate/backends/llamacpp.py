@@ -41,17 +41,43 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         *,
         suppress_thinking: bool = True,
         auto_logit_bias: bool = False,
+        lora_path: str | None = None,
+        lora_scale: float = 1.0,
     ) -> None:
         if not isinstance(suppress_thinking, bool):
             raise ConfigurationError(f"suppress_thinking must be a bool, got {suppress_thinking!r}")
         if not isinstance(auto_logit_bias, bool):
             raise ConfigurationError(f"auto_logit_bias must be a bool, got {auto_logit_bias!r}")
+        if lora_path is not None and (not isinstance(lora_path, str) or not lora_path.strip()):
+            raise ConfigurationError(f"lora_path must be a non-empty string or None, got {lora_path!r}")
+        if (
+            isinstance(lora_scale, bool)
+            or not isinstance(lora_scale, (int, float))
+            or not math.isfinite(float(lora_scale))
+            or float(lora_scale) <= 0.0
+        ):
+            raise ConfigurationError(f"lora_scale must be a finite positive float, got {lora_scale!r}")
+        if isinstance(llm, str):
+            try:
+                from llama_cpp import Llama
+            except ImportError as exc:
+                raise ConfigurationError(
+                    "Loading a GGUF model path in LlamaCppBackend requires llama-cpp-python. "
+                    "Install via: pip install 'logitgate[llamacpp]'"
+                ) from exc
+            llama_kwargs: dict[str, Any] = {"model_path": llm, "logits_all": True}
+            if lora_path is not None:
+                llama_kwargs["lora_path"] = lora_path
+                llama_kwargs["lora_scale"] = float(lora_scale)
+            llm = Llama(**llama_kwargs)
         self.llm = llm
         self.base_url = base_url.rstrip("/") if base_url is not None else "http://localhost:8080"
         self.model = model
         self.timeout = timeout
         self.suppress_thinking = suppress_thinking
         self.auto_logit_bias = auto_logit_bias
+        self.lora_path = lora_path
+        self.lora_scale = float(lora_scale)
         self._supports_chat_template_kwargs = True
         self._logit_bias_cache: dict[tuple[str, ...], dict[str, int | float]] = {}
         self._init_http_clients(client=client, async_client=async_client)

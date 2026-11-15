@@ -133,6 +133,7 @@ class AdaptiveConformalController:
         self,
         profile: CalibrationProfile | str | Path | None = None,
         *,
+        distillation_bundle: Any = None,
         pass_threshold: float | None = None,
         fail_threshold: float | None = None,
         target_risk_alpha: float | None = None,
@@ -146,33 +147,64 @@ class AdaptiveConformalController:
         max_history: int = 512,
         seed: int | None = 42,
     ) -> None:
-        loaded_profile = resolve_calibration_profile(profile)
+        from logitgate.distill.bundle import resolve_distillation_bundle
+
+        loaded_bundle = resolve_distillation_bundle(distillation_bundle)
+        explicit_profile = resolve_calibration_profile(profile)
+        loaded_profile = explicit_profile
+        if loaded_profile is None and loaded_bundle is not None:
+            loaded_profile = loaded_bundle.profile
+        bundle_mc = loaded_bundle.meta_calibrator if loaded_bundle is not None else None
 
         raw_pass = (
             pass_threshold
             if pass_threshold is not None
             else (
-                loaded_profile.pass_threshold
-                if loaded_profile is not None and loaded_profile.pass_threshold is not None
-                else LogitGateDefaults.pass_threshold
+                explicit_profile.pass_threshold
+                if explicit_profile is not None and explicit_profile.pass_threshold is not None
+                else (
+                    bundle_mc.pass_threshold
+                    if bundle_mc is not None and bundle_mc.pass_threshold is not None
+                    else (
+                        loaded_profile.pass_threshold
+                        if loaded_profile is not None and loaded_profile.pass_threshold is not None
+                        else LogitGateDefaults.pass_threshold
+                    )
+                )
             )
         )
         raw_fail = (
             fail_threshold
             if fail_threshold is not None
             else (
-                loaded_profile.fail_threshold
-                if loaded_profile is not None and loaded_profile.fail_threshold is not None
-                else LogitGateDefaults.fail_threshold
+                explicit_profile.fail_threshold
+                if explicit_profile is not None and explicit_profile.fail_threshold is not None
+                else (
+                    bundle_mc.fail_threshold
+                    if bundle_mc is not None and bundle_mc.fail_threshold is not None
+                    else (
+                        loaded_profile.fail_threshold
+                        if loaded_profile is not None and loaded_profile.fail_threshold is not None
+                        else LogitGateDefaults.fail_threshold
+                    )
+                )
             )
         )
         raw_alpha = (
             target_risk_alpha
             if target_risk_alpha is not None
             else (
-                loaded_profile.target_risk_alpha
-                if loaded_profile is not None and loaded_profile.target_risk_alpha is not None
-                else 0.05
+                explicit_profile.target_risk_alpha
+                if explicit_profile is not None and explicit_profile.target_risk_alpha is not None
+                else (
+                    bundle_mc.target_risk_alpha
+                    if bundle_mc is not None and bundle_mc.target_risk_alpha is not None
+                    else (
+                        loaded_profile.target_risk_alpha
+                        if loaded_profile is not None and loaded_profile.target_risk_alpha is not None
+                        else 0.05
+                    )
+                )
             )
         )
 

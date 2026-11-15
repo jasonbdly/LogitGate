@@ -82,6 +82,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Path to a CalibrationProfile JSON file",
     )
     eval_parser.add_argument(
+        "--bundle",
+        type=str,
+        default=None,
+        help="Path to a DistillationBundle JSON file (anchors + meta-calibrator)",
+    )
+    eval_parser.add_argument(
         "--ast-syntax",
         action="store_true",
         help="Enable Layer 0 AST syntax validation before logit evaluation",
@@ -266,6 +272,12 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Path to a CalibrationProfile JSON file for LogitGate / cascade modes",
+    )
+    bench_parser.add_argument(
+        "--bundle",
+        type=str,
+        default=None,
+        help="Path to a DistillationBundle JSON file for LogitGate / cascade modes",
     )
     bench_parser.add_argument(
         "--cache",
@@ -577,6 +589,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Optional CalibrationProfile JSON path",
     )
     stream_parser.add_argument(
+        "--bundle",
+        type=str,
+        default=None,
+        help="Optional DistillationBundle JSON path",
+    )
+    stream_parser.add_argument(
         "--backend",
         type=str,
         default=None,
@@ -622,6 +640,132 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Output StreamGuardSummary and yielded text in JSON format",
     )
+
+    distill_parser = subparsers.add_parser(
+        "distill",
+        help="Compile BYO teacher-to-student distillation bundles (Tier A) or PEFT LoRA adapters (Tier B)",
+    )
+    distill_sub = distill_parser.add_subparsers(dest="distill_cmd", required=True)
+
+    distill_compile = distill_sub.add_parser(
+        "compile",
+        help="Compile a portable DistillationBundle JSON (DistilledAnchorBank + optional LogitMetaCalibrator)",
+    )
+    distill_compile.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Split-A dataset path (.json, .jsonl, or .md) to mine contrastive minimal-pair anchors",
+    )
+    distill_compile.add_argument(
+        "--telemetry",
+        type=str,
+        default=None,
+        help="DistillationSink / TelemetrySink JSONL path to compile anchors and fit 0-call meta-calibrator",
+    )
+    distill_compile.add_argument(
+        "--output",
+        "-o",
+        required=True,
+        type=str,
+        help="Output path for the compiled DistillationBundle JSON file",
+    )
+    distill_compile.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="Optional student backend specifier to fit a 5-feature LogitMetaCalibrator on --dataset",
+    )
+    distill_compile.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Optional student model identifier",
+    )
+    distill_compile.add_argument(
+        "--teacher-model",
+        type=str,
+        default=None,
+        help="Optional teacher model identifier recorded in bundle metadata",
+    )
+    distill_compile.add_argument(
+        "--alpha",
+        type=float,
+        default=0.10,
+        help="Target out-of-fold split-conformal selective risk alpha (default: 0.10)",
+    )
+    distill_compile.add_argument(
+        "--max-pairs",
+        type=int,
+        default=24,
+        help="Maximum contrastive pairs stored in DistilledAnchorBank (default: 24)",
+    )
+    distill_compile.add_argument(
+        "--retrieve-pairs",
+        type=int,
+        default=1,
+        help="Default contrastive pairs retrieved per evaluation query (default: 1)",
+    )
+    distill_compile.add_argument(
+        "--min-rubric-overlap",
+        type=float,
+        default=0.25,
+        help="Minimum Szymkiewicz-Simpson rubric token overlap [0.0..1.0] required before injecting anchors; abstains cleanly on OOD rubrics (default: 0.25)",
+    )
+    distill_compile.add_argument(
+        "--no-anchors",
+        action="store_true",
+        help="Omit DistilledAnchorBank (fit student LogitMetaCalibrator only)",
+    )
+    distill_compile.add_argument(
+        "--no-meta",
+        action="store_true",
+        help="Omit LogitMetaCalibrator (compile 100% model-agnostic DistilledAnchorBank only)",
+    )
+    distill_compile.add_argument("--json", action="store_true", help="Output bundle metadata as JSON")
+
+    distill_lora = distill_sub.add_parser(
+        "train-lora",
+        help="Train an architecture-agnostic PEFT LoRA adapter (target_modules='all-linear') for any open-weights CausalLM",
+    )
+    distill_lora.add_argument(
+        "--base-model",
+        required=True,
+        type=str,
+        help="HuggingFace model ID or local checkpoint directory (Qwen, Llama, Gemma, Mistral, Phi, etc.)",
+    )
+    distill_lora.add_argument(
+        "--dataset",
+        required=True,
+        type=str,
+        help="Dataset or distillation JSONL file (.json, .jsonl, .md)",
+    )
+    distill_lora.add_argument(
+        "--output-dir",
+        "-o",
+        required=True,
+        type=str,
+        help="Output directory for adapter/, calibration_profile.json, Modelfile.ollama, and launch scripts",
+    )
+    distill_lora.add_argument("--rank", type=int, default=8, help="LoRA rank r (default: 8)")
+    distill_lora.add_argument("--lora-alpha", type=int, default=16, help="LoRA alpha (default: 16)")
+    distill_lora.add_argument("--epochs", type=int, default=3, help="Training epochs (default: 3)")
+    distill_lora.add_argument("--batch-size", type=int, default=4, help="Micro-batch size (default: 4)")
+    distill_lora.add_argument("--lr", type=float, default=2e-4, help="Learning rate (default: 2e-4)")
+    distill_lora.add_argument(
+        "--alpha",
+        type=float,
+        default=0.10,
+        help="Post-LoRA conformal calibration target risk alpha (default: 0.10)",
+    )
+    distill_lora.add_argument(
+        "--ollama-base",
+        type=str,
+        default=None,
+        help="Optional Ollama base tag written into Modelfile.ollama FROM line",
+    )
+    distill_lora.add_argument("--device", type=str, default="auto", help="Compute device (auto, cpu, cuda, mps)")
+    distill_lora.add_argument("--json", action="store_true", help="Output LoRADistillManifest as JSON")
 
     return parser
 
@@ -1167,6 +1311,7 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             judge_think=args.judge_think,
             cascade_trigger=args.cascade_trigger,
             profile=args.profile,
+            distillation_bundle=getattr(args, "bundle", None),
             cache=cache_arg,
             dataset_label=label,
             progress=None if (args.quiet or args.json) else progress,
@@ -1225,6 +1370,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             pass_threshold=args.threshold,
             fail_threshold=args.fail_threshold,
             profile=args.profile,
+            distillation_bundle=getattr(args, "bundle", None),
             telemetry_sink=sink if not has_ast else None,
             cache=cache_obj if not has_ast else False,
         )
@@ -1599,6 +1745,7 @@ def _cmd_stream(args: argparse.Namespace) -> int:
             pass_threshold=args.threshold,
             fail_threshold=args.fail_threshold,
             profile=args.profile,
+            distillation_bundle=getattr(args, "bundle", None),
             save_on_fail=False,
             telemetry_sink=sink if not has_judge else False,
             cache=cache_obj if not has_judge else False,
@@ -1669,6 +1816,88 @@ def _cmd_stream(args: argparse.Namespace) -> int:
     return EXIT_OK if summary.passed else EXIT_FAILED
 
 
+def _cmd_distill(args: argparse.Namespace) -> int:
+    import json
+
+    if args.distill_cmd == "compile":
+        from logitgate.distill.bundle import compile_distillation_bundle
+
+        bundle = compile_distillation_bundle(
+            dataset=args.dataset,
+            telemetry=args.telemetry,
+            backend=args.backend,
+            student_model=args.model,
+            teacher_model=args.teacher_model,
+            include_anchors=not args.no_anchors,
+            fit_meta=not args.no_meta,
+            max_bank_pairs=args.max_pairs,
+            default_retrieve_pairs=args.retrieve_pairs,
+            min_rubric_overlap=args.min_rubric_overlap,
+            target_risk_alpha=args.alpha,
+        )
+        saved = bundle.save(args.output)
+        if args.json:
+            payload = {
+                "output_path": str(saved),
+                "has_anchor_bank": bundle.anchor_bank is not None,
+                "num_anchor_pairs": len(bundle.anchor_bank.pairs) if bundle.anchor_bank else 0,
+                "has_meta_calibrator": bundle.meta_calibrator is not None,
+                "meta_oof_auroc": (
+                    bundle.meta_calibrator.oof_auroc if bundle.meta_calibrator else None
+                ),
+                "pass_threshold": (
+                    bundle.meta_calibrator.pass_threshold if bundle.meta_calibrator else None
+                ),
+                "fail_threshold": (
+                    bundle.meta_calibrator.fail_threshold if bundle.meta_calibrator else None
+                ),
+                "has_profile": bundle.profile is not None,
+            }
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Saved DistillationBundle to {sanitize_terminal_text(str(saved))}")
+            if bundle.anchor_bank is not None:
+                print(f"  Anchor Pairs:      {len(bundle.anchor_bank.pairs)} (retrieve k={bundle.anchor_bank.max_pairs})")
+            if bundle.meta_calibrator is not None:
+                mc = bundle.meta_calibrator
+                print(
+                    f"  Meta-Calibrator:   intercept={mc.intercept:+.4f}, w_sym={mc.weights[0]:.4f}, "
+                    f"OOF AUROC={mc.oof_auroc}, thresholds=[{mc.fail_threshold}, {mc.pass_threshold}]"
+                )
+        return EXIT_OK
+
+    if args.distill_cmd == "train-lora":
+        from logitgate.distill.lora import LoRADistillConfig, train_distillation_lora
+
+        cfg = LoRADistillConfig(
+            rank=args.rank,
+            lora_alpha=args.lora_alpha,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+            device=args.device,
+        )
+        manifest = train_distillation_lora(
+            args.base_model,
+            args.dataset,
+            args.output_dir,
+            config=cfg,
+            calibrate_alpha=args.alpha,
+            ollama_base_model=args.ollama_base,
+        )
+        if args.json:
+            print(manifest.model_dump_json(indent=2))
+        else:
+            print(f"Trained PEFT LoRA adapter -> {sanitize_terminal_text(manifest.adapter_dir)}")
+            print(f"  Loss:              {manifest.initial_loss:.4f} -> {manifest.final_loss:.4f}")
+            print(f"  Ollama Modelfile:  {sanitize_terminal_text(manifest.ollama_modelfile_path)}")
+            print(f"  vLLM Launch:       {sanitize_terminal_text(manifest.vllm_launch_script_path)}")
+            print(f"  llama.cpp Launch:  {sanitize_terminal_text(manifest.llamacpp_launch_script_path)}")
+        return EXIT_OK
+
+    return EXIT_FAILED
+
+
 _COMMANDS: dict[str, Any] = {
     "eval": _cmd_eval,
     "calibrate": _cmd_calibrate,
@@ -1677,6 +1906,7 @@ _COMMANDS: dict[str, Any] = {
     "rank": _cmd_rank,
     "telemetry": _cmd_telemetry,
     "stream": _cmd_stream,
+    "distill": _cmd_distill,
 }
 
 

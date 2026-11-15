@@ -44,6 +44,7 @@ deepeval = ["deepeval>=1.0.0"]
 langgraph = ["langgraph>=0.0.1"]
 llamacpp = ["llama-cpp-python>=0.2.0"]
 recurrent = ["torch>=2.0.0", "transformers>=4.40.0", "huggingface-hub>=0.20.0", "safetensors>=0.4.1"]
+distill = ["torch>=2.0.0", "transformers>=4.40.0", "peft>=0.10.0", "safetensors>=0.4.1"]
 pytest = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 test = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 all = [
@@ -52,6 +53,7 @@ all = [
     "llama-cpp-python>=0.2.0",
     "torch>=2.0.0",
     "transformers>=4.40.0",
+    "peft>=0.10.0",
     "huggingface-hub>=0.20.0",
     "safetensors>=0.4.1",
     "pytest>=8.0.0",
@@ -72,6 +74,7 @@ module = [
     "deepeval.*",
     "langgraph.*",
     "llama_cpp.*",
+    "peft.*",
     "torch.*",
     "transformers.*",
     "huggingface_hub.*",

@@ -259,7 +259,7 @@ def run_full_check(root: Path) -> bool:
 
     slim_check_code = (
         "import sys, pytest\n"
-        "BLOCKED = {'torch', 'deepeval', 'langgraph', 'llama_cpp', 'transformers', 'safetensors', 'huggingface_hub'}\n"
+        "BLOCKED = {'torch', 'deepeval', 'langgraph', 'llama_cpp', 'transformers', 'peft', 'safetensors', 'huggingface_hub'}\n"
         "class BlockOptionalImports:\n"
         "    def find_spec(self, fullname, path, target=None):\n"
         "        top = fullname.split('.')[0]\n"

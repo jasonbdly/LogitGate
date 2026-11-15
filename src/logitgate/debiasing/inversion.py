@@ -69,20 +69,32 @@ def compile_binary_prompt(
     pass_description: str = "The candidate artifact complies fully with the rubric.",
     fail_description: str = "The candidate artifact violates the rubric or has defects.",
     boundary_nonce: str | None = None,
+    anchor_block: str | None = None,
 ) -> str:
     """
     Compiles a prefix-cache-friendly binary evaluation prompt.
-    When query_first=True, the rubric and candidate artifact form a 100% byte-identical
-    static prefix across both Pass 1 and Pass 2, allowing KV-cache hit rates > 99%.
+    When query_first=True, the rubric, optional calibration anchors, and candidate artifact
+    form a 100% byte-identical static prefix across both Pass 1 and Pass 2, allowing
+    KV-cache hit rates > 99%.
     """
     safe_nonce = _sanitize_nonce(boundary_nonce)
     cand_str = _format_bounded_block(render_candidate(candidate), "candidate", safe_nonce)
     rubric_str = rubric.strip()
+    anchors_clean = anchor_block.strip() if anchor_block and anchor_block.strip() else ""
+    anchor_section = f"[CALIBRATION ANCHORS]\n{anchors_clean}\n\n" if anchors_clean else ""
 
     if query_first:
-        prefix = f"[EVALUATION RUBRIC]\n{rubric_str}\n\n[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+        prefix = (
+            f"[EVALUATION RUBRIC]\n{rubric_str}\n\n"
+            f"{anchor_section}"
+            f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+        )
     else:
-        prefix = f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n[EVALUATION RUBRIC]\n{rubric_str}\n\n"
+        prefix = (
+            f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+            f"[EVALUATION RUBRIC]\n{rubric_str}\n\n"
+            f"{anchor_section}"
+        )
 
     t_pass, t_fail = _validate_binary_tokens(pass_token, fail_token)
 
@@ -182,6 +194,7 @@ def compile_batch_binary_prompt(
     pass_description: str = "The candidate artifact complies fully with the rubric.",
     fail_description: str = "The candidate artifact violates the rubric or has defects.",
     boundary_nonce: str | None = None,
+    anchor_block: str | None = None,
 ) -> str:
     """
     Compiles an isolated, prefix-cache-friendly binary evaluation prompt for an individual rubric
@@ -205,6 +218,8 @@ def compile_batch_binary_prompt(
     safe_nonce = _sanitize_nonce(boundary_nonce)
     cand_str = _format_bounded_block(render_candidate(candidate), "candidate", safe_nonce)
     target_rubric = rubrics[rubric_index].strip()
+    anchors_clean = anchor_block.strip() if anchor_block and anchor_block.strip() else ""
+    anchor_section = f"[CALIBRATION ANCHORS]\n{anchors_clean}\n\n" if anchors_clean else ""
 
     t_pass, t_fail = _validate_binary_tokens(pass_token, fail_token)
 
@@ -221,6 +236,7 @@ def compile_batch_binary_prompt(
         suffix = (
             f"[EVALUATION RUBRIC]\n"
             f"{target_rubric}\n\n"
+            f"{anchor_section}"
             f"[DECISION MAPPING]\n"
             f"{_nonce_instruction_clause(safe_nonce)}"
             f"{option_lines}\n"
@@ -228,7 +244,11 @@ def compile_batch_binary_prompt(
             f"Verdict:"
         )
     else:
-        prefix = f"[EVALUATION RUBRIC]\n{target_rubric}\n\n[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+        prefix = (
+            f"[EVALUATION RUBRIC]\n{target_rubric}\n\n"
+            f"{anchor_section}"
+            f"[CANDIDATE ARTIFACT]\n{cand_str}\n\n"
+        )
         suffix = (
             f"[DECISION MAPPING]\n"
             f"{_nonce_instruction_clause(safe_nonce)}"
