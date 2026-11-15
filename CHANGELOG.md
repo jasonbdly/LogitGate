@@ -7,15 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] - 2026-11-15
+## [0.12.0] - 2026-11-15
 
 ### Added
 - **Zero-Dependency OpenTelemetry Span Bridge (`logitgate.telemetry.otel`, `logitgate[otel]`):** Added `OtelSpanSink` and `OtelAttributeValue` (re-exported at `logitgate` and `logitgate.telemetry`) to bridge structured `TelemetryRecord` evaluations into OpenTelemetry spans (`<span_prefix>.<gate_name>`) and per-layer `"logitgate.layer"` span events (`record_layer_events=True`). Lazily resolves `opentelemetry.trace.get_tracer(...)` when `opentelemetry-api` is installed, accepts any injected or duck-typed `Tracer` (`start_as_current_span` or `start_span`), degrades to a zero-overhead no-op when `opentelemetry-api` is absent (`require_otel=False`), enforces `privacy="omit_candidate"` by default, omits `None` and non-finite (`NaN`/`+-inf`) values per the OpenTelemetry attribute spec, and supports `error_on_fail=True`.
 - **Module Execution Entry Point & Async Sink Lifecycle Parity:** Added `src/logitgate/__main__.py` (`python -m logitgate`) and `aclose()` / `async with` context manager methods on `TelemetrySink` and `CompositeTelemetrySink`.
-- **Property-Based Fuzzing & `v1.0.0` Stability Contract Suites:** Added `hypothesis`-backed property fuzzing (`tests/test_v100_property_fuzzing.py`) across sigmoid/softmax/logprob boundaries, symmetric debiasing bias cancellation, conformal order statistics, meta-calibrator monotonicity, PSI/KS drift invariants, and linear-time PII/AST scanners, alongside public API contract tests (`tests/test_v100_api_contract.py`).
+- **Property-Based Fuzzing & Public API Surface Suites:** Added `hypothesis`-backed property fuzzing (`tests/test_v0120_property_fuzzing.py`) across sigmoid/softmax/logprob boundaries, symmetric debiasing bias cancellation, conformal order statistics, meta-calibrator monotonicity, PSI/KS drift invariants, and linear-time PII/AST scanners, alongside public API export and schema contract tests (`tests/test_v0120_api_contract.py`).
 
 ### Changed
-- **Promoted Package Classifier to `5 - Production/Stable`:** Promoted PyPI Trove classifier in `pyproject.toml` from `Development Status :: 4 - Beta` to `Development Status :: 5 - Production/Stable` and formalized the `1.x` public API and `schema_version` compatibility contract.
 - **PyTorch Inference Mode & Post-Training VRAM Hygiene:** Switched `HuggingFaceLogitBackend` and `RecurrentPyTorchBackend` forward passes from `torch.no_grad()` to `torch.inference_mode()`, added `HuggingFaceLogitBackend.close()` / `aclose()` and owned GGUF teardown in `LlamaCppBackend.close()`, and released optimizer buffers after `train_distillation_lora()`.
 
 ### Fixed
