@@ -1,3 +1,9 @@
+from logitgate.calibration.audit import (
+    DatasetAuditReport,
+    SplitLeakageReport,
+    audit_benchmark_dataset,
+    check_split_leakage,
+)
 from logitgate.calibration.conformal import (
     ConformalCascadeThresholds,
     calibrate_cascade_thresholds,
@@ -21,11 +27,15 @@ __all__ = [
     "CalibrationWarning",
     "ChoiceConformalThresholds",
     "ConformalCascadeThresholds",
+    "DatasetAuditReport",
     "ScoreConformalThresholds",
+    "SplitLeakageReport",
     "afit_calibration_profile",
+    "audit_benchmark_dataset",
     "calibrate_cascade_thresholds",
     "calibrate_choice_thresholds",
     "calibrate_score_thresholds",
+    "check_split_leakage",
     "fit_calibration_profile",
     "load_calibration_dataset",
     "min_samples_per_class",

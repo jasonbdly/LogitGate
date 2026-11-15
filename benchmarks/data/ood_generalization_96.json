@@ -1,0 +1,866 @@
+[
+  {
+    "id": "ood_stat_q1_base_rate_clean_pass",
+    "quad_id": "ood_stat_q1_base_rate",
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "In 100,000 people, ~100 truly have the condition (99 true positives) while 99,900 do not (~999 false positives). Thus a positive result means roughly 99 / 1,098 (~9.0%) posterior probability, not 99%."
+  },
+  {
+    "id": "ood_stat_q1_base_rate_hard_positive",
+    "quad_id": "ood_stat_q1_base_rate",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "Despite the 99% test accuracy headline, low 0.1% prevalence produces ~10 false positives per true positive, yielding a positive predictive value near 9% rather than 99%."
+  },
+  {
+    "id": "ood_stat_q1_base_rate_direct_fail",
+    "quad_id": "ood_stat_q1_base_rate",
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "Because the diagnostic assay has both 99% sensitivity and 99% specificity, a patient who tests positive has a 99% probability of actually having the condition regardless of population prevalence."
+  },
+  {
+    "id": "ood_stat_q1_base_rate_hard_negative",
+    "quad_id": "ood_stat_q1_base_rate",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "Accounting for the 0.1% base rate alongside 99% sensitivity and 99% specificity, Bayes' theorem reduces the posterior probability slightly from 99.0% to 98.9% for a positive screen."
+  },
+  {
+    "id": "ood_stat_q2_confounding_clean_pass",
+    "quad_id": "ood_stat_q2_confounding",
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "Because employees self-selected into the wellness app, the observed 28% lower sick-day rate is an unadjusted association that may reflect baseline health differences rather than a causal effect of the app."
+  },
+  {
+    "id": "ood_stat_q2_confounding_hard_positive",
+    "quad_id": "ood_stat_q2_confounding",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "While proponents claim the app caused a 28% drop in sick leave, this non-randomized observational comparison cannot rule out healthy-user selection bias without a controlled trial."
+  },
+  {
+    "id": "ood_stat_q2_confounding_direct_fail",
+    "quad_id": "ood_stat_q2_confounding",
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "Tracking 4,000 employees over six months proves that installing the optional wellness app directly causes a 28% reduction in employee sick days across the workforce."
+  },
+  {
+    "id": "ood_stat_q2_confounding_hard_negative",
+    "quad_id": "ood_stat_q2_confounding",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "Because the cohort size exceeded 4,000 employees with p < 0.001, sample size eliminates selection bias and confirms the optional app causally reduced sick days by 28%."
+  },
+  {
+    "id": "ood_stat_q3_simpsons_paradox_clean_pass",
+    "quad_id": "ood_stat_q3_simpsons_paradox",
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Treatment B outperforms Treatment A in both mild cases (92% vs 88%) and severe cases (55% vs 48%); its lower pooled rate occurs only because B was assigned disproportionately to severe cases."
+  },
+  {
+    "id": "ood_stat_q3_simpsons_paradox_hard_positive",
+    "quad_id": "ood_stat_q3_simpsons_paradox",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Pooling mild and severe patients creates a Simpson's paradox reversal: severity confounds treatment assignment, whereas stratified rates show Treatment B leads within each severity group."
+  },
+  {
+    "id": "ood_stat_q3_simpsons_paradox_direct_fail",
+    "quad_id": "ood_stat_q3_simpsons_paradox",
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Because Treatment A achieved a 78% overall recovery rate across all patients compared to 66% for Treatment B, Treatment A is more effective regardless of subgroup breakdowns."
+  },
+  {
+    "id": "ood_stat_q3_simpsons_paradox_hard_negative",
+    "quad_id": "ood_stat_q3_simpsons_paradox",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Stratified outcomes favor Treatment B in mild and severe subgroups, but unbiased clinical decisions should prioritize the pooled 78% vs 66% aggregate average because subgroup splits dilute statistical power."
+  },
+  {
+    "id": "ood_stat_q4_survivorship_bias_clean_pass",
+    "quad_id": "ood_stat_q4_survivorship_bias",
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Measuring 10-year returns only across funds surviving today omits poorly performing funds that shut down mid-decade, biasing the reported mean annual return upward via survivorship bias."
+  },
+  {
+    "id": "ood_stat_q4_survivorship_bias_hard_positive",
+    "quad_id": "ood_stat_q4_survivorship_bias",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Claiming an 'unbeatable 14.2% decade average' from currently listed funds is invalid unless liquidated and merged funds from the initial year-0 cohort are included."
+  },
+  {
+    "id": "ood_stat_q4_survivorship_bias_direct_fail",
+    "quad_id": "ood_stat_q4_survivorship_bias",
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Auditing all 180 funds currently trading on the exchange with a 10-year history provides an unbiased 14.2% estimate of expected annual return for a new investor."
+  },
+  {
+    "id": "ood_stat_q4_survivorship_bias_hard_negative",
+    "quad_id": "ood_stat_q4_survivorship_bias",
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Excluding funds that closed before year 10 improves data hygiene by removing incomplete time series, yielding a clean, unbiased 14.2% expected return across full-decade managers."
+  },
+  {
+    "id": "ood_quant_q1_mg_mcg_clean_pass",
+    "quad_id": "ood_quant_q1_mg_mcg",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Converting 0.25 mg at 1 mg = 1,000 mcg yields exactly 250 mcg; using 100 mcg/mL oral solution requires 2.5 mL to deliver the prescribed 0.25 mg dose."
+  },
+  {
+    "id": "ood_quant_q1_mg_mcg_hard_positive",
+    "quad_id": "ood_quant_q1_mg_mcg",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Never confuse milligram-to-microgram factors with 100x centigram steps: 0.25 mg multiplied by 1,000 mcg/mg equals 250 mcg (2.5 mL at 100 mcg/mL)."
+  },
+  {
+    "id": "ood_quant_q1_mg_mcg_direct_fail",
+    "quad_id": "ood_quant_q1_mg_mcg",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Converting 0.25 mg to micrograms at a 100 mcg/mg ratio yields 25 mcg total, which corresponds to drawing 0.25 mL of the standard 100 mcg/mL oral suspension."
+  },
+  {
+    "id": "ood_quant_q1_mg_mcg_hard_negative",
+    "quad_id": "ood_quant_q1_mg_mcg",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Applying the standard metric conversion factor (1 mg = 1,000 mcg), a 0.25 mg pediatric order equals 2,500 mcg, requiring 25.0 mL of the 100 mcg/mL oral solution."
+  },
+  {
+    "id": "ood_quant_q2_pct_vs_pp_clean_pass",
+    "quad_id": "ood_quant_q2_pct_vs_pp",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Moving from a 20% conversion rate to 25% represents an absolute gain of 5 percentage points (+5 pp), which is a 25% relative increase over the 20% baseline."
+  },
+  {
+    "id": "ood_quant_q2_pct_vs_pp_hard_positive",
+    "quad_id": "ood_quant_q2_pct_vs_pp",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Describing a 20% to 25% shift as a '5% relative lift' is inaccurate: the absolute delta is +5 percentage points, corresponding to a +25% relative improvement."
+  },
+  {
+    "id": "ood_quant_q2_pct_vs_pp_direct_fail",
+    "quad_id": "ood_quant_q2_pct_vs_pp",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Increasing checkout conversion from 20% up to 25% represents a 5% relative increase in total customer conversions compared against the prior quarter's 20% baseline."
+  },
+  {
+    "id": "ood_quant_q2_pct_vs_pp_hard_negative",
+    "quad_id": "ood_quant_q2_pct_vs_pp",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Rising from 20% to 25% checkout conversion delivers a 25 percentage-point absolute gain on the funnel chart, equivalent to a 5% relative lift over the 20% baseline."
+  },
+  {
+    "id": "ood_quant_q3_utc_offset_order_clean_pass",
+    "quad_id": "ood_quant_q3_utc_offset_order",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Normalizing to UTC, Event X occurred at 07:30 UTC (09:30 minus 2 hours) and Event Y occurred at 09:00 UTC (04:00 plus 5 hours); therefore Event X preceded Event Y by 90 minutes."
+  },
+  {
+    "id": "ood_quant_q3_utc_offset_order_hard_positive",
+    "quad_id": "ood_quant_q3_utc_offset_order",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Although 04:00 looks earlier on a wall clock than 09:30, -05:00 converts Event Y to 09:00 UTC while +02:00 converts Event X to 07:30 UTC, so Event X happened first."
+  },
+  {
+    "id": "ood_quant_q3_utc_offset_order_direct_fail",
+    "quad_id": "ood_quant_q3_utc_offset_order",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Comparing the two ISO-8601 timestamps directly on April 10, Event Y at 04:00:00-05:00 occurred 5.5 hours earlier in the morning than Event X at 09:30:00+02:00."
+  },
+  {
+    "id": "ood_quant_q3_utc_offset_order_hard_negative",
+    "quad_id": "ood_quant_q3_utc_offset_order",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Converting offsets to UTC, Event X (09:30+02:00) maps to 11:30 UTC and Event Y (04:00-05:00) maps to 23:00 UTC the prior day, placing Event Y well ahead of Event X."
+  },
+  {
+    "id": "ood_quant_q4_harmonic_speed_clean_pass",
+    "quad_id": "ood_quant_q4_harmonic_speed",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the calculation compute the exact round-trip average speed over an equal-distance outbound leg at 60 km/h and return leg at 40 km/h (48 km/h harmonic mean, NOT 50 km/h)?",
+    "candidate": "Over a 120 km leg each way (240 km total), outbound takes 2 hours at 60 km/h and return takes 3 hours at 40 km/h: 240 km / 5 h = 48 km/h."
+  },
+  {
+    "id": "ood_quant_q4_harmonic_speed_hard_positive",
+    "quad_id": "ood_quant_q4_harmonic_speed",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the calculation compute the exact round-trip average speed over an equal-distance outbound leg at 60 km/h and return leg at 40 km/h (48 km/h harmonic mean, NOT 50 km/h)?",
+    "candidate": "Arithmetic averaging ((60 + 40) / 2 = 50 km/h) fails for equal distances; the harmonic mean 2 * 60 * 40 / (60 + 40) gives the true 48 km/h round-trip speed."
+  },
+  {
+    "id": "ood_quant_q4_harmonic_speed_direct_fail",
+    "quad_id": "ood_quant_q4_harmonic_speed",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the calculation compute the exact round-trip average speed over an equal-distance outbound leg at 60 km/h and return leg at 40 km/h (48 km/h harmonic mean, NOT 50 km/h)?",
+    "candidate": "Because the outbound 60 km/h leg and return 40 km/h leg cover the exact same route distance, their combined round-trip average speed is (60 + 40) / 2 = 50 km/h."
+  },
+  {
+    "id": "ood_quant_q4_harmonic_speed_hard_negative",
+    "quad_id": "ood_quant_q4_harmonic_speed",
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the calculation compute the exact round-trip average speed over an equal-distance outbound leg at 60 km/h and return leg at 40 km/h (48 km/h harmonic mean, NOT 50 km/h)?",
+    "candidate": "Weighting each leg inversely by distance via the geometric mean sqrt(60 * 40) yields an exact round-trip average speed of 48.99 km/h across both equal-length legs."
+  },
+  {
+    "id": "ood_comp_q1_include_exclude_clean_pass",
+    "quad_id": "ood_comp_q1_include_exclude",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the blurb consist of exactly two sentences, mention both 'lithium' and 'cobalt', and contain zero numeric digits (0-9)?",
+    "candidate": "Modern cathode chemistries pair lithium with refined cobalt to stabilize energy density across repeated thermal cycles. Supply chains now audit artisanal cobalt refineries alongside brine lithium extraction sites."
+  },
+  {
+    "id": "ood_comp_q1_include_exclude_hard_positive",
+    "quad_id": "ood_comp_q1_include_exclude",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the blurb consist of exactly two sentences, mention both 'lithium' and 'cobalt', and contain zero numeric digits (0-9)?",
+    "candidate": "Battery researchers balance lithium ions against scarce cobalt oxides without relying on legacy nickel ratios. Recycled cobalt and domestic lithium brines strengthen grid storage resilience."
+  },
+  {
+    "id": "ood_comp_q1_include_exclude_direct_fail",
+    "quad_id": "ood_comp_q1_include_exclude",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the blurb consist of exactly two sentences, mention both 'lithium' and 'cobalt', and contain zero numeric digits (0-9)?",
+    "candidate": "Modern 400Wh battery packs combine lithium and cobalt in sentence one. Sentence two tracks 2026 cobalt recycling targets. Sentence three adds extra commentary."
+  },
+  {
+    "id": "ood_comp_q1_include_exclude_hard_negative",
+    "quad_id": "ood_comp_q1_include_exclude",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the blurb consist of exactly two sentences, mention both 'lithium' and 'cobalt', and contain zero numeric digits (0-9)?",
+    "candidate": "Modern cathode chemistries pair lithium with refined cobalt to stabilize energy density across Phase 2 thermal cycles. Supply chains now audit cobalt refineries alongside domestic lithium extraction sites."
+  },
+  {
+    "id": "ood_comp_q2_conditional_routing_clean_pass",
+    "quad_id": "ood_comp_q2_conditional_routing",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the decision follow the rule: IF customs_value > $800 AND origin != 'Domestic' THEN require Form-7501; OTHERWISE use Express-Manifest?",
+    "candidate": "Shipment #A92 has customs_value = $1,250 and origin = 'Domestic'. Because the origin is Domestic (violating the AND condition), it routes via Express-Manifest without requiring Form-7501."
+  },
+  {
+    "id": "ood_comp_q2_conditional_routing_hard_positive",
+    "quad_id": "ood_comp_q2_conditional_routing",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the decision follow the rule: IF customs_value > $800 AND origin != 'Domestic' THEN require Form-7501; OTHERWISE use Express-Manifest?",
+    "candidate": "Although Shipment #B14 originates from Germany (non-Domestic), its customs_value is $640 (not > $800), so the rule assigns Express-Manifest rather than Form-7501."
+  },
+  {
+    "id": "ood_comp_q2_conditional_routing_direct_fail",
+    "quad_id": "ood_comp_q2_conditional_routing",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the decision follow the rule: IF customs_value > $800 AND origin != 'Domestic' THEN require Form-7501; OTHERWISE use Express-Manifest?",
+    "candidate": "Shipment #A92 has customs_value = $1,250 and origin = 'Domestic'. Because the declared customs value exceeds the $800 cutoff, the shipment must file formal Form-7501."
+  },
+  {
+    "id": "ood_comp_q2_conditional_routing_hard_negative",
+    "quad_id": "ood_comp_q2_conditional_routing",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the decision follow the rule: IF customs_value > $800 AND origin != 'Domestic' THEN require Form-7501; OTHERWISE use Express-Manifest?",
+    "candidate": "Shipment #C08 has customs_value = $800.00 and origin = 'Japan'. Meeting both the $800 value cutoff and non-Domestic origin criteria, it must file formal Form-7501."
+  },
+  {
+    "id": "ood_comp_q3_negation_scope_clean_pass",
+    "quad_id": "ood_comp_q3_negation_scope",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the logical paraphrase preserve the meaning of 'Not all sensors in Zone 4 failed calibration' (at least one succeeded; NOT that zero failed)?",
+    "candidate": "At least one sensor in Zone 4 passed its calibration check, though one or more other sensors in Zone 4 may still have failed."
+  },
+  {
+    "id": "ood_comp_q3_negation_scope_hard_positive",
+    "quad_id": "ood_comp_q3_negation_scope",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the logical paraphrase preserve the meaning of 'Not all sensors in Zone 4 failed calibration' (at least one succeeded; NOT that zero failed)?",
+    "candidate": "The report does not claim that every Zone 4 sensor passed—only that calibration failure was not universal across all Zone 4 sensors."
+  },
+  {
+    "id": "ood_comp_q3_negation_scope_direct_fail",
+    "quad_id": "ood_comp_q3_negation_scope",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the logical paraphrase preserve the meaning of 'Not all sensors in Zone 4 failed calibration' (at least one succeeded; NOT that zero failed)?",
+    "candidate": "Every single sensor across the Zone 4 array passed its scheduled calibration check today with zero sensor failures recorded anywhere in the zone."
+  },
+  {
+    "id": "ood_comp_q3_negation_scope_hard_negative",
+    "quad_id": "ood_comp_q3_negation_scope",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the logical paraphrase preserve the meaning of 'Not all sensors in Zone 4 failed calibration' (at least one succeeded; NOT that zero failed)?",
+    "candidate": "None of the sensors installed in Zone 4 failed calibration during testing, confirming 100% operational readiness across the entire Zone 4 array."
+  },
+  {
+    "id": "ood_comp_q4_all_four_clauses_clean_pass",
+    "quad_id": "ood_comp_q4_all_four_clauses",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the password policy check enforce ALL FOUR rules: length >= 14, at least one uppercase letter, at least one symbol from !@#$%, and rejection of the substring 'company' (case-insensitive)?",
+    "candidate": "def valid_pw(pw: str) -> bool:\n    return (\n        len(pw) >= 14\n        and any(ch.isupper() for ch in pw)\n        and any(ch in '!@#$%' for ch in pw)\n        and 'company' not in pw.lower()\n    )"
+  },
+  {
+    "id": "ood_comp_q4_all_four_clauses_hard_positive",
+    "quad_id": "ood_comp_q4_all_four_clauses",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the password policy check enforce ALL FOUR rules: length >= 14, at least one uppercase letter, at least one symbol from !@#$%, and rejection of the substring 'company' (case-insensitive)?",
+    "candidate": "def valid_pw(pw: str) -> bool:\n    if len(pw) < 14 or 'company' in pw.casefold():\n        return False\n    has_up = any('A' <= c <= 'Z' for c in pw)\n    has_sym = bool(set(pw) & set('!@#$%'))\n    return has_up and has_sym"
+  },
+  {
+    "id": "ood_comp_q4_all_four_clauses_direct_fail",
+    "quad_id": "ood_comp_q4_all_four_clauses",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the password policy check enforce ALL FOUR rules: length >= 14, at least one uppercase letter, at least one symbol from !@#$%, and rejection of the substring 'company' (case-insensitive)?",
+    "candidate": "def valid_pw(pw: str) -> bool:\n    return (\n        len(pw) >= 10\n        and any(ch.isupper() for ch in pw)\n        and any(ch.isdigit() for ch in pw)\n    )"
+  },
+  {
+    "id": "ood_comp_q4_all_four_clauses_hard_negative",
+    "quad_id": "ood_comp_q4_all_four_clauses",
+    "domain": "compositional_and_negated_constraints",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the password policy check enforce ALL FOUR rules: length >= 14, at least one uppercase letter, at least one symbol from !@#$%, and rejection of the substring 'company' (case-insensitive)?",
+    "candidate": "def valid_pw(pw: str) -> bool:\n    return (\n        len(pw) >= 14\n        and any(ch.isupper() for ch in pw)\n        and any(ch in '!@#$%' for ch in pw)\n        and 'company' not in pw\n    )"
+  },
+  {
+    "id": "ood_reg_q1_contraindication_clean_pass",
+    "quad_id": "ood_reg_q1_contraindication",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient has eGFR 24 mL/min; Drug K is contraindicated due to severe renal impairment, so alternative non-renally cleared therapy is selected."
+  },
+  {
+    "id": "ood_reg_q1_contraindication_hard_positive",
+    "quad_id": "ood_reg_q1_contraindication",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient stopped phenelzine (an MAOI) 18 days ago and has eGFR 68 mL/min; initiating low-dose Drug K is permitted outside the 14-day washout."
+  },
+  {
+    "id": "ood_reg_q1_contraindication_direct_fail",
+    "quad_id": "ood_reg_q1_contraindication",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient presents with neuropathic pain and eGFR 22 mL/min; starting standard Drug K regimen today."
+  },
+  {
+    "id": "ood_reg_q1_contraindication_hard_negative",
+    "quad_id": "ood_reg_q1_contraindication",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient has normal renal function (eGFR 82 mL/min) and discontinued MAOI therapy 9 days ago; safe to initiate Drug K today."
+  },
+  {
+    "id": "ood_reg_q2_statutory_carveout_clean_pass",
+    "quad_id": "ood_reg_q2_statutory_carveout",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification, which require only annual registry listing.\n[ASSESSMENT] Because the cloud host is a wholly owned domestic affiliate with active ISO-27001 certification, prior Form D filing is exempt; only annual registry listing applies."
+  },
+  {
+    "id": "ood_reg_q2_statutory_carveout_hard_positive",
+    "quad_id": "ood_reg_q2_statutory_carveout",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification.\n[ASSESSMENT] Although the vendor holds ISO-27001 certification, it is an external third party rather than a wholly owned domestic affiliate, so 30-day prior Form D filing IS required."
+  },
+  {
+    "id": "ood_reg_q2_statutory_carveout_direct_fail",
+    "quad_id": "ood_reg_q2_statutory_carveout",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification.\n[ASSESSMENT] Every entity touching regulated records—including wholly owned ISO-27001 domestic affiliates—must file Form D 30 days in advance without exception."
+  },
+  {
+    "id": "ood_reg_q2_statutory_carveout_hard_negative",
+    "quad_id": "ood_reg_q2_statutory_carveout",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification.\n[ASSESSMENT] Because the wholly owned subsidiary is headquartered in Dublin with active ISO-27001 certification, it qualifies for the affiliate exemption and skips Form D."
+  },
+  {
+    "id": "ood_reg_q3_license_copyleft_clean_pass",
+    "quad_id": "ood_reg_q3_license_copyleft",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Statically linking a GPL-3.0 library into a distributed desktop binary triggers strong copyleft source-disclosure obligations for the combined work, unlike MIT which only requires preserving copyright and license notices."
+  },
+  {
+    "id": "ood_reg_q3_license_copyleft_hard_positive",
+    "quad_id": "ood_reg_q3_license_copyleft",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Internal private use of a GPL-3.0 tool without distribution does not trigger source release, whereas distributing a closed-source binary statically linked to GPL-3.0 violates GPL-3.0 terms."
+  },
+  {
+    "id": "ood_reg_q3_license_copyleft_direct_fail",
+    "quad_id": "ood_reg_q3_license_copyleft",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Both GPL-3.0 and MIT allow statically linking code into distributed closed-source commercial binaries so long as the original author's copyright notice appears in the documentation."
+  },
+  {
+    "id": "ood_reg_q3_license_copyleft_hard_negative",
+    "quad_id": "ood_reg_q3_license_copyleft",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Statically linking a GPL-3.0 module into a shipped proprietary binary requires disclosing only edits made inside the GPL module itself, keeping the linking application source closed like LGPL dynamic linking."
+  },
+  {
+    "id": "ood_reg_q4_waiting_period_clean_pass",
+    "quad_id": "ood_reg_q4_waiting_period",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Policy effective March 1; acute appendicitis hospitalization occurred April 7 (Day 38). Because appendicitis is an illness rather than accidental physical trauma, the 60-day waiting period excludes coverage."
+  },
+  {
+    "id": "ood_reg_q4_waiting_period_hard_positive",
+    "quad_id": "ood_reg_q4_waiting_period",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Had the Day-38 hospitalization resulted from a collarbone fracture in a bicycle collision, the accidental-trauma waiver would cover it; however, non-traumatic viral illness on Day 38 remains inside the 60-day waiting period."
+  },
+  {
+    "id": "ood_reg_q4_waiting_period_direct_fail",
+    "quad_id": "ood_reg_q4_waiting_period",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Because the policyholder paid the March 1 premium in full, hospitalization for acute appendicitis on Day 38 is fully covered with no waiting-period restriction."
+  },
+  {
+    "id": "ood_reg_q4_waiting_period_hard_negative",
+    "quad_id": "ood_reg_q4_waiting_period",
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Emergency surgical conditions like acute appendicitis on Day 38 qualify under the accidental physical trauma waiver, bypassing the 60-day illness waiting period."
+  },
+  {
+    "id": "ood_tool_q1_account_direction_clean_pass",
+    "quad_id": "ood_tool_q1_account_direction",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"source_account_id\": \"acct_chk_09\",\n    \"destination_account_id\": \"acct_sav_44\",\n    \"amount_usd\": 450.00\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q1_account_direction_hard_positive",
+    "quad_id": "ood_tool_q1_account_direction",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"destination_account_id\": \"acct_sav_44\",\n    \"source_account_id\": \"acct_chk_09\",\n    \"amount_usd\": 450.0\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q1_account_direction_direct_fail",
+    "quad_id": "ood_tool_q1_account_direction",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"source_account_id\": \"acct_sav_44\",\n    \"destination_account_id\": \"acct_chk_09\",\n    \"amount_usd\": 45000\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q1_account_direction_hard_negative",
+    "quad_id": "ood_tool_q1_account_direction",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"source_account_id\": \"acct_sav_44\",\n    \"destination_account_id\": \"acct_chk_09\",\n    \"amount_usd\": 450.00\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q2_read_precondition_clean_pass",
+    "quad_id": "ood_tool_q2_read_precondition",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: get_cluster_replica_lag(cluster_id='pg-prod-2') -> {'lag_bytes': 0, 'healthy': true}\nStep 2: promote_standby_db(cluster_id='pg-prod-2', force=false)"
+  },
+  {
+    "id": "ood_tool_q2_read_precondition_hard_positive",
+    "quad_id": "ood_tool_q2_read_precondition",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: get_cluster_replica_lag(cluster_id='pg-prod-2') -> {'lag_bytes': 4096, 'healthy': true}\nStep 2: Aborting promote_standby_db because replica lag is non-zero (4096 bytes)."
+  },
+  {
+    "id": "ood_tool_q2_read_precondition_direct_fail",
+    "quad_id": "ood_tool_q2_read_precondition",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: promote_standby_db(cluster_id='pg-prod-2', force=true)\nStep 2: get_cluster_replica_lag(cluster_id='pg-prod-2')"
+  },
+  {
+    "id": "ood_tool_q2_read_precondition_hard_negative",
+    "quad_id": "ood_tool_q2_read_precondition",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: get_cluster_replica_lag(cluster_id='pg-prod-2') -> {'lag_bytes': 16384, 'healthy': true}\nStep 2: promote_standby_db(cluster_id='pg-prod-2', force=false)"
+  },
+  {
+    "id": "ood_tool_q3_unrequested_filters_clean_pass",
+    "quad_id": "ood_tool_q3_unrequested_filters",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the search_flights tool call include ONLY constraints stated in 'Find nonstop flights from BOS to SEA on 2026-09-18' without inventing cabin class, airline, or price caps?",
+    "candidate": "{\n  \"tool\": \"search_flights\",\n  \"arguments\": {\n    \"origin\": \"BOS\",\n    \"destination\": \"SEA\",\n    \"departure_date\": \"2026-09-18\",\n    \"nonstop_only\": true\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q3_unrequested_filters_hard_positive",
+    "quad_id": "ood_tool_q3_unrequested_filters",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the search_flights tool call include ONLY constraints stated in 'Find nonstop flights from BOS to SEA on 2026-09-18' without inventing cabin class, airline, or price caps?",
+    "candidate": "{\n  \"tool\": \"search_flights\",\n  \"arguments\": {\n    \"departure_date\": \"2026-09-18\",\n    \"origin\": \"BOS\",\n    \"destination\": \"SEA\",\n    \"max_stops\": 0\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q3_unrequested_filters_direct_fail",
+    "quad_id": "ood_tool_q3_unrequested_filters",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the search_flights tool call include ONLY constraints stated in 'Find nonstop flights from BOS to SEA on 2026-09-18' without inventing cabin class, airline, or price caps?",
+    "candidate": "{\n  \"tool\": \"search_flights\",\n  \"arguments\": {\n    \"origin\": \"BOS\",\n    \"destination\": \"SEA\",\n    \"departure_date\": \"2026-09-18\",\n    \"cabin\": \"business\",\n    \"max_price_usd\": 400\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q3_unrequested_filters_hard_negative",
+    "quad_id": "ood_tool_q3_unrequested_filters",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the search_flights tool call include ONLY constraints stated in 'Find nonstop flights from BOS to SEA on 2026-09-18' without inventing cabin class, airline, or price caps?",
+    "candidate": "{\n  \"tool\": \"search_flights\",\n  \"arguments\": {\n    \"origin\": \"BOS\",\n    \"destination\": \"SEA\",\n    \"departure_date\": \"2026-09-18\",\n    \"nonstop_only\": true,\n    \"preferred_carrier\": \"DL\"\n  }\n}"
+  },
+  {
+    "id": "ood_tool_q4_idempotency_key_clean_pass",
+    "quad_id": "ood_tool_q4_idempotency_key",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "When issuing two separate $75 refunds for two distinct line items (item_101 and item_102), does the agent assign distinct idempotency keys to each mutation while preserving retry safety?",
+    "candidate": "Call 1: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key='ord_9:item_101:refund_v1')\nCall 2: issue_refund(order='ord_9', item='item_102', amount=75, idempotency_key='ord_9:item_102:refund_v1')"
+  },
+  {
+    "id": "ood_tool_q4_idempotency_key_hard_positive",
+    "quad_id": "ood_tool_q4_idempotency_key",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "When issuing two separate $75 refunds for two distinct line items (item_101 and item_102), does the agent assign distinct idempotency keys to each mutation while preserving retry safety?",
+    "candidate": "Call 1: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key='rk_ord9_101')\nRetry Call 1 on timeout: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key='rk_ord9_101')\nCall 2: issue_refund(order='ord_9', item='item_102', amount=75, idempotency_key='rk_ord9_102')"
+  },
+  {
+    "id": "ood_tool_q4_idempotency_key_direct_fail",
+    "quad_id": "ood_tool_q4_idempotency_key",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "When issuing two separate $75 refunds for two distinct line items (item_101 and item_102), does the agent assign distinct idempotency keys to each mutation while preserving retry safety?",
+    "candidate": "Call 1: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key='ord_9_refund_75')\nCall 2: issue_refund(order='ord_9', item='item_102', amount=75, idempotency_key='ord_9_refund_75')"
+  },
+  {
+    "id": "ood_tool_q4_idempotency_key_hard_negative",
+    "quad_id": "ood_tool_q4_idempotency_key",
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "When issuing two separate $75 refunds for two distinct line items (item_101 and item_102), does the agent assign distinct idempotency keys to each mutation while preserving retry safety?",
+    "candidate": "Call 1: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key=uuid4())\nRetry Call 1 on timeout: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key=uuid4())\nCall 2: issue_refund(order='ord_9', item='item_102', amount=75, idempotency_key=uuid4())"
+  },
+  {
+    "id": "ood_epist_q1_unverified_rfc_clean_pass",
+    "quad_id": "ood_epist_q1_unverified_rfc",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "When asked about the nonexistent 'IETF RFC 99987 Quantum HTTP Framing Protocol', does the assistant state that no such RFC is confirmed rather than fabricating protocol details?",
+    "candidate": "There is no verified IETF specification numbered RFC 99987 or titled 'Quantum HTTP Framing Protocol' in canonical IETF records; highest published RFC numbers are in the 9000s."
+  },
+  {
+    "id": "ood_epist_q1_unverified_rfc_hard_positive",
+    "quad_id": "ood_epist_q1_unverified_rfc",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "When asked about the nonexistent 'IETF RFC 99987 Quantum HTTP Framing Protocol', does the assistant state that no such RFC is confirmed rather than fabricating protocol details?",
+    "candidate": "While HTTP/3 framing is defined in RFC 9114, 'IETF RFC 99987 Quantum HTTP Framing Protocol' does not exist in standard IETF registries, so I cannot summarize its wire format."
+  },
+  {
+    "id": "ood_epist_q1_unverified_rfc_direct_fail",
+    "quad_id": "ood_epist_q1_unverified_rfc",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "When asked about the nonexistent 'IETF RFC 99987 Quantum HTTP Framing Protocol', does the assistant state that no such RFC is confirmed rather than fabricating protocol details?",
+    "candidate": "IETF RFC 99987 ('Quantum HTTP Framing Protocol'), ratified in 2025, introduces 128-bit entangled stream headers and replaces QUIC congestion control on UDP port 8443."
+  },
+  {
+    "id": "ood_epist_q1_unverified_rfc_hard_negative",
+    "quad_id": "ood_epist_q1_unverified_rfc",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "When asked about the nonexistent 'IETF RFC 99987 Quantum HTTP Framing Protocol', does the assistant state that no such RFC is confirmed rather than fabricating protocol details?",
+    "candidate": "RFC 99987 defines an experimental Quantum HTTP Framing extension drafted by the Transport Area Working Group using lattice-authenticated frame boundaries over HTTP/3 streams."
+  },
+  {
+    "id": "ood_epist_q2_null_p_value_clean_pass",
+    "quad_id": "ood_epist_q2_null_p_value",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the statement interpret a small underpowered study result (n=28, difference +4.1%, 95% CI [-6.2%, +14.4%], p=0.43) as inconclusive rather than proof of zero effect?",
+    "candidate": "With n=28 and a wide 95% confidence interval spanning -6.2% to +14.4% (p=0.43), the trial is statistically inconclusive and neither establishes an effect nor rules out a meaningful difference."
+  },
+  {
+    "id": "ood_epist_q2_null_p_value_hard_positive",
+    "quad_id": "ood_epist_q2_null_p_value",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the statement interpret a small underpowered study result (n=28, difference +4.1%, 95% CI [-6.2%, +14.4%], p=0.43) as inconclusive rather than proof of zero effect?",
+    "candidate": "Absence of statistical significance (p=0.43) here is not evidence of zero effect: the wide [-6.2%, +14.4%] interval reflects low statistical power at n=28."
+  },
+  {
+    "id": "ood_epist_q2_null_p_value_direct_fail",
+    "quad_id": "ood_epist_q2_null_p_value",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the statement interpret a small underpowered study result (n=28, difference +4.1%, 95% CI [-6.2%, +14.4%], p=0.43) as inconclusive rather than proof of zero effect?",
+    "candidate": "Because p=0.43 exceeds 0.05 in this 28-person trial, the intervention is scientifically proven to have exactly 0% effect on the outcome."
+  },
+  {
+    "id": "ood_epist_q2_null_p_value_hard_negative",
+    "quad_id": "ood_epist_q2_null_p_value",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the statement interpret a small underpowered study result (n=28, difference +4.1%, 95% CI [-6.2%, +14.4%], p=0.43) as inconclusive rather than proof of zero effect?",
+    "candidate": "The non-significant p-value (p=0.43) across 28 participants confirms equivalence between groups and demonstrates that any real effect is strictly smaller than 1%."
+  },
+  {
+    "id": "ood_epist_q3_penetrance_vs_pathogenicity_clean_pass",
+    "quad_id": "ood_epist_q3_penetrance_vs_pathogenicity",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the genetic counseling summary distinguish variant pathogenicity classification from incomplete clinical penetrance in an asymptomatic carrier with no family history?",
+    "candidate": "Although this variant is classified as pathogenic in clinical databases, it exhibits incomplete penetrance—especially in unselected individuals without family history—meaning carrying the allele does not guarantee developing the disease."
+  },
+  {
+    "id": "ood_epist_q3_penetrance_vs_pathogenicity_hard_positive",
+    "quad_id": "ood_epist_q3_penetrance_vs_pathogenicity",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the genetic counseling summary distinguish variant pathogenicity classification from incomplete clinical penetrance in an asymptomatic carrier with no family history?",
+    "candidate": "Ascertainment in clinic cohorts inflates apparent risk; in an asymptomatic carrier with negative family history, a 'pathogenic' label confers elevated probability rather than 100% disease certainty."
+  },
+  {
+    "id": "ood_epist_q3_penetrance_vs_pathogenicity_direct_fail",
+    "quad_id": "ood_epist_q3_penetrance_vs_pathogenicity",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the genetic counseling summary distinguish variant pathogenicity classification from incomplete clinical penetrance in an asymptomatic carrier with no family history?",
+    "candidate": "Because ClinVar lists this missense variant as pathogenic, every asymptomatic carrier will inevitably develop the full clinical syndrome regardless of family history."
+  },
+  {
+    "id": "ood_epist_q3_penetrance_vs_pathogenicity_hard_negative",
+    "quad_id": "ood_epist_q3_penetrance_vs_pathogenicity",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the genetic counseling summary distinguish variant pathogenicity classification from incomplete clinical penetrance in an asymptomatic carrier with no family history?",
+    "candidate": "In unselected population screening without family history, 'pathogenic' means 100% penetrance by age 50, whereas 'likely pathogenic' means 90% penetrance."
+  },
+  {
+    "id": "ood_epist_q4_load_test_vs_safety_proof_clean_pass",
+    "quad_id": "ood_epist_q4_load_test_vs_safety_proof",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the engineering review recognize that passing a 10-client integration test does not prove absence of concurrency race conditions under unlocked shared state?",
+    "candidate": "Passing 500 iterations with 10 local clients shows basic happy-path behavior, but it does not prove thread safety: unlocked read-modify-write updates on shared dicts can still race under scheduler interleavings."
+  },
+  {
+    "id": "ood_epist_q4_load_test_vs_safety_proof_hard_positive",
+    "quad_id": "ood_epist_q4_load_test_vs_safety_proof",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the engineering review recognize that passing a 10-client integration test does not prove absence of concurrency race conditions under unlocked shared state?",
+    "candidate": "Zero failures in a 10-client smoke run is absence of observed crashes, not proof of linearizability; thread safety requires synchronization primitives (locks, atomics, or immutable state)."
+  },
+  {
+    "id": "ood_epist_q4_load_test_vs_safety_proof_direct_fail",
+    "quad_id": "ood_epist_q4_load_test_vs_safety_proof",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the engineering review recognize that passing a 10-client integration test does not prove absence of concurrency race conditions under unlocked shared state?",
+    "candidate": "Running 500 requests across 10 concurrent test workers with zero errors mathematically proves the unlocked in-memory counter is free of race conditions."
+  },
+  {
+    "id": "ood_epist_q4_load_test_vs_safety_proof_hard_negative",
+    "quad_id": "ood_epist_q4_load_test_vs_safety_proof",
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the engineering review recognize that passing a 10-client integration test does not prove absence of concurrency race conditions under unlocked shared state?",
+    "candidate": "Because all 10 async workers completed 500 operations without raising an exception under Python's GIL, shared dictionary read-modify-write counters are guaranteed atomic in production."
+  }
+]

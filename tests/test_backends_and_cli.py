@@ -1082,22 +1082,19 @@ def test_pcie_spillover_guard_reserved_memory_risk():
 # ---------------------------------------------------------------------------
 
 def test_cli_calibrate_conformal_md(capsys):
-    from logitgate.exceptions import CalibrationWarning
-
-    with pytest.warns(CalibrationWarning):
-        ret = main([
-            "calibrate",
-            "--dataset",
-            "EPISTEMIC_REASONING_TEST_CASES.md",
-            "--alpha",
-            "0.05",
-        ])
+    ret = main([
+        "calibrate",
+        "--dataset",
+        "EPISTEMIC_REASONING_TEST_CASES.md",
+        "--alpha",
+        "0.05",
+    ])
     assert ret == 0
     captured = capsys.readouterr().out
     assert "LOGITGATE SPLIT CONFORMAL CASCADE CALIBRATION" in captured
     assert "Layer 1 Tau Reject:" in captured
     assert "Layer 1 Tau Accept:" in captured
-    assert "Guaranteed Layer 1 Error:" in captured
+    assert "Guaranteed Layer 1 Error: <= 5.00%" in captured
 
 
 def test_cli_calibrate_json_dataset(tmp_path, capsys):

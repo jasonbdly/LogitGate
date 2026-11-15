@@ -1,0 +1,1202 @@
+[
+  {
+    "step": 0,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the Python binary_search function terminate cleanly for all sorted lists and return the target index or -1 without off-by-one infinite loops?",
+    "candidate": "def binary_search(nums: list[int], target: int) -> int:\n    lo, hi = 0, len(nums) - 1\n    while lo <= hi:\n        mid = lo + (hi - lo) // 2\n        if nums[mid] == target:\n            return mid\n        if nums[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1"
+  },
+  {
+    "step": 1,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the Python binary_search function terminate cleanly for all sorted lists and return the target index or -1 without off-by-one infinite loops?",
+    "candidate": "def binary_search(nums: list[int], target: int) -> int:\n    lo, hi = 0, len(nums) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if nums[mid] == target:\n            return mid\n        if nums[mid] < target:\n            lo = mid\n        else:\n            hi = mid\n    return -1"
+  },
+  {
+    "step": 2,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the Python binary_search function terminate cleanly for all sorted lists and return the target index or -1 without off-by-one infinite loops?",
+    "candidate": "def binary_search(nums: list[int], target: int) -> int:\n    # Avoid naive 'lo = mid' infinite loop traps by using half-open [lo, hi)\n    lo, hi = 0, len(nums)\n    while lo < hi:\n        mid = (lo + hi) // 2\n        if nums[mid] == target:\n            return mid\n        lo, hi = (mid + 1, hi) if nums[mid] < target else (lo, mid)\n    return -1"
+  },
+  {
+    "step": 3,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the Python binary_search function terminate cleanly for all sorted lists and return the target index or -1 without off-by-one infinite loops?",
+    "candidate": "def binary_search(nums: list[int], target: int) -> int:\n    \"\"\"Searches a sorted integer sequence using midpoint halving.\"\"\"\n    if not nums:\n        return -1\n    lo, hi = 0, len(nums) - 1\n    while lo < hi:\n        mid = lo + (hi - lo) // 2\n        if nums[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return lo if nums[lo] == target else -1"
+  },
+  {
+    "step": 4,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the Python helper avoid shared mutable default state across separate calls when collecting tags?",
+    "candidate": "def append_tag(tag: str, bucket: list[str] | None = None) -> list[str]:\n    active = list(bucket) if bucket is not None else []\n    active.append(tag.strip().lower())\n    return active"
+  },
+  {
+    "step": 5,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the Python helper avoid shared mutable default state across separate calls when collecting tags?",
+    "candidate": "def append_tag(tag: str, bucket: list[str] = []) -> list[str]:\n    # Reuses caller list or shared default list across invocations\n    bucket.append(tag.strip().lower())\n    return bucket"
+  },
+  {
+    "step": 6,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the Python helper avoid shared mutable default state across separate calls when collecting tags?",
+    "candidate": "def append_tag(tag: str, bucket: tuple[str, ...] = ()) -> list[str]:\n    # Tuple default is immutable; never use def f(bucket=[]) here\n    result = list(bucket)\n    result.append(tag.strip().lower())\n    return result"
+  },
+  {
+    "step": 7,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the Python helper avoid shared mutable default state across separate calls when collecting tags?",
+    "candidate": "_DEFAULT_TAGS: list[str] = []\n\ndef append_tag(tag: str, bucket: list[str] | None = None) -> list[str]:\n    \"\"\"Appends a normalized tag to the caller bucket or module fallback.\"\"\"\n    target = bucket if bucket is not None else _DEFAULT_TAGS\n    target.append(tag.strip().lower())\n    return target"
+  },
+  {
+    "step": 8,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the invoice function compute exact integer cent totals without IEEE-754 binary floating-point rounding drift?",
+    "candidate": "from decimal import Decimal, ROUND_HALF_UP\n\ndef total_cents(prices_str: list[str], tax_rate: str) -> int:\n    subtotal = sum((Decimal(p) for p in prices_str), Decimal('0'))\n    taxed = subtotal * (Decimal('1') + Decimal(tax_rate))\n    return int((taxed * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))"
+  },
+  {
+    "step": 9,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the invoice function compute exact integer cent totals without IEEE-754 binary floating-point rounding drift?",
+    "candidate": "def total_cents(prices_str: list[str], tax_rate: str) -> int:\n    # Converts string inputs to IEEE-754 float before multiplying tax\n    subtotal = sum(float(p) for p in prices_str)\n    taxed = subtotal * (1.0 + float(tax_rate))\n    return int(round(taxed * 100.0))"
+  },
+  {
+    "step": 10,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the invoice function compute exact integer cent totals without IEEE-754 binary floating-point rounding drift?",
+    "candidate": "def total_cents(unit_cents: list[int], tax_bps: int) -> int:\n    # Integer basis points avoid float('0.1 + 0.2') drift entirely\n    sub_cents = sum(unit_cents)\n    numerator = sub_cents * (10_000 + tax_bps) + 5_000\n    return numerator // 10_000"
+  },
+  {
+    "step": 11,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the invoice function compute exact integer cent totals without IEEE-754 binary floating-point rounding drift?",
+    "candidate": "from decimal import Decimal\n\ndef total_cents(prices: list[float], tax_rate: float) -> int:\n    \"\"\"Computes taxed invoice total in integer cents using Decimal.\"\"\"\n    subtotal = sum((Decimal(p) for p in prices), Decimal(0))\n    total = subtotal * Decimal(1.0 + tax_rate) * Decimal(100)\n    return round(total)"
+  },
+  {
+    "step": 12,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the cache refresher guarantee that self._lock is always released even when fetch_fn() raises an exception?",
+    "candidate": "def refresh(self, key: str, fetch_fn) -> object:\n    with self._lock:\n        value = fetch_fn(key)\n        self._store[key] = value\n        return value"
+  },
+  {
+    "step": 13,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the cache refresher guarantee that self._lock is always released even when fetch_fn() raises an exception?",
+    "candidate": "def refresh(self, key: str, fetch_fn) -> object:\n    self._lock.acquire()\n    value = fetch_fn(key)\n    self._store[key] = value\n    self._lock.release()\n    return value"
+  },
+  {
+    "step": 14,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the cache refresher guarantee that self._lock is always released even when fetch_fn() raises an exception?",
+    "candidate": "def refresh(self, key: str, fetch_fn) -> object:\n    # Manual acquire/release is safe here because try/finally wraps fetch_fn\n    self._lock.acquire()\n    try:\n        self._store[key] = fetch_fn(key)\n        return self._store[key]\n    finally:\n        self._lock.release()"
+  },
+  {
+    "step": 15,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the cache refresher guarantee that self._lock is always released even when fetch_fn() raises an exception?",
+    "candidate": "def refresh(self, key: str, fetch_fn) -> object:\n    \"\"\"Thread-safe refresh releasing lock on ValueError.\"\"\"\n    self._lock.acquire()\n    try:\n        value = fetch_fn(key)\n        self._store[key] = value\n    except ValueError:\n        self._lock.release()\n        raise\n    self._lock.release()\n    return value"
+  },
+  {
+    "step": 16,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the Python function compute the maximum of every contiguous window of size k >= 1 in O(n) time instead of O(n * k) slicing?",
+    "candidate": "from collections import deque\n\ndef window_max(xs: list[int], k: int) -> list[int]:\n    dq: deque[int] = deque()\n    out: list[int] = []\n    for i, val in enumerate(xs):\n        while dq and dq[0] <= i - k:\n            dq.popleft()\n        while dq and xs[dq[-1]] <= val:\n            dq.pop()\n        dq.append(i)\n        if i >= k - 1:\n            out.append(xs[dq[0]])\n    return out"
+  },
+  {
+    "step": 17,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the Python function compute the maximum of every contiguous window of size k >= 1 in O(n) time instead of O(n * k) slicing?",
+    "candidate": "def window_max(xs: list[int], k: int) -> list[int]:\n    \"\"\"Computes sliding window maxima by slicing each k-element subarray.\"\"\"\n    if not xs or k > len(xs):\n        return []\n    out: list[int] = []\n    for start in range(len(xs) - k + 1):\n        window_slice = xs[start : start + k]\n        out.append(max(window_slice))\n    return out"
+  },
+  {
+    "step": 18,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the Python function compute the maximum of every contiguous window of size k >= 1 in O(n) time instead of O(n * k) slicing?",
+    "candidate": "def window_max(xs: list[int], k: int) -> list[int]:\n    # Block prefix/suffix maxima avoid max(xs[i:i+k]) O(n*k) rescans\n    n = len(xs)\n    if n == 0 or k > n:\n        return []\n    pref, suff = [0] * n, [0] * n\n    for i in range(n):\n        pref[i] = xs[i] if i % k == 0 else max(pref[i - 1], xs[i])\n    for i in range(n - 1, -1, -1):\n        suff[i] = xs[i] if (i == n - 1 or (i + 1) % k == 0) else max(suff[i + 1], xs[i])\n    return [max(suff[i], pref[i + k - 1]) for i in range(n - k + 1)]"
+  },
+  {
+    "step": 19,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "software_correctness",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the Python function compute the maximum of every contiguous window of size k >= 1 in O(n) time instead of O(n * k) slicing?",
+    "candidate": "from collections import deque\n\ndef window_max(xs: list[int], k: int) -> list[int]:\n    \"\"\"Maintains a bounded deque of window elements and extracts maxima.\"\"\"\n    win: deque[int] = deque(maxlen=k)\n    out: list[int] = []\n    for i, val in enumerate(xs):\n        win.append(val)\n        if i >= k - 1:\n            out.append(max(win))\n    return out"
+  },
+  {
+    "step": 20,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the SQL query return customers who have zero archived orders even when archived_orders.customer_id contains NULL rows?",
+    "candidate": "SELECT c.id, c.email\nFROM customers c\nWHERE NOT EXISTS (\n    SELECT 1 FROM archived_orders ao\n    WHERE ao.customer_id = c.id\n);"
+  },
+  {
+    "step": 21,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the SQL query return customers who have zero archived orders even when archived_orders.customer_id contains NULL rows?",
+    "candidate": "SELECT c.id, c.email, c.created_at\nFROM customers c\nWHERE c.status = 'active'\n  AND c.id NOT IN (\n      SELECT ao.customer_id FROM archived_orders ao\n  )\nORDER BY c.id ASC;"
+  },
+  {
+    "step": 22,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the SQL query return customers who have zero archived orders even when archived_orders.customer_id contains NULL rows?",
+    "candidate": "-- Filter NULL customer_id explicitly so NOT IN never collapses to UNKNOWN\nSELECT c.id, c.email\nFROM customers c\nWHERE c.id NOT IN (\n    SELECT ao.customer_id FROM archived_orders ao\n    WHERE ao.customer_id IS NOT NULL\n);"
+  },
+  {
+    "step": 23,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the SQL query return customers who have zero archived orders even when archived_orders.customer_id contains NULL rows?",
+    "candidate": "SELECT DISTINCT c.id, c.email, c.created_at\nFROM customers c\nLEFT JOIN archived_orders ao ON ao.customer_id = c.id\nWHERE ao.customer_id <> c.id\nORDER BY c.id ASC;"
+  },
+  {
+    "step": 24,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the SQL predicate keep the indexed column events.created_at unwrapped so a standard B-tree index on events(created_at) can perform a range scan for UTC year 2025?",
+    "candidate": "SELECT event_id, account_id, payload_bytes\nFROM events\nWHERE created_at >= TIMESTAMP '2025-01-01 00:00:00'\n  AND created_at < TIMESTAMP '2026-01-01 00:00:00';"
+  },
+  {
+    "step": 25,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the SQL predicate keep the indexed column events.created_at unwrapped so a standard B-tree index on events(created_at) can perform a range scan for UTC year 2025?",
+    "candidate": "SELECT event_id, account_id, payload_bytes\nFROM events\nWHERE EXTRACT(YEAR FROM created_at AT TIME ZONE 'UTC') = 2025\nORDER BY event_id ASC;"
+  },
+  {
+    "step": 26,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the SQL predicate keep the indexed column events.created_at unwrapped so a standard B-tree index on events(created_at) can perform a range scan for UTC year 2025?",
+    "candidate": "-- Avoid EXTRACT(YEAR FROM created_at) = 2025; keep column bare on the left\nSELECT event_id, account_id, payload_bytes\nFROM events\nWHERE created_at >= DATE_TRUNC('year', TIMESTAMP '2025-06-15')\n  AND created_at < DATE_TRUNC('year', TIMESTAMP '2025-06-15') + INTERVAL '1 year';"
+  },
+  {
+    "step": 27,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the SQL predicate keep the indexed column events.created_at unwrapped so a standard B-tree index on events(created_at) can perform a range scan for UTC year 2025?",
+    "candidate": "SELECT event_id, account_id, payload_bytes\nFROM events\nWHERE DATE_TRUNC('year', created_at) = TIMESTAMP '2025-01-01 00:00:00'\n  AND COALESCE(created_at, TIMESTAMP '2025-01-01 00:00:00') IS NOT NULL\nORDER BY created_at ASC;"
+  },
+  {
+    "step": 28,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the keyset pagination SQL query deterministically break ties when multiple rows share the same created_at timestamp without skipping or duplicating rows?",
+    "candidate": "SELECT id, created_at, amount_cents\nFROM ledger_entries\nWHERE (created_at, id) < (:cursor_ts, :cursor_id)\nORDER BY created_at DESC, id DESC\nLIMIT 50;"
+  },
+  {
+    "step": 29,
+    "regime": "stationary_in_domain",
+    "regime_index": 0,
+    "domain": "database_and_schema",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the keyset pagination SQL query deterministically break ties when multiple rows share the same created_at timestamp without skipping or duplicating rows?",
+    "candidate": "SELECT id, created_at, amount_cents\nFROM ledger_entries\nWHERE created_at < :cursor_ts\nORDER BY created_at DESC\nLIMIT 50;"
+  },
+  {
+    "step": 30,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "In 100,000 people, ~100 truly have the condition (99 true positives) while 99,900 do not (~999 false positives). Thus a positive result means roughly 99 / 1,098 (~9.0%) posterior probability, not 99%."
+  },
+  {
+    "step": 31,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "Because the diagnostic assay has both 99% sensitivity and 99% specificity, a patient who tests positive has a 99% probability of actually having the condition regardless of population prevalence."
+  },
+  {
+    "step": 32,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "Despite the 99% test accuracy headline, low 0.1% prevalence produces ~10 false positives per true positive, yielding a positive predictive value near 9% rather than 99%."
+  },
+  {
+    "step": 33,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the analysis correctly apply Bayes' rule to a 0.1% prevalence condition tested with 99% sensitivity and 99% specificity (~9% positive predictive value, NOT 99%)?",
+    "candidate": "Accounting for the 0.1% base rate alongside 99% sensitivity and 99% specificity, Bayes' theorem reduces the posterior probability slightly from 99.0% to 98.9% for a positive screen."
+  },
+  {
+    "step": 34,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "Because employees self-selected into the wellness app, the observed 28% lower sick-day rate is an unadjusted association that may reflect baseline health differences rather than a causal effect of the app."
+  },
+  {
+    "step": 35,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "Tracking 4,000 employees over six months proves that installing the optional wellness app directly causes a 28% reduction in employee sick days across the workforce."
+  },
+  {
+    "step": 36,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "While proponents claim the app caused a 28% drop in sick leave, this non-randomized observational comparison cannot rule out healthy-user selection bias without a controlled trial."
+  },
+  {
+    "step": 37,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the critique refrain from claiming causal efficacy from an observational cohort without randomization or confounder adjustment?",
+    "candidate": "Because the cohort size exceeded 4,000 employees with p < 0.001, sample size eliminates selection bias and confirms the optional app causally reduced sick days by 28%."
+  },
+  {
+    "step": 38,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Treatment B outperforms Treatment A in both mild cases (92% vs 88%) and severe cases (55% vs 48%); its lower pooled rate occurs only because B was assigned disproportionately to severe cases."
+  },
+  {
+    "step": 39,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Because Treatment A achieved a 78% overall recovery rate across all patients compared to 66% for Treatment B, Treatment A is more effective regardless of subgroup breakdowns."
+  },
+  {
+    "step": 40,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Pooling mild and severe patients creates a Simpson's paradox reversal: severity confounds treatment assignment, whereas stratified rates show Treatment B leads within each severity group."
+  },
+  {
+    "step": 41,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the interpretation recognize Simpson's paradox when Treatment B has higher recovery in both mild and severe strata individually despite a lower crude pooled rate?",
+    "candidate": "Stratified outcomes favor Treatment B in mild and severe subgroups, but unbiased clinical decisions should prioritize the pooled 78% vs 66% aggregate average because subgroup splits dilute statistical power."
+  },
+  {
+    "step": 42,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Measuring 10-year returns only across funds surviving today omits poorly performing funds that shut down mid-decade, biasing the reported mean annual return upward via survivorship bias."
+  },
+  {
+    "step": 43,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Auditing all 180 funds currently trading on the exchange with a 10-year history provides an unbiased 14.2% estimate of expected annual return for a new investor."
+  },
+  {
+    "step": 44,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Claiming an 'unbeatable 14.2% decade average' from currently listed funds is invalid unless liquidated and merged funds from the initial year-0 cohort are included."
+  },
+  {
+    "step": 45,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "causal_and_statistical_inference",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the evaluation flag survivorship bias when computing average fund returns solely over funds still active at year 10 (excluding liquidated funds)?",
+    "candidate": "Excluding funds that closed before year 10 improves data hygiene by removing incomplete time series, yielding a clean, unbiased 14.2% expected return across full-decade managers."
+  },
+  {
+    "step": 46,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Converting 0.25 mg at 1 mg = 1,000 mcg yields exactly 250 mcg; using 100 mcg/mL oral solution requires 2.5 mL to deliver the prescribed 0.25 mg dose."
+  },
+  {
+    "step": 47,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Converting 0.25 mg to micrograms at a 100 mcg/mg ratio yields 25 mcg total, which corresponds to drawing 0.25 mL of the standard 100 mcg/mL oral suspension."
+  },
+  {
+    "step": 48,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Never confuse milligram-to-microgram factors with 100x centigram steps: 0.25 mg multiplied by 1,000 mcg/mg equals 250 mcg (2.5 mL at 100 mcg/mL)."
+  },
+  {
+    "step": 49,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Is the pediatric dose conversion between milligrams (mg) and micrograms (mcg) mathematically exact (1 mg = 1,000 mcg) for a 0.25 mg order?",
+    "candidate": "Applying the standard metric conversion factor (1 mg = 1,000 mcg), a 0.25 mg pediatric order equals 2,500 mcg, requiring 25.0 mL of the 100 mcg/mL oral solution."
+  },
+  {
+    "step": 50,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Moving from a 20% conversion rate to 25% represents an absolute gain of 5 percentage points (+5 pp), which is a 25% relative increase over the 20% baseline."
+  },
+  {
+    "step": 51,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Increasing checkout conversion from 20% up to 25% represents a 5% relative increase in total customer conversions compared against the prior quarter's 20% baseline."
+  },
+  {
+    "step": 52,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Describing a 20% to 25% shift as a '5% relative lift' is inaccurate: the absolute delta is +5 percentage points, corresponding to a +25% relative improvement."
+  },
+  {
+    "step": 53,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the report accurately distinguish relative percentage change (+25%) from absolute percentage-point change (+5 pp) when conversion rises from 20% to 25%?",
+    "candidate": "Rising from 20% to 25% checkout conversion delivers a 25 percentage-point absolute gain on the funnel chart, equivalent to a 5% relative lift over the 20% baseline."
+  },
+  {
+    "step": 54,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Normalizing to UTC, Event X occurred at 07:30 UTC (09:30 minus 2 hours) and Event Y occurred at 09:00 UTC (04:00 plus 5 hours); therefore Event X preceded Event Y by 90 minutes."
+  },
+  {
+    "step": 55,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Comparing the two ISO-8601 timestamps directly on April 10, Event Y at 04:00:00-05:00 occurred 5.5 hours earlier in the morning than Event X at 09:30:00+02:00."
+  },
+  {
+    "step": 56,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Although 04:00 looks earlier on a wall clock than 09:30, -05:00 converts Event Y to 09:00 UTC while +02:00 converts Event X to 07:30 UTC, so Event X happened first."
+  },
+  {
+    "step": 57,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the timeline order Event X (2026-04-10T09:30:00+02:00) and Event Y (2026-04-10T04:00:00-05:00) accurately in UTC and state which happened first?",
+    "candidate": "Converting offsets to UTC, Event X (09:30+02:00) maps to 11:30 UTC and Event Y (04:00-05:00) maps to 23:00 UTC the prior day, placing Event Y well ahead of Event X."
+  },
+  {
+    "step": 58,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the calculation compute the exact round-trip average speed over an equal-distance outbound leg at 60 km/h and return leg at 40 km/h (48 km/h harmonic mean, NOT 50 km/h)?",
+    "candidate": "Over a 120 km leg each way (240 km total), outbound takes 2 hours at 60 km/h and return takes 3 hours at 40 km/h: 240 km / 5 h = 48 km/h."
+  },
+  {
+    "step": 59,
+    "regime": "covariate_domain_shift",
+    "regime_index": 1,
+    "domain": "quantitative_unit_and_temporal",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the calculation compute the exact round-trip average speed over an equal-distance outbound leg at 60 km/h and return leg at 40 km/h (48 km/h harmonic mean, NOT 50 km/h)?",
+    "candidate": "Because the outbound 60 km/h leg and return 40 km/h leg cover the exact same route distance, their combined round-trip average speed is (60 + 40) / 2 = 50 km/h."
+  },
+  {
+    "step": 60,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient stopped phenelzine (an MAOI) 18 days ago and has eGFR 68 mL/min; initiating low-dose Drug K is permitted outside the 14-day washout."
+  },
+  {
+    "step": 61,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient presents with neuropathic pain and eGFR 22 mL/min; starting standard Drug K regimen today."
+  },
+  {
+    "step": 62,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Based on [MONOGRAPH], does the clinical note refrain from prescribing Drug K to patients with eGFR < 30 mL/min or concurrent MAOI therapy within 14 days?",
+    "candidate": "[MONOGRAPH] Drug K is indicated for neuropathic pain; contraindicated if eGFR < 30 mL/min or within 14 days of MAOI use.\n[NOTE] Patient has normal renal function (eGFR 82 mL/min) and discontinued MAOI therapy 9 days ago; safe to initiate Drug K today."
+  },
+  {
+    "step": 63,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification.\n[ASSESSMENT] Every entity touching regulated records—including wholly owned ISO-27001 domestic affiliates—must file Form D 30 days in advance without exception."
+  },
+  {
+    "step": 64,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification.\n[ASSESSMENT] Because the wholly owned subsidiary is headquartered in Dublin with active ISO-27001 certification, it qualifies for the affiliate exemption and skips Form D."
+  },
+  {
+    "step": 65,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Under [RULE_12], must a contractor file Disclosure Form D when subcontracting cloud hosting to an ISO-27001 certified domestic affiliate?",
+    "candidate": "[RULE_12] All subcontractors processing regulated records require 30-day prior Form D filing, EXCEPT wholly owned domestic affiliates holding active ISO-27001 certification.\n[ASSESSMENT] Although the vendor holds ISO-27001 certification, it is an external third party rather than a wholly owned domestic affiliate, so 30-day prior Form D filing IS required."
+  },
+  {
+    "step": 66,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Both GPL-3.0 and MIT allow statically linking code into distributed closed-source commercial binaries so long as the original author's copyright notice appears in the documentation."
+  },
+  {
+    "step": 67,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Statically linking a GPL-3.0 module into a shipped proprietary binary requires disclosing only edits made inside the GPL module itself, keeping the linking application source closed like LGPL dynamic linking."
+  },
+  {
+    "step": 68,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Because the policyholder paid the March 1 premium in full, hospitalization for acute appendicitis on Day 38 is fully covered with no waiting-period restriction."
+  },
+  {
+    "step": 69,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Emergency surgical conditions like acute appendicitis on Day 38 qualify under the accidental physical trauma waiver, bypassing the 60-day illness waiting period."
+  },
+  {
+    "step": 70,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the compliance guidance accurately distinguish static linking of a GPL-3.0 library into a proprietary closed-source binary from permissive MIT obligations?",
+    "candidate": "Internal private use of a GPL-3.0 tool without distribution does not trigger source release, whereas distributing a closed-source binary statically linked to GPL-3.0 violates GPL-3.0 terms."
+  },
+  {
+    "step": 71,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"source_account_id\": \"acct_sav_44\",\n    \"destination_account_id\": \"acct_chk_09\",\n    \"amount_usd\": 45000\n  }\n}"
+  },
+  {
+    "step": 72,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"source_account_id\": \"acct_sav_44\",\n    \"destination_account_id\": \"acct_chk_09\",\n    \"amount_usd\": 450.00\n  }\n}"
+  },
+  {
+    "step": 73,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: promote_standby_db(cluster_id='pg-prod-2', force=true)\nStep 2: get_cluster_replica_lag(cluster_id='pg-prod-2')"
+  },
+  {
+    "step": 74,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: get_cluster_replica_lag(cluster_id='pg-prod-2') -> {'lag_bytes': 16384, 'healthy': true}\nStep 2: promote_standby_db(cluster_id='pg-prod-2', force=false)"
+  },
+  {
+    "step": 75,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "regulatory_and_clinical_exceptions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the claims determination correctly apply the 60-day waiting period (waived ONLY for accidental physical trauma) to an illness claim on Policy Day 38?",
+    "candidate": "Had the Day-38 hospitalization resulted from a collarbone fracture in a bicycle collision, the accidental-trauma waiver would cover it; however, non-traumatic viral illness on Day 38 remains inside the 60-day waiting period."
+  },
+  {
+    "step": 76,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the search_flights tool call include ONLY constraints stated in 'Find nonstop flights from BOS to SEA on 2026-09-18' without inventing cabin class, airline, or price caps?",
+    "candidate": "{\n  \"tool\": \"search_flights\",\n  \"arguments\": {\n    \"origin\": \"BOS\",\n    \"destination\": \"SEA\",\n    \"departure_date\": \"2026-09-18\",\n    \"cabin\": \"business\",\n    \"max_price_usd\": 400\n  }\n}"
+  },
+  {
+    "step": 77,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the search_flights tool call include ONLY constraints stated in 'Find nonstop flights from BOS to SEA on 2026-09-18' without inventing cabin class, airline, or price caps?",
+    "candidate": "{\n  \"tool\": \"search_flights\",\n  \"arguments\": {\n    \"origin\": \"BOS\",\n    \"destination\": \"SEA\",\n    \"departure_date\": \"2026-09-18\",\n    \"nonstop_only\": true,\n    \"preferred_carrier\": \"DL\"\n  }\n}"
+  },
+  {
+    "step": 78,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "When issuing two separate $75 refunds for two distinct line items (item_101 and item_102), does the agent assign distinct idempotency keys to each mutation while preserving retry safety?",
+    "candidate": "Call 1: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key='ord_9_refund_75')\nCall 2: issue_refund(order='ord_9', item='item_102', amount=75, idempotency_key='ord_9_refund_75')"
+  },
+  {
+    "step": 79,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "When issuing two separate $75 refunds for two distinct line items (item_101 and item_102), does the agent assign distinct idempotency keys to each mutation while preserving retry safety?",
+    "candidate": "Call 1: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key=uuid4())\nRetry Call 1 on timeout: issue_refund(order='ord_9', item='item_101', amount=75, idempotency_key=uuid4())\nCall 2: issue_refund(order='ord_9', item='item_102', amount=75, idempotency_key=uuid4())"
+  },
+  {
+    "step": 80,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the JSON tool call match the user's request: 'Move $450.00 from Checking (acct_chk_09) into Vault Savings (acct_sav_44)' without swapping source and destination or altering units?",
+    "candidate": "{\n  \"tool\": \"initiate_transfer\",\n  \"arguments\": {\n    \"destination_account_id\": \"acct_sav_44\",\n    \"source_account_id\": \"acct_chk_09\",\n    \"amount_usd\": 450.0\n  }\n}"
+  },
+  {
+    "step": 81,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "When asked about the nonexistent 'IETF RFC 99987 Quantum HTTP Framing Protocol', does the assistant state that no such RFC is confirmed rather than fabricating protocol details?",
+    "candidate": "IETF RFC 99987 ('Quantum HTTP Framing Protocol'), ratified in 2025, introduces 128-bit entangled stream headers and replaces QUIC congestion control on UDP port 8443."
+  },
+  {
+    "step": 82,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "When asked about the nonexistent 'IETF RFC 99987 Quantum HTTP Framing Protocol', does the assistant state that no such RFC is confirmed rather than fabricating protocol details?",
+    "candidate": "RFC 99987 defines an experimental Quantum HTTP Framing extension drafted by the Transport Area Working Group using lattice-authenticated frame boundaries over HTTP/3 streams."
+  },
+  {
+    "step": 83,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the statement interpret a small underpowered study result (n=28, difference +4.1%, 95% CI [-6.2%, +14.4%], p=0.43) as inconclusive rather than proof of zero effect?",
+    "candidate": "Because p=0.43 exceeds 0.05 in this 28-person trial, the intervention is scientifically proven to have exactly 0% effect on the outcome."
+  },
+  {
+    "step": 84,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the statement interpret a small underpowered study result (n=28, difference +4.1%, 95% CI [-6.2%, +14.4%], p=0.43) as inconclusive rather than proof of zero effect?",
+    "candidate": "The non-significant p-value (p=0.43) across 28 participants confirms equivalence between groups and demonstrates that any real effect is strictly smaller than 1%."
+  },
+  {
+    "step": 85,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "tool_call_and_state_preconditions",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the agent trace satisfy the safety precondition of calling get_cluster_replica_lag(cluster_id) and confirming lag == 0 BEFORE calling promote_standby_db?",
+    "candidate": "Step 1: get_cluster_replica_lag(cluster_id='pg-prod-2') -> {'lag_bytes': 4096, 'healthy': true}\nStep 2: Aborting promote_standby_db because replica lag is non-zero (4096 bytes)."
+  },
+  {
+    "step": 86,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the genetic counseling summary distinguish variant pathogenicity classification from incomplete clinical penetrance in an asymptomatic carrier with no family history?",
+    "candidate": "Because ClinVar lists this missense variant as pathogenic, every asymptomatic carrier will inevitably develop the full clinical syndrome regardless of family history."
+  },
+  {
+    "step": 87,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the genetic counseling summary distinguish variant pathogenicity classification from incomplete clinical penetrance in an asymptomatic carrier with no family history?",
+    "candidate": "In unselected population screening without family history, 'pathogenic' means 100% penetrance by age 50, whereas 'likely pathogenic' means 90% penetrance."
+  },
+  {
+    "step": 88,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the engineering review recognize that passing a 10-client integration test does not prove absence of concurrency race conditions under unlocked shared state?",
+    "candidate": "Running 500 requests across 10 concurrent test workers with zero errors mathematically proves the unlocked in-memory counter is free of race conditions."
+  },
+  {
+    "step": 89,
+    "regime": "adversarial_prevalence_shift",
+    "regime_index": 2,
+    "domain": "epistemic_calibration_and_hedging",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the engineering review recognize that passing a 10-client integration test does not prove absence of concurrency race conditions under unlocked shared state?",
+    "candidate": "Because all 10 async workers completed 500 operations without raising an exception under Python's GIL, shared dictionary read-modify-write counters are guaranteed atomic in production."
+  },
+  {
+    "step": 90,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the keyset pagination SQL query deterministically break ties when multiple rows share the same created_at timestamp without skipping or duplicating rows?",
+    "candidate": "SELECT id, created_at, amount_cents\nFROM ledger_entries\nWHERE created_at < :cursor_ts\n   OR (created_at = :cursor_ts AND id < :cursor_id)\nORDER BY created_at DESC, id DESC\nLIMIT 50;"
+  },
+  {
+    "step": 91,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the keyset pagination SQL query deterministically break ties when multiple rows share the same created_at timestamp without skipping or duplicating rows?",
+    "candidate": "SELECT id, created_at, amount_cents\nFROM ledger_entries\nWHERE created_at <= :cursor_ts AND id < :cursor_id\nORDER BY created_at DESC, id DESC\nLIMIT 50;"
+  },
+  {
+    "step": 92,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the SQL statement atomically prevent overdrawing the wallet under concurrent Read Committed transactions without a check-then-act race condition?",
+    "candidate": "UPDATE wallets\nSET balance_cents = balance_cents - :debit_cents,\n    updated_at = NOW()\nWHERE wallet_id = :wallet_id\n  AND balance_cents >= :debit_cents\nRETURNING balance_cents;"
+  },
+  {
+    "step": 93,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the SQL statement atomically prevent overdrawing the wallet under concurrent Read Committed transactions without a check-then-act race condition?",
+    "candidate": "-- Application checked SELECT balance_cents >= :debit_cents beforehand\nUPDATE wallets\nSET balance_cents = balance_cents - :debit_cents,\n    updated_at = NOW()\nWHERE wallet_id = :wallet_id\nRETURNING balance_cents;"
+  },
+  {
+    "step": 94,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the SQL statement atomically prevent overdrawing the wallet under concurrent Read Committed transactions without a check-then-act race condition?",
+    "candidate": "WITH locked_wallet AS (\n    SELECT wallet_id FROM wallets\n    WHERE wallet_id = :wallet_id AND balance_cents >= :debit_cents\n    FOR UPDATE\n)\nUPDATE wallets w\nSET balance_cents = w.balance_cents - :debit_cents\nFROM locked_wallet lw WHERE w.wallet_id = lw.wallet_id\nRETURNING w.balance_cents;"
+  },
+  {
+    "step": 95,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the SQL statement atomically prevent overdrawing the wallet under concurrent Read Committed transactions without a check-then-act race condition?",
+    "candidate": "UPDATE wallets\nSET balance_cents = balance_cents - :debit_cents,\n    updated_at = NOW()\nWHERE wallet_id = :wallet_id\n  AND (SELECT balance_cents FROM wallets WHERE wallet_id = :wallet_id) >= 0\nRETURNING balance_cents;"
+  },
+  {
+    "step": 96,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the JSON Schema require 'id' (string) and 'retries' (integer in 0..5) AND reject undeclared top-level properties?",
+    "candidate": "{\n  \"type\": \"object\",\n  \"required\": [\"id\", \"retries\"],\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"id\": {\"type\": \"string\", \"minLength\": 1},\n    \"retries\": {\"type\": \"integer\", \"minimum\": 0, \"maximum\": 5}\n  }\n}"
+  },
+  {
+    "step": 97,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the JSON Schema require 'id' (string) and 'retries' (integer in 0..5) AND reject undeclared top-level properties?",
+    "candidate": "{\n  \"type\": \"object\",\n  \"required\": [\"id\", \"retries\"],\n  \"properties\": {\n    \"id\": {\"type\": \"string\"},\n    \"retries\": {\"type\": \"number\", \"minimum\": 0, \"maximum\": 10}\n  }\n}"
+  },
+  {
+    "step": 98,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the JSON Schema require 'id' (string) and 'retries' (integer in 0..5) AND reject undeclared top-level properties?",
+    "candidate": "{\n  \"type\": \"object\",\n  \"required\": [\"id\", \"retries\"],\n  \"unevaluatedProperties\": false,\n  \"properties\": {\n    \"id\": {\"type\": \"string\"},\n    \"retries\": {\"type\": \"integer\", \"minimum\": 0, \"exclusiveMaximum\": 6}\n  }\n}"
+  },
+  {
+    "step": 99,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "database_and_schema",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the JSON Schema require 'id' (string) and 'retries' (integer in 0..5) AND reject undeclared top-level properties?",
+    "candidate": "{\n  \"type\": \"object\",\n  \"required\": [\"id\"],\n  \"additionalProperties\": true,\n  \"properties\": {\n    \"id\": {\"type\": \"string\", \"minLength\": 1},\n    \"retries\": {\"type\": \"integer\", \"minimum\": 0, \"maximum\": 5}\n  }\n}"
+  },
+  {
+    "step": 100,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Is the [SUMMARY] strictly faithful to the [POSTMORTEM] regarding duration, affected traffic share, and root cause?",
+    "candidate": "[POSTMORTEM]\nBetween 14:10 and 14:47 UTC on May 6, 18% of webhook deliveries in us-west-2 failed with HTTP 503 after a DNS TTL change exhausted connection pools. No payload data was lost; queued events drained by 15:05 UTC.\n\n[SUMMARY]\nOn May 6, a DNS TTL change exhausted connection pools in us-west-2, causing 18% of webhook deliveries to return HTTP 503 for 37 minutes (14:10–14:47 UTC) with zero data loss."
+  },
+  {
+    "step": 101,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Is the [SUMMARY] strictly faithful to the [POSTMORTEM] regarding duration, affected traffic share, and root cause?",
+    "candidate": "[POSTMORTEM]\nBetween 14:10 and 14:47 UTC on May 6, 18% of webhook deliveries in us-west-2 failed with HTTP 503 after a DNS TTL change exhausted connection pools. No payload data was lost; queued events drained by 15:05 UTC.\n\n[SUMMARY]\nA global webhook outage on May 6 dropped 82% of customer events across all regions for nearly an hour due to an expired database certificate."
+  },
+  {
+    "step": 102,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Is the [SUMMARY] strictly faithful to the [POSTMORTEM] regarding duration, affected traffic share, and root cause?",
+    "candidate": "[POSTMORTEM]\nBetween 14:10 and 14:47 UTC on May 6, 18% of webhook deliveries in us-west-2 failed with HTTP 503 after a DNS TTL change exhausted connection pools. Early theories suspected a TLS certificate expiry, which was ruled out.\n\n[SUMMARY]\nInvestigators ruled out TLS certificate expiry and confirmed a DNS TTL change caused 18% of us-west-2 webhooks to fail between 14:10 and 14:47 UTC."
+  },
+  {
+    "step": 103,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Is the [SUMMARY] strictly faithful to the [POSTMORTEM] regarding duration, affected traffic share, and root cause?",
+    "candidate": "[POSTMORTEM]\nBetween 14:10 and 14:47 UTC on May 6, 18% of webhook deliveries in us-west-2 failed with HTTP 503 after a DNS TTL change exhausted connection pools. No payload data was lost; queued events drained by 15:05 UTC.\n\n[SUMMARY]\nFrom 14:10 to 15:05 UTC on May 6, 18% of webhook deliveries in us-west-2 were permanently lost after a DNS TTL update exhausted connection pools."
+  },
+  {
+    "step": 104,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the [RELEASE_NOTE] accurately reflect the deprecation timeline and default behavior described in [CHANGELOG]?",
+    "candidate": "[CHANGELOG]\nv3.4 marks XML export as deprecated; it remains enabled by default in v3.x and will be removed in v4.0 (scheduled for November 2027). Users may opt into CSV v2 today.\n\n[RELEASE_NOTE]\nXML export is deprecated starting in v3.4 but stays enabled by default throughout v3.x ahead of planned removal in v4.0 (November 2027)."
+  },
+  {
+    "step": 105,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the [RELEASE_NOTE] accurately reflect the deprecation timeline and default behavior described in [CHANGELOG]?",
+    "candidate": "[CHANGELOG]\nv3.4 marks XML export as deprecated; it remains enabled by default in v3.x and will be removed in v4.0 (scheduled for November 2027). Users may opt into CSV v2 today.\n\n[RELEASE_NOTE]\nUpgrading to v3.4 immediately removes XML export support and switches all existing integrations to CSV v2 by default."
+  },
+  {
+    "step": 106,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the [RELEASE_NOTE] accurately reflect the deprecation timeline and default behavior described in [CHANGELOG]?",
+    "candidate": "[CHANGELOG]\nv3.4 marks XML export as deprecated; it remains enabled by default in v3.x and will be removed in v4.0 (scheduled for November 2027). Users may opt into CSV v2 today.\n\n[RELEASE_NOTE]\nNo breaking removal occurs in v3.4: although XML export is slated for deletion in v4.0 (November 2027), existing v3.x deployments keep XML enabled by default."
+  },
+  {
+    "step": 107,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the [RELEASE_NOTE] accurately reflect the deprecation timeline and default behavior described in [CHANGELOG]?",
+    "candidate": "[CHANGELOG]\nv3.4 marks XML export as deprecated; it remains enabled by default in v3.x and will be removed in v4.0 (scheduled for November 2027). Users may opt into CSV v2 today.\n\n[RELEASE_NOTE]\nXML export is deprecated and disabled by default in v3.4 unless re-enabled manually, prior to complete removal in v4.0 (November 2027)."
+  },
+  {
+    "step": 108,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the [DIGEST] state the exact replication factor and write-acknowledgment rule specified in [RFC_EXCERPT]?",
+    "candidate": "[RFC_EXCERPT]\nMetadata shards replicate across 5 availability zones. Client writes succeed once 3 of 5 replicas persist the WAL entry to local NVMe; async compaction runs every 15 minutes.\n\n[DIGEST]\nWrites to metadata shards are acknowledged as soon as 3 out of 5 availability-zone replicas flush the WAL entry to NVMe, with 15-minute async compaction."
+  },
+  {
+    "step": 109,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the [DIGEST] state the exact replication factor and write-acknowledgment rule specified in [RFC_EXCERPT]?",
+    "candidate": "[RFC_EXCERPT]\nMetadata shards replicate across 5 availability zones. Client writes succeed once 3 of 5 replicas persist the WAL entry to local NVMe; async compaction runs every 15 minutes.\n\n[DIGEST]\nMetadata shards replicate across 3 availability zones and acknowledge writes asynchronously in memory before flushing to disk every 15 minutes."
+  },
+  {
+    "step": 110,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the [DIGEST] state the exact replication factor and write-acknowledgment rule specified in [RFC_EXCERPT]?",
+    "candidate": "[RFC_EXCERPT]\nMetadata shards replicate across 5 availability zones. Client writes succeed once 3 of 5 replicas persist the WAL entry to local NVMe; full 5-of-5 sync mode was rejected due to tail latency.\n\n[DIGEST]\nThe RFC rejected synchronous 5-of-5 writes and instead requires 3 of 5 zone replicas to persist the WAL entry before acknowledging a write."
+  },
+  {
+    "step": 111,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the [DIGEST] state the exact replication factor and write-acknowledgment rule specified in [RFC_EXCERPT]?",
+    "candidate": "[RFC_EXCERPT]\nMetadata shards replicate across 5 availability zones. Client writes succeed once 3 of 5 replicas persist the WAL entry to local NVMe; async compaction runs every 15 minutes.\n\n[DIGEST]\nMetadata shards span 5 availability zones and require all 5 replicas to persist the WAL entry to NVMe and finish compaction before acknowledging client writes."
+  },
+  {
+    "step": 112,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the [TAKEAWAY] report the latency and memory trade-offs from [TABLE_NOTES] without reversing which engine used less RAM?",
+    "candidate": "[TABLE_NOTES]\nEngine Alpha achieved p95 latency of 14ms using 6.4 GB RAM, whereas Engine Beta achieved p95 latency of 22ms using 2.1 GB RAM on the same 8-core host.\n\n[TAKEAWAY]\nOn the 8-core benchmark host, Engine Alpha had lower p95 latency (14ms vs 22ms), while Engine Beta required less RAM (2.1 GB vs 6.4 GB)."
+  },
+  {
+    "step": 113,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the [TAKEAWAY] report the latency and memory trade-offs from [TABLE_NOTES] without reversing which engine used less RAM?",
+    "candidate": "[TABLE_NOTES]\nEngine Alpha achieved p95 latency of 14ms using 6.4 GB RAM, whereas Engine Beta achieved p95 latency of 22ms using 2.1 GB RAM on the same 8-core host.\n\n[TAKEAWAY]\nEngine Alpha dominated on both metrics, delivering 14ms p95 latency while consuming only 2.1 GB of RAM compared to Beta's 6.4 GB."
+  },
+  {
+    "step": 114,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the [TAKEAWAY] report the latency and memory trade-offs from [TABLE_NOTES] without reversing which engine used less RAM?",
+    "candidate": "[TABLE_NOTES]\nEngine Alpha achieved p95 latency of 14ms using 6.4 GB RAM, whereas Engine Beta achieved p95 latency of 22ms using 2.1 GB RAM on the same 8-core host.\n\n[TAKEAWAY]\nTrading 8ms of additional p95 latency (22ms vs Alpha's 14ms), Engine Beta cut memory consumption from 6.4 GB down to 2.1 GB."
+  },
+  {
+    "step": 115,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the [TAKEAWAY] report the latency and memory trade-offs from [TABLE_NOTES] without reversing which engine used less RAM?",
+    "candidate": "[TABLE_NOTES]\nEngine Alpha achieved p95 latency of 14ms using 6.4 GB RAM, whereas Engine Beta achieved p95 latency of 22ms using 2.1 GB RAM on the same 8-core host.\n\n[TAKEAWAY]\nOn the 8-core host, Engine Beta achieved faster 14ms p95 latency at 6.4 GB RAM, whereas Engine Alpha ran at 22ms using 2.1 GB RAM."
+  },
+  {
+    "step": 116,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the [ANSWER] accurately reflect the uptime target and scheduled-maintenance exclusion in [SLA_CLAUSE]?",
+    "candidate": "[SLA_CLAUSE]\nEnterprise plans guarantee 99.95% monthly API availability, excluding planned maintenance windows announced at least 72 hours in advance and capped at 2 hours per month.\n\n[ANSWER]\nThe Enterprise SLA guarantees 99.95% monthly uptime, excluding up to 2 hours per month of planned maintenance announced 72+ hours ahead."
+  },
+  {
+    "step": 117,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "direct_fail",
+    "expected": false,
+    "rubric": "Does the [ANSWER] accurately reflect the uptime target and scheduled-maintenance exclusion in [SLA_CLAUSE]?",
+    "candidate": "[SLA_CLAUSE]\nEnterprise plans guarantee 99.95% monthly API availability, excluding planned maintenance windows announced at least 72 hours in advance and capped at 2 hours per month.\n\n[ANSWER]\nEnterprise plans guarantee 99.999% zero-downtime availability every month with no maintenance exclusions permitted under any circumstances."
+  },
+  {
+    "step": 118,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the [ANSWER] accurately reflect the uptime target and scheduled-maintenance exclusion in [SLA_CLAUSE]?",
+    "candidate": "[SLA_CLAUSE]\nEnterprise plans guarantee 99.95% monthly API availability, excluding planned maintenance windows announced at least 72 hours in advance and capped at 2 hours per month.\n\n[ANSWER]\nUnannounced maintenance counts against the 99.95% monthly uptime target; only maintenance announced at least 72 hours early (up to 2 hours/month) is excluded."
+  },
+  {
+    "step": 119,
+    "regime": "stationary_recovery",
+    "regime_index": 3,
+    "domain": "grounded_summarization",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the [ANSWER] accurately reflect the uptime target and scheduled-maintenance exclusion in [SLA_CLAUSE]?",
+    "candidate": "[SLA_CLAUSE]\nEnterprise plans guarantee 99.95% monthly API availability, excluding planned maintenance windows announced at least 72 hours in advance and capped at 2 hours per month.\n\n[ANSWER]\nThe Enterprise SLA guarantees 99.95% monthly availability and excludes any planned maintenance announced 24 hours in advance for up to 8 hours per month."
+  }
+]

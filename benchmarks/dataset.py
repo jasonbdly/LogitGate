@@ -16,6 +16,10 @@ def _load_json(filename: str) -> Any:
 
 
 MULTI_DOMAIN_24_ITEMS: list[dict[str, Any]] = _load_json("multi_domain_24.json")
+CAL_DISTILL_80_ITEMS: list[dict[str, Any]] = _load_json("cal_distill_80.json")
+OOD_GENERALIZATION_96_ITEMS: list[dict[str, Any]] = _load_json("ood_generalization_96.json")
+STREAMING_TRAJECTORIES_32_ITEMS: list[dict[str, Any]] = _load_json("streaming_trajectories_32.json")
+DRIFT_REGIMES_120_ITEMS: list[dict[str, Any]] = _load_json("drift_regimes_120.json")
 
 _REASONING_DATA: dict[str, Any] = _load_json("reasoning_tiers_32.json")
 TIER_B_COMPOUND_RUBRIC: str = _REASONING_DATA["tier_b_compound_rubric"]
@@ -48,6 +52,22 @@ HANDBOOK_SECTIONS: list[str] = _HAYSTACK_DATA["sections"]
 
 def load_multi_domain_24() -> list[dict[str, Any]]:
     return list(MULTI_DOMAIN_24_ITEMS)
+
+
+def load_cal_distill_80() -> list[dict[str, Any]]:
+    return list(CAL_DISTILL_80_ITEMS)
+
+
+def load_ood_generalization_96() -> list[dict[str, Any]]:
+    return list(OOD_GENERALIZATION_96_ITEMS)
+
+
+def load_streaming_trajectories_32() -> list[dict[str, Any]]:
+    return list(STREAMING_TRAJECTORIES_32_ITEMS)
+
+
+def load_drift_regimes_120() -> list[dict[str, Any]]:
+    return list(DRIFT_REGIMES_120_ITEMS)
 
 
 def load_reasoning_tiers_32() -> list[dict[str, Any]]:

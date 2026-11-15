@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Benchmark Confounder & Cross-Split Leakage Auditor (`logitgate.calibration.audit`):** Added `DatasetAuditReport`, `SplitLeakageReport`, `audit_benchmark_dataset()`, and `check_split_leakage()` (re-exported at `logitgate` and `logitgate.calibration`) to audit JSON/JSONL/Markdown evaluation datasets in `0` LLM calls for Pass-vs-Fail length confounders (exact tie-aware `length_auroc` and per-domain char/word relative differences), rubric-blind Laplace-smoothed unigram leave-one-out shortcuts (`lexical_loo_accuracy`), split-conformal sample-power floors (`holds_at_alpha_010` requiring `>= 19`/class; `holds_at_alpha_005` requiring `>= 39`/class), duplicate candidates, and cross-split leakage via exact candidate/rubric hashing plus an inverted word-3-gram Jaccard shingle index (`O_NOFOLLOW` symlink-hardened, 32 MiB bounded).
+- **Deconfounded `2x2` Counterfactual Benchmark & Calibration Datasets:** Added `benchmarks/data/cal_distill_80.json` (`80` items across `20` `2x2` quads in 4 in-domain families), strictly domain-disjoint `benchmarks/data/ood_generalization_96.json` (`96` items across `24` `2x2` quads in 6 held-out reasoning families with `0` shared domains and `max_jaccard <= 0.0147`), `benchmarks/data/streaming_trajectories_32.json` (`32` multi-chunk streaming trajectories), and `benchmarks/data/drift_regimes_120.json` (`120` unique ordered items across 4 non-stationary drift regimes), alongside typed loaders in `benchmarks/dataset.py`.
+- **Zero-LLM-Call Dataset Audit CLI Flags (`logitgate benchmark`):** Added `--audit-only`, `--reference-dataset`, and `--strict-audit` flags to `logitgate benchmark` (supporting both human-readable reports and `--json` CI output).
+
+### Changed
+- **Upgraded Conformal Sample Power in `EPISTEMIC_REASONING_TEST_CASES.md`:** Expanded `EPISTEMIC_REASONING_TEST_CASES.md` from `20` (`10`/`10`) to `80` (`40`/`40`) length-balanced counterfactual cases (`char_length_rel_diff = 4.1%`, `length_auroc = 0.5366`) so default `--alpha 0.05` conformal calibration satisfies `min_samples_per_class(0.05) = 39` (`guarantee_holds = True`) out of the box.
+
+### Fixed
+- **Benchmark Documentation Link:** Fixed `UNIVERSAL_CALIBRATION_DATASET` relative path link in `docs/benchmarks.md` (`../src/logitgate/debiasing/permutation.py`).
+
 ## [0.8.0] - 2026-11-14
 
 ### Added

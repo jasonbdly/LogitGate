@@ -19,6 +19,12 @@ from logitgate.backends.pytorch_native import PrefixBroadcastLogitEvaluator
 from logitgate.backends.recurrent import (
     RecurrentPyTorchBackend,
 )
+from logitgate.calibration.audit import (
+    DatasetAuditReport,
+    SplitLeakageReport,
+    audit_benchmark_dataset,
+    check_split_leakage,
+)
 from logitgate.calibration.conformal import (
     ConformalCascadeThresholds,
     calibrate_cascade_thresholds,
@@ -191,6 +197,7 @@ __all__ = [
     "ConformalCascadeThresholds",
     "ContractGate",
     "ContractViolationError",
+    "DatasetAuditReport",
     "DebiasedLogitResult",
     "DecisionStatus",
     "DiscrepancyType",
@@ -223,6 +230,7 @@ __all__ = [
     "RecurrentPyTorchBackend",
     "ScoreConformalThresholds",
     "ScoreGate",
+    "SplitLeakageReport",
     "StubBackend",
     "StubBackendWarning",
     "SurfaceTokenMap",
@@ -237,11 +245,13 @@ __all__ = [
     "afit_calibration_profile",
     "as_async_conditional_edge",
     "as_conditional_edge",
+    "audit_benchmark_dataset",
     "auto_calibrate_backend",
     "calibrate_cascade_thresholds",
     "calibrate_choice_thresholds",
     "calibrate_score_thresholds",
     "check",
+    "check_split_leakage",
     "combine_symmetric_log_odds",
     "compile_batch_binary_prompt",
     "compile_binary_prompt",

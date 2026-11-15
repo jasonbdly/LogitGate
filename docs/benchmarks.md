@@ -571,7 +571,7 @@ Even full linear-time PII scrubbing plus thread-locked `O_NOFOLLOW` JSONL disk p
 
 #### B. Live GPU Discrepancy Mining & Zero-LLM-Call Offline Recalibration (`40`-Item Burn-In -> `MultiDomain-24` Holdout)
 
-Phase 1 streams `40` diverse burn-in items (`19` Teacher Pass / `21` Teacher Fail across [`UNIVERSAL_CALIBRATION_DATASET`](../src/logitgate/calibration/datasets.py) and [`EPISTEMIC_REASONING_TEST_CASES.md`](../EPISTEMIC_REASONING_TEST_CASES.md)) through an uncalibrated student `LogitGate` (`RTX 4070`) paired with a full-audit `JudgeGate(model="gemma4:26b", trigger="always")` teacher (`RTX 5090`, `17.84 GB` VRAM, standalone `MultiDomain-24` baseline: **`24/24 (100.0%)`**, `999.2 ms` mean / `928.0 ms` median) into `CompositeTelemetrySink([JsonlTelemetrySink, DistillationSink])`.
+Phase 1 streams `40` diverse burn-in items (`19` Teacher Pass / `21` Teacher Fail across [`UNIVERSAL_CALIBRATION_DATASET`](../src/logitgate/debiasing/permutation.py) and [`EPISTEMIC_REASONING_TEST_CASES.md`](../EPISTEMIC_REASONING_TEST_CASES.md)) through an uncalibrated student `LogitGate` (`RTX 4070`) paired with a full-audit `JudgeGate(model="gemma4:26b", trigger="always")` teacher (`RTX 5090`, `17.84 GB` VRAM, standalone `MultiDomain-24` baseline: **`24/24 (100.0%)`**, `999.2 ms` mean / `928.0 ms` median) into `CompositeTelemetrySink([JsonlTelemetrySink, DistillationSink])`.
 
 Phase 2 calls `recalibrate_from_telemetry(distill.jsonl, target_risk_alpha=0.10)` (**`0` LLM calls**, `<5 ms` CPU optimization) and evaluates the refitted profile on the disjoint `24`-item [`multi_domain_24.json`](../benchmarks/data/multi_domain_24.json) holdout (`JudgeGate(trigger="on_ambiguous_only")`):
 
@@ -591,7 +591,72 @@ Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to 
 
 ---
 
-### 10. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 10. Deconfounded Cross-Domain Counterfactual Suite & Domain-Disjoint Conformal Transfer (`v0.8.1`)
+
+#### A. Dataset Confounder & Cross-Split Leakage Audit (`0` LLM Calls)
+
+Auditing legacy `MultiDomain-24` via `audit_benchmark_dataset()` uncovered two structural validity risks before building downstream streaming (`v0.9.0`), drift (`v0.10.0`), and distillation (`v0.11.0`) evaluations:
+1. **Length Confounding:** Passing candidates averaged `361.3` chars vs. `250.9` chars for failing candidates (`30.6%` relative length imbalance, **`length_auroc = 0.7465`**).
+2. **Sample-Power Deficit & Domain Overlap:** `12` samples/class could not satisfy split-conformal coverage floors (`n >= 19`/class for `alpha = 0.10`; `n >= 39`/class for `alpha = 0.05`), and code/SQL/RAG archetypes overlapped with calibration sets.
+
+To eliminate length and lexical shortcuts, `v0.8.1` constructs paired **`2x2` contrastive counterfactual quads** (`clean_pass`, `hard_positive` carrying cautionary/defect vocabulary while satisfying the rubric, `direct_fail`, and `hard_negative` carrying polished compliance vocabulary while subtly violating the rubric) across strictly disjoint domain families:
+
+| Dataset Artifact | Cases (`Pass / Fail`) | `alpha = 0.05` Power (`>=39`/cls) | Pass/Fail Char Diff | `length_auroc` | Rubric-Blind Unigram LOO Acc | Audit Warnings |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Legacy [`multi_domain_24.json`](../benchmarks/data/multi_domain_24.json) | `24` (`12 / 12`) | `False` | `30.6%` | `0.7465` | `12.5%` | `2` |
+| **Split A:** [`cal_distill_80.json`](../benchmarks/data/cal_distill_80.json) (`4` in-domain families) | **`80` (`40 / 40`)** | **`True`** | **`4.3%`** | **`0.5397`** | **`7.5%`** | **`0`** |
+| **Split B:** [`ood_generalization_96.json`](../benchmarks/data/ood_generalization_96.json) (`6` unseen OOD families) | **`96` (`48 / 48`)** | **`True`** | **`6.8%`** | **`0.5979`** | **`19.8%`** | **`0`** |
+| Upgraded [`EPISTEMIC_REASONING_TEST_CASES.md`](../EPISTEMIC_REASONING_TEST_CASES.md) | **`80` (`40 / 40`)** | **`True`** | **`4.1%`** | **`0.5366`** | **`7.5%`** | **`0`** |
+| [`streaming_trajectories_32.json`](../benchmarks/data/streaming_trajectories_32.json) (`v0.9.0` multi-chunk streams) | `32` (`16 / 16`) | `False` (eval-only) | **`3.8%`** | **`0.4551`** | **`15.6%`** | `1` (size note) |
+| [`drift_regimes_120.json`](../benchmarks/data/drift_regimes_120.json) (`v0.10.0` 4-regime shift stream) | **`120` (`51 / 69`)** | **`True`** | **`8.8%`** | **`0.5718`** | **`17.5%`** | **`0`** |
+
+Running `check_split_leakage("benchmarks/data/ood_generalization_96.json", ...)` against `cal_distill_80.json`, `EPISTEMIC_REASONING_TEST_CASES.md`, `multi_domain_24.json`, `UNIVERSAL_CALIBRATION_DATASET`, and `BUILTIN_CASES` confirms **`is_clean = True`** across every pair (**`0` exact candidate/rubric overlaps, `0` shared domains, and maximum 3-gram Jaccard similarity `<= 0.0147`**). Rubric-blind unigram leave-one-out accuracy falls well below `50%` (`7.5%–19.8%`) because `hard_positive` and `hard_negative` deliberately invert surface vocabulary cues within every quad.
+
+#### B. Standard vs. Contrastive Counterfactual Stratification (`OOD-96`, 6 Held-Out Reasoning Families)
+
+Evaluating standalone forced-binary models across the 6 unseen OOD families (`causal_and_statistical_inference`, `quantitative_unit_and_temporal`, `compositional_and_negated_constraints`, `regulatory_and_clinical_exceptions`, `tool_call_and_state_preconditions`, and `epistemic_calibration_and_hedging`) exposes real architectural separation and opposing polarity biases that were masked by `MultiDomain-24`:
+
+| Model & Hardware | Overall `OOD-96` Acc | Standard (`clean_pass` + `direct_fail`, `N=48`) | Counterfactual (`hard_pos` + `hard_neg`, `N=48`) | Quadrant Breakdown (`clean_pass` / `hard_pos` / `direct_fail` / `hard_neg`) | Score AUROC (`All / Std / Hard`) | Mean / Median Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`gemma4:26b` `JudgeGate`** (RTX 5090, `17.84 GB`, `think=False`) | **`94/96 (97.9%)`** | **`48/48 (100.0%)`** | **`46/48 (95.8%)`** | `100.0% / 91.7% / 100.0% / 100.0%` | — | `1,132.9 ms / 1,089.4 ms` |
+| **`qwen2.5-coder:3b` `LogitGate`** (RTX 4070, `2.09 GB`, `0` tok) | `57/96 (59.4%)` | `34/48 (70.8%)` | `23/48 (47.9%)` | `41.7% / 16.7% / 100.0% / 79.2%` *(over-skeptical)* | `0.7218 / 0.8455 / 0.5590` | `133.5 ms / 110.1 ms` |
+| **`llama3.2:3b` `LogitGate`** (RTX 4070, `2.33 GB`, `0` tok) | `60/96 (62.5%)` | `34/48 (70.8%)` | `26/48 (54.2%)` | `91.7% / 87.5% / 50.0% / 20.8%` *(sycophantic)* | `0.7001 / 0.7899 / 0.5920` | `134.9 ms / 112.8 ms` |
+| **`gemma4:e4b` `LogitGate`** (RTX 4070, `3.21 GB`, `0` tok) | **`81/96 (84.4%)`** | **`44/48 (91.7%)`** | **`37/48 (77.1%)`** | `87.5% / 75.0% / 95.8% / 79.2%` *(balanced)* | **`0.9440 / 0.9878 / 0.8854`** | `174.1 ms / 171.6 ms` |
+| **`qwen2.5:14b` `LogitGate`** (RTX 4070, `9.09 GB`, `0` tok) | **`84/96 (87.5%)`** | **`45/48 (93.8%)`** | **`39/48 (81.2%)`** | `91.7% / 83.3% / 95.8% / 79.2%` *(balanced)* | **`0.9336 / 0.9948 / 0.8542`** | `183.7 ms / 179.2 ms` |
+
+- **Opposing 3B Failure Modes Uncovered:** When stripped of length shortcuts and tested on non-code OOD domains, `qwen2.5-coder:3b` defaults to skepticism (`100.0%` on `direct_fail` but `16.7%` on `hard_positive`), whereas `llama3.2:3b` defaults to sycophancy (`91.7%` on `clean_pass` but `20.8%` on polished `hard_negative`).
+- **4B–14B Semantic Separation:** `gemma4:e4b` (`3.21 GB` VRAM) and `qwen2.5:14b` (`9.09 GB` VRAM) achieve **`0.988–0.995` AUROC** on Standard OOD pairs and **`0.854–0.885` AUROC** on Hard Counterfactuals in a single `~175 ms` forward pass, while leaving clear `10–13 pp` headroom below the `26B` Layer-2 CoT teacher (`97.9%`).
+
+#### C. Strict Domain-Disjoint Conformal Transfer (`Split A cal_distill_80.json` -> Zero-Shot `Split B ood_generalization_96.json`)
+
+Each `CalibrationProfile` is fitted **exclusively on Split A** (`cal_distill_80.json`, `4` domains: Python, SQL, grounded summarization, support ops; `guarantee_holds = True` at both `alpha = 0.10` and `alpha = 0.05`) and evaluated **zero-shot on Split B** (`ood_generalization_96.json`, `6` completely unseen domains) inside a `LogitGate >> JudgeGate(gemma4:26b, trigger="on_ambiguous_only")` cascade:
+
+| Layer-1 Model | Regime (Fitted on Split A Only) | Split-A `[tau_rej, tau_acc]` (`T_bin`) | OOD Layer-1 Error (`Std / Hard`) | OOD Fast-Path Rate | Cascade Accuracy | Cascade Mean Latency (`Speedup` vs 26B L2) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **`qwen2.5-coder:3b`** | Uncalibrated (`0.20, 0.85`, `T=1.0`) | `[0.2000, 0.8500]` (`1.0000`) | `2/96 (2.08%)` (`1 / 1`) | `18.8%` | `95.8%` | `1,092.8 ms` (`1.04x`) |
+| | Split-A Conformal (`alpha = 0.10`) | `[0.3210, 0.7635]` (`1.4453`) | **`9/96 (9.38%)`** (`6 / 3`) | `35.4%` | `88.5%` | `867.1 ms` (`1.31x`) |
+| | Split-A Conformal (`alpha = 0.05`) | `[0.3162, 0.7731]` (`1.3419`) | `9/96 (9.38%)` (`5 / 4`) | `35.4%` | `88.5%` | `870.3 ms` (`1.30x`) |
+| **`llama3.2:3b`** | Uncalibrated (`0.20, 0.85`, `T=1.0`) | `[0.2000, 0.8500]` (`1.0000`) | `10/96 (10.42%)` (`3 / 7`) | `40.6%` | `87.5%` | `812.4 ms` (`1.39x`) |
+| | Split-A Conformal (`alpha = 0.10`) | `[0.3910, 0.7828]` (`1.8616`) | **`6/96 (6.25%)`** (`2 / 4`) | `32.3%` | `90.6%` | `904.9 ms` (`1.25x`) |
+| | Split-A Conformal (`alpha = 0.05`) | `[0.2817, 0.8669]` (`1.6771`) | **`0/96 (0.00%)`** (`0 / 0`) | `15.6%` | **`95.8%`** | `1,128.4 ms` (`1.00x`) |
+| **`gemma4:e4b`** | Uncalibrated (`0.20, 0.85`, `T=1.0`) | `[0.2000, 0.8500]` (`1.0000`) | `13/96 (13.54%)` (`4 / 9`) | `95.8%` | `85.4%` | `228.0 ms` (`4.97x`) |
+| | Split-A Conformal (`alpha = 0.10`) | `[0.0641, 0.2059]` (`2.9552`) | `11/96 (11.46%)` (`2 / 9`) | `88.5%` | `86.5%` | `326.7 ms` (`3.47x`) |
+| | Split-A Conformal (`alpha = 0.05`) | `[0.0408, 0.9195]` (`2.9068`) | **`1/96 (1.04%)`** (`0 / 1`) | **`57.3%`** | **`96.9%`** | **`694.3 ms` (`1.63x`)** |
+| **`qwen2.5:14b`** | Uncalibrated (`0.20, 0.85`, `T=1.0`) | `[0.2000, 0.8500]` (`1.0000`) | `9/96 (9.38%)` (`3 / 6`) | `97.9%` | `90.6%` | `209.3 ms` (`5.41x`) |
+| | Split-A Conformal (`alpha = 0.10`) | `[0.2521, 0.9053]` (`9.0470`) | **`6/96 (6.25%)`** (`1 / 5`) | **`83.3%`** | **`92.7%`** | **`391.0 ms` (`2.90x`)** |
+| | Split-A Conformal (`alpha = 0.05`) | `[0.0783, 0.9274]` (`9.4214`) | **`3/96 (3.12%)`** (`0 / 3`) | **`69.8%`** | **`94.8%`** | **`547.1 ms` (`2.07x`)** |
+
+- **Zero-Shot Risk Control Across Unseen Domains:** At `alpha = 0.05` (`<= 5.0%` target Layer-1 error), `llama3.2:3b` (`0.00%`), `gemma4:e4b` (`1.04%`, `57.3%` fast-path, `96.9%` cascade accuracy), and `qwen2.5:14b` (`3.12%`, `69.8%` fast-path, `94.8%` cascade accuracy, `2.07x` speedup) all hold empirical OOD Layer-1 error strictly below the `5.0%` nominal bound despite **zero domain overlap** between calibration and evaluation.
+- **When Exchangeability Breaks Under Severe Specialization Shift:** Code-specialized `qwen2.5-coder:3b` (`Split-A probe_auroc = 0.6963`, triggering the `AUROC < 0.70 -> T >= 1.0` regularizer) stays within budget at `alpha = 0.10` (`9.38% <= 10.0%`), but exhibits mild under-coverage (`9.38%` vs `5.0%`) at `alpha = 0.05` when shifted from 50% code/SQL onto 100% prose clinical/causal/regulatory domains — empirically motivating online covariate-shift monitoring and Gibbs–Candès Adaptive Conformal Inference (`v0.10.0`).
+
+#### D. Pure-CPU Stratified OOD Validation (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`, `OOD-24`)
+
+Evaluated across `24` stratified OOD items (`1` complete `2x2` quad from each of the 6 held-out domains) with `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `[]`):
+- **Split-A Conformal Cascade (`alpha = 0.10`):** **`2/24 (8.33% <= 10.0%)`** Layer-1 selective error, `29.2%` fast-path rate, **`22/24 (91.7%)`** cascade accuracy, `1,957.2 ms` median Layer-1 CPU latency (`2,841.5 ms` mean end-to-end cascade latency).
+
+---
+
+### 11. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

@@ -261,6 +261,22 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to a CalibrationProfile JSON file for LogitGate / cascade modes",
     )
+    bench_parser.add_argument(
+        "--audit-only",
+        action="store_true",
+        help="Audit dataset for length confounders, lexical shortcuts, conformal power, and split leakage without calling any model",
+    )
+    bench_parser.add_argument(
+        "--reference-dataset",
+        type=str,
+        default=None,
+        help="Optional reference (calibration/training) dataset path to check for cross-split leakage with --audit-only",
+    )
+    bench_parser.add_argument(
+        "--strict-audit",
+        action="store_true",
+        help="With --audit-only, exit with code 1 if any dataset confounder warnings or cross-split leakage are detected",
+    )
     bench_parser.add_argument("--json", action="store_true", help="Emit machine-readable results")
     bench_parser.add_argument("--quiet", action="store_true", help="Suppress per-case progress on stderr")
 
@@ -891,7 +907,54 @@ def _cmd_explain(args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark(args: argparse.Namespace) -> int:
-    from logitgate.benchmark import format_report, load_cases, run_benchmark, write_json
+    from logitgate.benchmark import (
+        BUILTIN_CASES,
+        format_report,
+        load_cases,
+        run_benchmark,
+        write_json,
+    )
+
+    if getattr(args, "audit_only", False):
+        import json
+
+        from logitgate.calibration.audit import (
+            audit_benchmark_dataset,
+            check_split_leakage,
+        )
+
+        target_source: Any = args.dataset if args.dataset is not None else BUILTIN_CASES
+        target_label = sanitize_terminal_text(str(args.dataset)) if args.dataset is not None else "builtin"
+        try:
+            audit_rep = audit_benchmark_dataset(target_source, label=target_label)
+            leak_rep = None
+            if args.reference_dataset is not None:
+                leak_rep = check_split_leakage(
+                    args.reference_dataset,
+                    target_source,
+                    reference_label=sanitize_terminal_text(str(args.reference_dataset)),
+                    eval_label=target_label,
+                )
+        except (OSError, ValueError, CalibrationError) as e:
+            sys.stderr.write(f"Error auditing dataset: {sanitize_terminal_text(str(e))}\n")
+            return EXIT_FAILED
+
+        if args.json:
+            payload: dict[str, Any] = {"audit": audit_rep.to_dict()}
+            if leak_rep is not None:
+                payload["leakage"] = leak_rep.to_dict()
+            print(json.dumps(payload, indent=2))
+        else:
+            print(sanitize_terminal_text(audit_rep.format_summary()))
+            if leak_rep is not None:
+                print()
+                print(sanitize_terminal_text(leak_rep.format_summary()))
+
+        if getattr(args, "strict_audit", False) and (
+            audit_rep.warnings or (leak_rep is not None and not leak_rep.is_clean)
+        ):
+            return EXIT_FAILED
+        return EXIT_OK
 
     if args.judge_max_tokens is not None and args.judge_max_tokens < 1:
         sys.stderr.write("Error: --judge-max-tokens must be >= 1\n")

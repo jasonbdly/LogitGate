@@ -455,6 +455,24 @@ with tempfile.TemporaryDirectory() as tmp:
     assert recal_profile.guarantee_holds and recal_profile.fail_threshold < recal_profile.pass_threshold
 ```
 
+### Benchmark Confounder & Cross-Split Leakage Auditing (`v0.8.1`)
+Audit calibration and benchmark datasets in **0 LLM calls** for Pass-vs-Fail length confounders (`length_auroc`), rubric-blind unigram shortcuts (`lexical_loo_accuracy`), split-conformal sample-power floors (`n >= 39`/class for `alpha = 0.05`), and cross-split leakage (`check_split_leakage` via exact and word-3-gram Jaccard shingle indexing):
+
+```python
+from logitgate import audit_benchmark_dataset, check_split_leakage
+
+cal_audit = audit_benchmark_dataset("benchmarks/data/cal_distill_80.json")
+ood_audit = audit_benchmark_dataset("benchmarks/data/ood_generalization_96.json")
+assert cal_audit.holds_at_alpha_005 and cal_audit.warnings == ()
+assert ood_audit.holds_at_alpha_005 and ood_audit.warnings == ()
+
+leakage = check_split_leakage(
+    "benchmarks/data/ood_generalization_96.json",
+    "benchmarks/data/cal_distill_80.json",
+)
+assert leakage.is_clean and leakage.shared_domains == ()
+```
+
 ---
 
 ## Command-Line Interface (CLI)
@@ -478,6 +496,10 @@ logitgate explain --offline
 # Compare JudgeGate vs LogitGate vs Cascade latency and accuracy (homogeneous or heterogeneous L1/L2)
 logitgate benchmark --backend "ollama://localhost:11434" --model "qwen2.5:7b"
 logitgate benchmark --backend "ollama://localhost:11434/qwen2.5-coder:3b" --judge-model "gemma4:e4b"
+
+# Audit benchmark datasets for length/lexical confounders and cross-split leakage (0 LLM calls)
+logitgate benchmark --audit-only --dataset benchmarks/data/ood_generalization_96.json \
+    --reference-dataset benchmarks/data/cal_distill_80.json --strict-audit --json
 
 # Fit a unified temperature + split-conformal CalibrationProfile JSON artifact and apply it
 logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b" \
@@ -508,6 +530,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Hardened 32-item adversarial suite across `ChoiceGate` and `ScoreGate` ($N=5$)
   - Zero-token preference ranking (`RankGate`) & contract-filtered `BestOfNGate` pools
   - Production JSONL telemetry micro-overhead & zero-call offline distillation/recalibration
+  - Deconfounded `2x2` counterfactual OOD suite (`OOD-96`) & domain-disjoint conformal transfer (`Split A -> Split B`)
   - Falsification boundaries: reasoning depth, 16k-token haystack scaling, and context window (`num_ctx`) squeezing
   - Elastic recurrent layer-looping (NVIDIA Dory-4B, RTX 5090 vs RTX 4070)
 - **[3-Layer Architecture & Deployment Topologies](docs/architecture.md)**:
