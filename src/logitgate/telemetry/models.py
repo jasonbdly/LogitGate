@@ -150,8 +150,6 @@ class TelemetryRecord(BaseModel):
             or len(self.candidate) <= max_candidate_chars
         ):
             return self
-        if self.candidate is None:
-            return self
         if privacy in ("hash_only", "omit_candidate"):
             scrubbed_traces = [
                 tr.model_copy(update={"diagnostic_report": None})
@@ -159,14 +157,25 @@ class TelemetryRecord(BaseModel):
                 else tr
                 for tr in self.traces
             ]
+            has_generative_critique = self.gate_type == "JudgeGate" or any(
+                tr.diagnostic_report is not None or tr.tokens_generated > 0 for tr in self.traces
+            )
+            scrubbed_reason = (
+                None if (privacy == "omit_candidate" and has_generative_critique) else self.reason
+            )
             return self.model_copy(
                 update={
                     "candidate": None,
+                    "reason": scrubbed_reason,
                     "traces": scrubbed_traces,
                 }
             )
         if privacy == "redact_pii":
-            red_cand = redact_text(self.candidate, max_chars=max_candidate_chars)
+            red_cand = (
+                redact_text(self.candidate, max_chars=max_candidate_chars)
+                if self.candidate is not None
+                else None
+            )
             red_reason = (
                 redact_text(self.reason, max_chars=max_candidate_chars)
                 if self.reason is not None
@@ -192,7 +201,13 @@ class TelemetryRecord(BaseModel):
                 }
             )
         return self.model_copy(
-            update={"candidate": truncate_text(self.candidate, max_candidate_chars)}
+            update={
+                "candidate": (
+                    truncate_text(self.candidate, max_candidate_chars)
+                    if self.candidate is not None
+                    else None
+                )
+            }
         )
 
 

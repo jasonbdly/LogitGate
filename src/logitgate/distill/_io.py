@@ -131,7 +131,7 @@ def read_json_object_nofollow(
         )
     try:
         parsed = json.loads(raw)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         raise ConfigurationError(
             f"Invalid JSON in {artifact_name} '{target}': {exc}"
         ) from exc

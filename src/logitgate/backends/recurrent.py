@@ -163,7 +163,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         no_grad_ctx: Any
         try:
             import torch
-            no_grad_ctx = torch.no_grad()
+            no_grad_ctx = torch.inference_mode()
         except ImportError:
             from contextlib import nullcontext
             no_grad_ctx = nullcontext()
@@ -276,7 +276,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
         try:
             import torch
 
-            no_grad_ctx = torch.no_grad()
+            no_grad_ctx = torch.inference_mode()
         except ImportError:
             from contextlib import nullcontext
 

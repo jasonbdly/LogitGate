@@ -5,7 +5,6 @@ import json
 import math
 import os
 import secrets
-import stat
 import tempfile
 import warnings
 from collections.abc import Mapping, Sequence
@@ -664,28 +663,20 @@ class CalibrationProfile(BaseModel):
     @classmethod
     def load(cls, path: str | Path) -> CalibrationProfile:
         """Loads and validates a `CalibrationProfile` from a regular JSON file (<= 1 MiB)."""
+        from logitgate.telemetry.sinks import read_regular_text_nofollow
+
         if isinstance(path, str) and not path.strip():
             raise CalibrationError("CalibrationProfile load path cannot be empty.")
         target = Path(path)
         try:
-            if target.is_symlink():
-                raise CalibrationError(f"Refusing to load CalibrationProfile from symlink: {target}")
-            st = target.stat()
-        except CalibrationError:
-            raise
-        except OSError as exc:
-            raise CalibrationError(f"CalibrationProfile file not found or unreadable: '{target}'") from exc
-
-        if not stat.S_ISREG(st.st_mode):
-            raise CalibrationError(f"CalibrationProfile path is not a regular file: '{target}'")
-        if st.st_size > _MAX_PROFILE_BYTES:
-            raise CalibrationError(
-                f"CalibrationProfile file '{target}' exceeds maximum size ({_MAX_PROFILE_BYTES} bytes)."
+            raw_text = read_regular_text_nofollow(
+                target,
+                max_bytes=_MAX_PROFILE_BYTES,
+                label="CalibrationProfile",
             )
-
-        try:
-            raw_text = target.read_text(encoding="utf-8")
             parsed = json.loads(raw_text)
+        except ConfigurationError as exc:
+            raise CalibrationError(str(exc)) from exc
         except (OSError, UnicodeDecodeError, ValueError, TypeError, RecursionError) as exc:
             raise CalibrationError(
                 f"Malformed CalibrationProfile JSON in '{target}': {exc}"
@@ -736,7 +727,7 @@ class CalibrationProfile(BaseModel):
     @classmethod
     def from_log_odds_samples(
         cls,
-        samples: Sequence[tuple[float, float, int]],
+        samples: Sequence[tuple[float, float, int | bool]],
         *,
         target_risk_alpha: float | None = 0.05,
         model: str | None = None,
@@ -744,18 +735,27 @@ class CalibrationProfile(BaseModel):
         multiclass_temperature: float | None = None,
     ) -> CalibrationProfile:
         """Fits temperature first, then fits split-conformal cascade thresholds on scaled probabilities."""
+        normalized_samples: list[tuple[float, float, int]] = []
+        for f_lo, r_lo, y in samples:
+            if isinstance(y, bool):
+                normalized_samples.append((f_lo, r_lo, 1 if y else 0))
+            elif isinstance(y, int) and y in (0, 1):
+                normalized_samples.append((f_lo, r_lo, int(y)))
+            else:
+                raise CalibrationError(f"Calibration sample label must be 0/1 or bool, got {y!r}")
+
         if target_risk_alpha is not None:
             alpha = _validate_alpha(target_risk_alpha)
-            if len(samples) < 10:
+            if len(normalized_samples) < 10:
                 raise CalibrationError("Calibration requires matching sequences of at least 10 samples.")
-            if len({int(y) for _, _, y in samples if not isinstance(y, bool) and y in (0, 1)}) < 2:
+            if len({y_int for _, _, y_int in normalized_samples}) < 2:
                 raise CalibrationError(
                     "Calibration set must contain both positive and negative ground truth labels."
                 )
         else:
             alpha = None
 
-        cal = fit_calibration(samples)
+        cal = fit_calibration(normalized_samples)
         if multiclass_temperature is not None:
             if (
                 isinstance(multiclass_temperature, bool)
@@ -772,9 +772,9 @@ class CalibrationProfile(BaseModel):
         if alpha is not None:
             probs_after = [
                 round(combine_symmetric_log_odds(f, r, logit_temperature=cal.optimal_temperature), 4)
-                for f, r, _ in samples
+                for f, r, _ in normalized_samples
             ]
-            labels = [bool(y) for _, _, y in samples]
+            labels = [bool(y) for _, _, y in normalized_samples]
             thresholds = calibrate_cascade_thresholds(probs_after, labels, target_risk_alpha=alpha)
 
         return cls.from_calibration_result(

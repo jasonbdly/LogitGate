@@ -65,6 +65,8 @@ pip install "logitgate[llamacpp]"    # In-process llama-cpp-python (no backgroun
 pip install "logitgate[langgraph]"   # LangGraph conditional edge routing
 pip install "logitgate[deepeval]"    # DeepEval System-1 metrics (LogitGateMetric)
 pip install "logitgate[recurrent]"   # Elastic recurrent looping (NVIDIA Dory-4B)
+pip install "logitgate[distill]"     # Architecture-agnostic PEFT LoRA student distillation
+pip install "logitgate[otel]"        # OpenTelemetry span bridge (OtelSpanSink)
 pip install "logitgate[all]"         # All integrations
 ```
 
@@ -394,7 +396,7 @@ assert final_verdict.passed
 ```
 
 ### Production Telemetry, Self-Distilling Sinks & Zero-Call Recalibration
-Stream structured `TelemetryRecord` JSONL logs with optional PII redaction (`"redact_pii"`, `"hash_candidate"`, `"metrics_only"`), collect Layer-1 student vs. Layer-2 teacher escalations via `DistillationSink`, refit a `CalibrationProfile` from logged `(forward_log_odds, reverse_log_odds, teacher_passed)` tuples in **0 LLM calls**, or export symmetric `A/B`-swapped SFT / DPO datasets:
+Stream structured `TelemetryRecord` JSONL logs with optional PII redaction (`"redact_pii"`, `"hash_only"`, `"omit_candidate"`, `"full"`), collect Layer-1 student vs. Layer-2 teacher escalations via `DistillationSink`, refit a `CalibrationProfile` from logged `(forward_log_odds, reverse_log_odds, teacher_passed)` tuples in **0 LLM calls**, or export symmetric `A/B`-swapped SFT / DPO datasets:
 
 ```python
 import tempfile
@@ -593,6 +595,41 @@ leakage = check_split_leakage(
 assert leakage.is_clean and leakage.shared_domains == ()
 ```
 
+### OpenTelemetry Span Bridge (`v1.0.0`, `OtelSpanSink`)
+Export `LogitGate` and `Cascade` verdicts into OpenTelemetry distributed traces (`gen_ai.*` + `logitgate.*` semantic attributes and per-layer `logitgate.layer` span events) with privacy-safe candidate omission (`privacy="omit_candidate"` by default) or linear-time PII scrubbing (`privacy="redact_pii"`). `OtelSpanSink` accepts any OpenTelemetry `Tracer` (via `pip install 'logitgate[otel]'`) or duck-typed tracer, and degrades to a zero-overhead no-op when `opentelemetry-api` is not installed:
+
+```python
+from contextlib import contextmanager
+from logitgate import ASTGate, Cascade, LogitGate, OtelSpanSink, StubBackend
+
+
+class RecordingTracer:
+    def __init__(self) -> None:
+        self.spans: list[tuple[str, dict[str, object]]] = []
+
+    @contextmanager
+    def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+        self.spans.append((name, dict(attributes or {})))
+        yield None
+
+
+tracer = RecordingTracer()
+otel_sink = OtelSpanSink(tracer=tracer, span_prefix="service.guardrail", privacy="omit_candidate")
+
+pipeline = Cascade(
+    [
+        ASTGate(syntax=True, forbidden_imports=["subprocess"]),
+        LogitGate("Uses parameterized SQL", backend=StubBackend(default_prob=0.95), model="qwen2.5:3b"),
+    ],
+    name="sql_check",
+    telemetry_sink=otel_sink,
+)
+verdict = pipeline.evaluate("def query(db, uid):\n    return db.execute('SELECT 1 WHERE id = ?', (uid,))\n")
+assert verdict.passed and otel_sink.spans_emitted == 1
+assert tracer.spans[0][0] == "service.guardrail.sql_check"
+assert "logitgate.candidate.text" not in tracer.spans[0][1]
+```
+
 ---
 
 ## Command-Line Interface (CLI)
@@ -672,7 +709,7 @@ Exit codes: `0` passed / ok, `1` verdict failed or bad input, `2` backend unreac
   - Execution mechanics, lookahead policy, and failure preservation
   - Hardware sizing across CPU-only, consumer GPU, and multi-GPU setups
   - Deployment topologies to prevent KV-cache eviction
-  - Portable `CalibrationProfile`, `RankGate`/`BestOfNGate`, and `logitgate.telemetry` sinks
+  - Portable `CalibrationProfile`, `RankGate`/`BestOfNGate`, `logitgate.telemetry` sinks, and `OtelSpanSink` (`v1.0.0` API stability contract)
 - **[Mathematical Foundations & Symmetric Debiasing](docs/math_and_debiasing.md)**:
   - Proof of token and position bias cancellation in log-odds space
   - Why probability averaging fails under sigmoid saturation

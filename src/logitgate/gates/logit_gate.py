@@ -813,6 +813,8 @@ class LogitGate(BaseGate):
                 status = DecisionStatus.FAILED
             else:
                 status = DecisionStatus.AMBIGUOUS
+                if prob_rounded >= eff_pass_thresh or prob_rounded <= eff_fail_thresh:
+                    abstained_reason = "adaptive_log_odds_margin_unmet"
         elif prob_rounded >= eff_pass_thresh:
             status = DecisionStatus.PASSED
         elif prob_rounded <= eff_fail_thresh:
@@ -852,6 +854,7 @@ class LogitGate(BaseGate):
             tokens_generated=0,
             metadata=meta,
         )
+        reason_suffix = f" [{abstained_reason}]" if abstained_reason is not None else ""
         return Verdict(
             passed=status == DecisionStatus.PASSED,
             status=status,
@@ -859,7 +862,10 @@ class LogitGate(BaseGate):
             triggered_layer=self.name,
             total_latency_ms=latency,
             total_tokens_generated=0,
-            reason=f"LogitGate prob={prob_rounded:.4f} (pass_thresh={eff_pass_thresh}, fail_thresh={eff_fail_thresh})",
+            reason=(
+                f"LogitGate prob={prob_rounded:.4f} "
+                f"(pass_thresh={eff_pass_thresh}, fail_thresh={eff_fail_thresh}){reason_suffix}"
+            ),
             traces=[trace],
         )
 

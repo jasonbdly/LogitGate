@@ -437,7 +437,14 @@ def _fit_multiclass_temperature(
 ) -> float:
     from logitgate.debiasing.softmax import softmax_probabilities
 
-    if min_temp <= 0.0 or max_temp <= min_temp:
+    if (
+        isinstance(min_temp, bool)
+        or isinstance(max_temp, bool)
+        or not math.isfinite(min_temp)
+        or not math.isfinite(max_temp)
+        or min_temp <= 0.0
+        or max_temp <= min_temp
+    ):
         min_temp = 0.65
         max_temp = 10.0
     fallback_clamped = min(max_temp, max(min_temp, float(fallback_temp)))

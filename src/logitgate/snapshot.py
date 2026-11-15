@@ -20,6 +20,7 @@ from logitgate.backends.base import (
     infer_backend_spec,
 )
 from logitgate.config import get_default_snapshot_dir
+from logitgate.exceptions import ConfigurationError
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
 __all__ = [
@@ -36,8 +37,13 @@ def _compute_snapshot_id(timestamp: str, rubric: str, candidate: Any) -> str:
     return hashlib.sha256(raw).hexdigest()[:8]
 
 
+_MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
+
+
 def _atomic_write_text(path: Path, content: str) -> None:
     """Writes text to a temporary file in the same directory and atomically replaces `path`."""
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ConfigurationError(f"Refusing to write VerdictSnapshot through symlink: '{path}'")
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp_path = Path(tmp_name)
     fd_owned = True
@@ -46,6 +52,8 @@ def _atomic_write_text(path: Path, content: str) -> None:
             fd_owned = False
             handle.write(content)
             handle.flush()
+        if path.is_symlink():
+            raise ConfigurationError(f"Refusing to overwrite symlink VerdictSnapshot: '{path}'")
         os.replace(tmp_path, path)
     except BaseException:
         if fd_owned:
@@ -314,24 +322,36 @@ class VerdictSnapshot(BaseModel):
         If path is a directory, loads latest.json (or the newest *.json file).
         If path is a file, loads and validates the snapshot JSON.
         """
+        from logitgate.telemetry.sinks import read_regular_text_nofollow
+
         p = Path(path)
+        if p.is_symlink():
+            raise ConfigurationError(f"Refusing to load VerdictSnapshot from symlink: '{p}'")
         if p.is_dir():
             latest = p / "latest.json"
+            if latest.is_symlink():
+                raise ConfigurationError(
+                    f"Refusing to load VerdictSnapshot from symlink: '{latest}'"
+                )
             if latest.exists():
                 target = latest
             else:
-                candidates = [f for f in p.glob("fail_*.json")]
+                candidates = [f for f in p.glob("fail_*.json") if not f.is_symlink()]
                 if not candidates:
-                    candidates = [f for f in p.glob("*.json")]
+                    candidates = [f for f in p.glob("*.json") if not f.is_symlink()]
                 if not candidates:
                     raise FileNotFoundError(f"No snapshot JSON files found in directory '{p}'")
                 target = max(candidates, key=lambda f: f.stat().st_mtime)
-        elif p.is_file():
+        elif p.exists():
             target = p
         else:
             raise FileNotFoundError(f"Snapshot path '{path}' does not exist")
 
-        content = target.read_text(encoding="utf-8")
+        content = read_regular_text_nofollow(
+            target,
+            max_bytes=_MAX_SNAPSHOT_BYTES,
+            label="VerdictSnapshot",
+        )
         try:
             data = json.loads(content)
         except RecursionError as e:

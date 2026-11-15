@@ -214,15 +214,30 @@ def calibrate_cascade_thresholds(
     )
 
 
+_MAX_CALIBRATION_DATASET_BYTES = 32 * 1024 * 1024
+
+
 def load_calibration_dataset(
     path: str | Path,
 ) -> list[tuple[str, str, bool]]:
     """Loads calibration samples (rubric, candidate, label) from JSON, JSONL, or Markdown files."""
+    from logitgate.exceptions import ConfigurationError
+    from logitgate.telemetry.sinks import read_regular_text_nofollow
+
     file_path = Path(path)
+    if file_path.is_symlink():
+        raise CalibrationError(f"Refusing to load calibration dataset from symlink: '{file_path}'")
     if not file_path.exists():
         raise FileNotFoundError(f"Calibration dataset file not found: {path}")
 
-    content = file_path.read_text(encoding="utf-8")
+    try:
+        content = read_regular_text_nofollow(
+            file_path,
+            max_bytes=_MAX_CALIBRATION_DATASET_BYTES,
+            label="Calibration dataset",
+        )
+    except ConfigurationError as exc:
+        raise CalibrationError(str(exc)) from exc
     suffix = file_path.suffix.lower()
 
     # 1. JSON

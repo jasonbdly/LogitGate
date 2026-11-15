@@ -90,6 +90,10 @@ _NEGATED_PASS_RE = re.compile(
 )
 _PASS_WORD_RE = re.compile(r"\b(PASS|PASSED|PASSES|APPROVE|APPROVED)\b", re.IGNORECASE)
 _FAIL_WORD_RE = re.compile(r"\b(FAIL|FAILED|FAILS|FAILURE|REJECT|REJECTED)\b", re.IGNORECASE)
+_QUOTED_VERDICT_MENTION_RE = re.compile(
+    r"""(['"`])[^\r\n'"`]{0,80}\b(?:VERDICT|PASS|PASSED|PASSES|APPROVE|APPROVED|FAIL|FAILED|FAILS|FAILURE|REJECT|REJECTED)\b[^\r\n'"`]{0,80}\1""",
+    re.IGNORECASE,
+)
 _TRUTHY_STRINGS = frozenset({"pass", "passed", "passes", "approve", "approved", "true", "yes", "1"})
 _FALSY_STRINGS = frozenset({"fail", "failed", "fails", "failure", "reject", "rejected", "false", "no", "0"})
 _VALID_TRIGGERS = frozenset({"on_ambiguous_or_fail", "on_ambiguous_only", "adjudicate", "always"})
@@ -168,6 +172,15 @@ def _coerce_pass(value: Any) -> bool:
     return bool(value)
 
 
+def _is_quoted_mention(text: str, start: int, end: int) -> bool:
+    """Returns True when ``text[start:end]`` is immediately enclosed in quotes or backticks."""
+    if start <= 0 or end >= len(text):
+        return False
+    left = text[start - 1]
+    right = text[end]
+    return (left, right) in {("'", "'"), ('"', '"'), ("`", "`")}
+
+
 def _extract_structured_verdict(text: str) -> ParsedVerdict | None:
     """Reads an explicit verdict the judge was asked to emit: a ``[VERDICT: ...]`` tag or JSON.
 
@@ -175,14 +188,23 @@ def _extract_structured_verdict(text: str) -> ParsedVerdict | None:
     an early "PASS" inside the reasoning bullets must not override the conclusion. Explicit
     bracketed ``[VERDICT: PASS/FAIL]`` tags take precedence over unbracketed ``Verdict: ...``
     phrases so prose discussing ``Verdict: fail`` in bullet points cannot override a closing
-    bracketed tag or vice versa.
+    bracketed tag or vice versa, while tags immediately quoted as candidate text are ignored.
     """
-    bracketed_tags = _BRACKETED_VERDICT_TAG_RE.findall(text)
+    bracketed_tags: list[str] = []
+    for match in _BRACKETED_VERDICT_TAG_RE.finditer(text):
+        if _is_quoted_mention(text, match.start(), match.end()):
+            continue
+        prefix = text[max(0, match.start() - 40) : match.start()]
+        if _NEGATED_VERDICT_PREFIX_RE.search(prefix):
+            continue
+        bracketed_tags.append(match.group(1))
     if bracketed_tags:
         return _PASS if bracketed_tags[-1].upper().startswith("PASS") else _FAIL
 
     unbracketed_tags: list[str] = []
     for match in _VERDICT_TAG_RE.finditer(text):
+        if _is_quoted_mention(text, match.start(), match.end()):
+            continue
         prefix = text[max(0, match.start() - 40) : match.start()]
         if _NEGATED_VERDICT_PREFIX_RE.search(prefix):
             continue
@@ -217,7 +239,8 @@ def _extract_structured_verdict(text: str) -> ParsedVerdict | None:
 
 
 def _keyword_signal(text: str, *, tie_break: bool) -> ParsedVerdict | None:
-    sanitized = _NEGATED_FAILURE_RE.sub(" ", text)
+    unquoted = _QUOTED_VERDICT_MENTION_RE.sub(" ", text)
+    sanitized = _NEGATED_FAILURE_RE.sub(" ", unquoted)
     # Replace negated pass phrases ("did not pass", "not approved") with "FAIL" so they count as failure
     sanitized = _NEGATED_PASS_RE.sub(" FAIL ", sanitized)
     pass_match = _PASS_WORD_RE.search(sanitized)

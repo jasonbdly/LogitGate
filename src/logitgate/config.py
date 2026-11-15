@@ -524,8 +524,6 @@ def get_default_auto_calibrate() -> bool:
 
 def get_default_telemetry_sink() -> TelemetrySink | None:
     """Resolves default `TelemetrySink` via `configure()` or ``LOGITGATE_TELEMETRY_PATH``."""
-    if _state.telemetry_sink is None and "LOGITGATE_TELEMETRY_PATH" not in os.environ:
-        return None
     with _config_lock:
         if _state.telemetry_sink is False:
             return None
@@ -551,8 +549,6 @@ def get_default_telemetry_sink() -> TelemetrySink | None:
 
 def get_default_verdict_cache() -> VerdictCache | None:
     """Resolves default `VerdictCache` via `configure()` or ``LOGITGATE_CACHE_PATH``."""
-    if _state.cache is None and "LOGITGATE_CACHE_PATH" not in os.environ:
-        return None
     with _config_lock:
         if _state.cache is False:
             return None

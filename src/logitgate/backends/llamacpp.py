@@ -57,6 +57,7 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             or float(lora_scale) <= 0.0
         ):
             raise ConfigurationError(f"lora_scale must be a finite positive float, got {lora_scale!r}")
+        owns_llm = False
         if isinstance(llm, str):
             try:
                 from llama_cpp import Llama
@@ -70,7 +71,9 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
                 llama_kwargs["lora_path"] = lora_path
                 llama_kwargs["lora_scale"] = float(lora_scale)
             llm = Llama(**llama_kwargs)
+            owns_llm = True
         self.llm = llm
+        self._owns_llm = owns_llm
         self.base_url = base_url.rstrip("/") if base_url is not None else "http://localhost:8080"
         self.model = model
         self.timeout = timeout
@@ -187,10 +190,38 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
                     "or an HTTP server URL (e.g. 'llamacpp://localhost:8080')."
                 ) from err
             try:
-                self.llm = Llama(model_path=self.model, logits_all=True, verbose=False)
+                lazy_kwargs: dict[str, Any] = {
+                    "model_path": self.model,
+                    "logits_all": True,
+                    "verbose": False,
+                }
+                if self.lora_path is not None:
+                    lazy_kwargs["lora_path"] = self.lora_path
+                    lazy_kwargs["lora_scale"] = float(self.lora_scale)
+                self.llm = Llama(**lazy_kwargs)
+                self._owns_llm = True
             except Exception as err:
                 raise BackendError(f"Failed to load GGUF model '{self.model}': {err}") from err
             return True
+
+    def close(self) -> None:
+        super().close()
+        with self._llm_lock:
+            if getattr(self, "_owns_llm", False) and self.llm is not None:
+                close_fn = getattr(self.llm, "close", None)
+                if callable(close_fn):
+                    import contextlib
+
+                    with contextlib.suppress(Exception):
+                        close_fn()
+                self.llm = None
+                self._owns_llm = False
+
+    async def aclose(self) -> None:
+        await super().aclose()
+        if getattr(self, "_owns_llm", False) and self.llm is not None:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.close)
 
     def _resolve_in_process_logit_bias(self, allowed_tokens: list[str] | None) -> dict[str, int | float] | None:
         if not getattr(self, "auto_logit_bias", False) or not allowed_tokens or self.llm is None:

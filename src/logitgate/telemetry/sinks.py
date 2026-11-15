@@ -173,6 +173,10 @@ class TelemetrySink(abc.ABC):
         """Flushes and releases underlying resources."""
         self.flush()
 
+    async def aclose(self) -> None:
+        """Async close hook; defaults to synchronous `close()`."""
+        self.close()
+
     def __enter__(self) -> Self:
         return self
 
@@ -183,6 +187,17 @@ class TelemetrySink(abc.ABC):
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.aclose()
 
 
 class JsonlTelemetrySink(TelemetrySink):
@@ -441,6 +456,10 @@ class CompositeTelemetrySink(TelemetrySink):
     def close(self) -> None:
         for sink in self.sinks:
             sink.close()
+
+    async def aclose(self) -> None:
+        for sink in self.sinks:
+            await sink.aclose()
 
 
 def resolve_telemetry_sink(

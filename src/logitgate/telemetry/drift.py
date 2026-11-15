@@ -175,11 +175,10 @@ def compute_psi(
 def _kolmogorov_survival(d_stat: float, n_ref: int, n_cur: int) -> float:
     if d_stat <= 0.0:
         return 1.0
-    if d_stat >= 1.0:
-        return 0.0
+    d_clamped = min(float(d_stat), 1.0)
     n_eff = (n_ref * n_cur) / (n_ref + n_cur)
     root_n = math.sqrt(n_eff)
-    lam = (root_n + 0.12 + 0.11 / root_n) * d_stat
+    lam = (root_n + 0.12 + 0.11 / root_n) * d_clamped
     if lam <= 1e-6:
         return 1.0
     if lam >= 6.0:

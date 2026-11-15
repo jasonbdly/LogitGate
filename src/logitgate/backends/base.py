@@ -341,16 +341,14 @@ class _HTTPClientMixin:
         with lock:
             client = self._async_client
             owns = getattr(self, "_owns_async_client", True)
+            self._async_client_loop = None
+            if owns:
+                self._async_client = None
         if client is not None and not client.is_closed:
             try:
                 await client.aclose()
             except RuntimeError:
                 pass
-            finally:
-                with lock:
-                    self._async_client_loop = None
-                    if owns:
-                        self._async_client = None
 
 
 class StubBackend(LogitBackend, GenerativeBackend):
@@ -526,7 +524,7 @@ class StubBackend(LogitBackend, GenerativeBackend):
 
 
 def _is_openai_host(netloc: str, path: str) -> bool:
-    """Distinguishes a host (`api.openai.com`, `localhost:8000`, `10.0.0.1`) from a model ID (`gpt-4.1-mini`)."""
+    """Distinguishes a host (`api.openai.com`, `localhost:8000`, `198.51.100.1`) from a model ID (`gpt-4.1-mini`)."""
     if not netloc:
         return False
     if netloc == "localhost" or netloc.startswith("localhost:"):

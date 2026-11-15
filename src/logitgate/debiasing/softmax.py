@@ -49,8 +49,10 @@ def softmax_probabilities(logprobs: Mapping[Any, float], temperature: float = 1.
     return {k: v / total for k, v in exp_vals.items()}
 
 
-def has_finite_logprobs(top_logprobs: list[dict[str, Any]]) -> bool:
+def has_finite_logprobs(top_logprobs: list[dict[str, Any]] | None) -> bool:
     """Returns True if top_logprobs contains at least one entry with a finite numeric logprob."""
+    if not top_logprobs:
+        return False
     for item in top_logprobs:
         if not isinstance(item, dict):
             continue
@@ -98,10 +100,13 @@ def logsumexp(logprobs: list[float]) -> float:
     """Numerically stable logsumexp."""
     if not logprobs:
         return -10.0
-    max_lp = max(logprobs)
-    if math.isinf(max_lp):
-        return max_lp
-    return max_lp + math.log(sum(math.exp(lp - max_lp) for lp in logprobs))
+    finite_lps = [float(x) for x in logprobs if not isinstance(x, bool) and math.isfinite(x)]
+    if not finite_lps:
+        if any(not isinstance(x, bool) and math.isinf(x) and x > 0 for x in logprobs):
+            return float("inf")
+        return -10.0
+    max_lp = max(finite_lps)
+    return max_lp + math.log(sum(math.exp(lp - max_lp) for lp in finite_lps))
 
 
 def _compute_missing_token_floor(observed_logprobs: list[float]) -> float:

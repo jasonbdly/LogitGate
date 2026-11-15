@@ -23,6 +23,9 @@ _IMPORT_STMT_RE = re.compile(
     r"(?:^|;)[ \t]*(?:from[ \t]+([a-zA-Z0-9_\.]+)[ \t]+import[ \t]+([a-zA-Z0-9_\., \t\*]+)|import[ \t]+([a-zA-Z0-9_\., \t]+))",
     re.MULTILINE,
 )
+_DYNAMIC_IMPORT_RE = re.compile(
+    r"(?:\b__import__|\bimport_module)[ \t]*\([ \t]*['\"]([a-zA-Z0-9_\.]+)['\"]"
+)
 _FENCED_BLOCK_RE = re.compile(r"```[^\r\n`]*\r?\n(.*?)```", re.DOTALL)
 _INLINE_FENCE_RE = re.compile(r"```(.*?)```", re.DOTALL)
 _MAX_JSON_DECODE_ATTEMPTS = 128
@@ -410,6 +413,30 @@ class ASTGate(BaseGate):
                         for alias in node.names:
                             if alias.name and alias.name != "*":
                                 found_imports.add(alias.name)
+                elif isinstance(node, ast.Call):
+                    is_dunder_import = (
+                        isinstance(node.func, ast.Name) and node.func.id == "__import__"
+                    ) or (
+                        isinstance(node.func, ast.Attribute) and node.func.attr == "__import__"
+                    )
+                    is_import_module = (
+                        isinstance(node.func, ast.Name) and node.func.id == "import_module"
+                    ) or (
+                        isinstance(node.func, ast.Attribute) and node.func.attr == "import_module"
+                    )
+                    if is_dunder_import or is_import_module:
+                        dyn_arg: ast.expr | None = node.args[0] if node.args else None
+                        if dyn_arg is None:
+                            for kw in node.keywords:
+                                if kw.arg == "name":
+                                    dyn_arg = kw.value
+                                    break
+                        if (
+                            isinstance(dyn_arg, ast.Constant)
+                            and isinstance(dyn_arg.value, str)
+                            and dyn_arg.value.strip()
+                        ):
+                            found_imports.add(dyn_arg.value.strip().lstrip("."))
         else:
             for match in _IMPORT_STMT_RE.finditer(source):
                 from_mod, from_names, imp_names = match.group(1), match.group(2), match.group(3)
@@ -426,6 +453,10 @@ class ASTGate(BaseGate):
                         name_tok = part.strip().split()[0] if part.strip() else ""
                         if name_tok and name_tok != "*":
                             found_imports.add(f"{base_mod}.{name_tok}" if base_mod else name_tok)
+            for dyn_match in _DYNAMIC_IMPORT_RE.finditer(source):
+                dyn_mod = dyn_match.group(1).strip().lstrip(".")
+                if dyn_mod:
+                    found_imports.add(dyn_mod)
         return found_imports
 
     @staticmethod

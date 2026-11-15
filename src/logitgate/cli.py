@@ -10,7 +10,12 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TextIO
 
 from logitgate.cascade import Cascade
-from logitgate.exceptions import BackendError, CalibrationError, ConfigurationError
+from logitgate.exceptions import (
+    BackendError,
+    CalibrationError,
+    ConfigurationError,
+    LogitGateError,
+)
 from logitgate.gates.ast_gate import ASTGate
 from logitgate.gates.logit_gate import LogitGate
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
@@ -1334,7 +1339,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             with open(args.file, "r", encoding="utf-8") as f:
                 candidate = f.read()
         except (OSError, UnicodeDecodeError) as e:
-            sys.stderr.write(f"Error reading file '{args.file}': {e}\n")
+            sys.stderr.write(
+                f"Error reading file '{sanitize_terminal_text(str(args.file))}': "
+                f"{sanitize_terminal_text(str(e))}\n"
+            )
             return EXIT_FAILED
     elif args.candidate is not None:
         candidate = args.candidate
@@ -1343,7 +1351,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             try:
                 candidate = sys.stdin.read()
             except (OSError, UnicodeDecodeError) as e:
-                sys.stderr.write(f"Error reading stdin: {e}\n")
+                sys.stderr.write(f"Error reading stdin: {sanitize_terminal_text(str(e))}\n")
                 return EXIT_FAILED
         else:
             sys.stderr.write("Error: Either --candidate or --file must be specified.\n")
@@ -1925,7 +1933,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Backends already phrase these as "what went wrong + what to do"; a traceback adds nothing.
         sys.stderr.write(f"error: {sanitize_terminal_text(str(exc))}\n")
         return EXIT_BACKEND_ERROR
-    except (ConfigurationError, CalibrationError) as exc:
+    except (ConfigurationError, CalibrationError, LogitGateError) as exc:
         sys.stderr.write(f"error: {sanitize_terminal_text(str(exc))}\n")
         return EXIT_FAILED
     return result

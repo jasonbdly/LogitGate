@@ -29,6 +29,10 @@ from logitgate.telemetry.models import (
     hash_candidate,
     redact_text,
 )
+from logitgate.telemetry.otel import (
+    OtelAttributeValue,
+    OtelSpanSink,
+)
 from logitgate.telemetry.sinks import (
     CallbackTelemetrySink,
     CompositeTelemetrySink,
@@ -55,6 +59,8 @@ __all__ = [
     "ExportFormat",
     "JsonlTelemetrySink",
     "MemoryTelemetrySink",
+    "OtelAttributeValue",
+    "OtelSpanSink",
     "PrivacyMode",
     "RollingDriftMonitor",
     "TelemetryRecord",

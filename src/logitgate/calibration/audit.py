@@ -454,7 +454,11 @@ def audit_benchmark_dataset(
     pos_rate = round(n_pos / float(n), 4)
 
     min_cls = min(n_pos, n_neg)
-    min_alpha = round(1.0 / float(min_cls + 1), 4) if min_cls >= 1 else None
+    min_alpha = (
+        round(math.ceil((2.0 / float(min_cls + 1)) * 10000.0 - 1e-9) / 10000.0, 4)
+        if min_cls >= 1
+        else None
+    )
     holds_010 = min_cls >= min_samples_per_class(0.10)
     holds_005 = min_cls >= min_samples_per_class(0.05)
 

@@ -381,6 +381,21 @@ class HuggingFaceLogitBackend(LogitBackend):
     def __repr__(self) -> str:
         return f"HuggingFaceLogitBackend(model={self.model!r}, lora_path={self.lora_path!r})"
 
+    def close(self) -> None:
+        with self._lock:
+            self._model_obj = None
+            self._tokenizer = None
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+
+    async def aclose(self) -> None:
+        self.close()
+
     def query_top_logprobs(
         self,
         prompt: str,
@@ -406,7 +421,7 @@ class HuggingFaceLogitBackend(LogitBackend):
                 except StopIteration:
                     dev = "cpu"
             tensor_ids = torch.tensor([input_ids], dtype=torch.long, device=dev)
-            with torch.no_grad():
+            with torch.inference_mode():
                 outputs = self._model_obj(input_ids=tensor_ids)
                 next_logits = outputs.logits[0, -1, :].float()
                 log_probs = torch.log_softmax(next_logits, dim=-1)
@@ -614,6 +629,9 @@ def train_distillation_lora(
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
 
+    del optimizer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     peft_model.eval()
     adapter_dir = out_dir / "adapter"
     adapter_dir.mkdir(parents=True, exist_ok=True)
