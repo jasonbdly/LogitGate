@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.0] - 2026-11-15
+
+### Added
+- **Decision-Grade Statistical & Calibration Benchmark Engine (`logitgate.benchmark`):** Added pure-Python `wilson_confidence_interval()`, seeded `bootstrap_metric_ci()`, exact two-sided `mcnemar_exact_test()`, and `compute_calibration_metrics()` (`brier_score`, 10-bin `ece`, tie-aware Mann-Whitney `auroc`, and Area Under the Selective Risk-Coverage Curve `aurc`), re-exported at `logitgate`. Extended `ModeStats` and `BenchmarkReport` with `p99_ms`, `cold_prefix_p50_ms` vs `warm_prefix_p50_ms` KV-cache latency splits, `accuracy_ci95`, `coverage`, `selective_risk`, and paired `comparisons` (`cascade_vs_judge` / `logit_vs_judge` McNemar p-values and bootstrap delta CIs).
+- **Four Deconfounded `N=80` Modality Core Suites (`benchmarks/data/`):** Added `rag_groundedness_80.json` (multi-chunk RAG with retrieval distractors), `agent_mcp_tool_safety_80.json` (MCP `tools/call` and OpenAI `tool_calls` security and intent alignment), `multilingual_unicode_bpe_80.json` (CJK, Cyrillic, Arabic, European diacritics, emoji, and long structured Markdown/`<think>` outputs), and `rank_pairwise_80.json` (60 length-balanced pairwise `RankGate` items + 20 4-way `BestOfNGate` pools including `all_bad` rejection pools), all verified with 0 warnings and 0 cross-split leakage against `cal_distill_80.json` and `ood_generalization_96.json`.
+- **Canonical External Public Benchmark Harness (`benchmarks/external/`):** Added commercial-clean license validation (`MIT`, `Apache-2.0`, `ODC-By-1.0`, `CC-BY-4.0`, blocking `CC-BY-NC` / copyleft), zero-dependency HuggingFace `/rows` + direct CDN fallback loaders with local caching and deterministic slot balancing, and CLI/programmatic runners (`run_external.py`) for `LLMBar`, `JudgeBench`, `TruthfulQA`, `HaluEval`, `RAGTruth` (including mid-stream `StreamGuard` token-savings evaluation), and `RewardBench-2`.
+
+### Changed
+- **Multi-Schema & Anti-Padding Dataset Auditor (`logitgate.calibration.audit`):** Extended `audit_benchmark_dataset()` to inspect pairwise `(candidate_a, candidate_b, winner)` records, reasoning-tier (`tier_a`..`tier_d`) dicts, and choice/score benchmark files, and added automatic detection of artificial trailing whitespace or dot-run length-padding artifacts. Modernized `benchmarks/run_benchmarks.py` (`--suite v0130_core`) to default to the deconfounded core suites.
+
+### Fixed
+- **Missing Tier-B Rubric & Cascade Fusion Parity in Legacy Runners:** Populated explicit `"rubric"` fields on all `tier_b` items in `benchmarks/data/reasoning_tiers_32.json` so dataset audits evaluate all 32 items without dropping `tier_b`, updated `benchmarks/run_dory_benchmarks.py` to route escalated verdicts through `fuse_escalated_verdict()`, and documented Split-A correspondence in `EPISTEMIC_REASONING_TEST_CASES.md`.
+
 ## [0.12.0] - 2026-11-15
 
 ### Added
