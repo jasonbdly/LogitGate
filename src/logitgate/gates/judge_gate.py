@@ -548,7 +548,8 @@ class JudgeGate(BaseGate):
         if self._can_debias_cot() and raw_text and raw_text.strip():
             notes = _extract_verification_notes(raw_text)
             if len(notes) >= 12:
-                assert isinstance(self.backend, LogitBackend)
+                if not isinstance(self.backend, LogitBackend):
+                    raise RuntimeError("Expected backend to be a LogitBackend for CoT debiasing.")
                 effective_rubric = self._effective_rubric(rubric_override)
                 cot_nonce = secrets.token_hex(8)
                 p_fwd = compile_cot_binary_prompt(
@@ -579,7 +580,8 @@ class JudgeGate(BaseGate):
         if self._can_debias_cot() and raw_text and raw_text.strip():
             notes = _extract_verification_notes(raw_text)
             if len(notes) >= 12:
-                assert isinstance(self.backend, LogitBackend)
+                if not isinstance(self.backend, LogitBackend):
+                    raise RuntimeError("Expected backend to be a LogitBackend for CoT debiasing.")
                 effective_rubric = self._effective_rubric(rubric_override)
                 cot_nonce = secrets.token_hex(8)
                 p_fwd = compile_cot_binary_prompt(

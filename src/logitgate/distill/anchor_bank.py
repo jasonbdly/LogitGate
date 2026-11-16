@@ -87,9 +87,9 @@ def _condense_rationale(raw_reason: str | None, *, passed: bool, max_chars: int)
         return default_msg[:max_chars]
     cleaned = _VERDICT_TAG_RE.sub("", raw_reason).strip()
     lines = [
-        ln.lstrip("-*•0123456789.) ").strip()
+        stripped
         for ln in cleaned.splitlines()
-        if ln.strip()
+        if (stripped := ln.lstrip("-*•0123456789.) ").strip())
     ]
     if not lines:
         return default_msg[:max_chars]
@@ -585,7 +585,7 @@ class DistilledAnchorBank(BaseModel):
         k1 = 1.5
         b = 0.75
         scored: list[tuple[float, int]] = []
-        for idx, (pr, doc_toks) in enumerate(zip(eligible, docs)):
+        for idx, (pr, doc_toks) in enumerate(zip(eligible, docs, strict=True)):
             tf = Counter(doc_toks)
             dl = len(doc_toks)
             bm25 = 0.0

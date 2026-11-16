@@ -48,6 +48,9 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         *,
         suppress_thinking: bool = True,
         auto_logit_bias: bool = False,
+        max_retries: int = 2,
+        retry_backoff_base: float = 0.25,
+        retry_max_wait: float = 5.0,
     ) -> None:
         if not isinstance(suppress_thinking, bool):
             raise ConfigurationError(f"suppress_thinking must be a bool, got {suppress_thinking!r}")
@@ -65,7 +68,13 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         self._use_chat_template_no_think = False
         self._auto_logit_bias_supported = True
         self._logit_bias_cache: dict[tuple[str, ...], dict[str, int]] = {}
-        self._init_http_clients(client=client, async_client=async_client)
+        self._init_http_clients(
+            client=client,
+            async_client=async_client,
+            max_retries=max_retries,
+            retry_backoff_base=retry_backoff_base,
+            retry_max_wait=retry_max_wait,
+        )
 
     def __repr__(self) -> str:
         return f"OpenAICompatBackend(model='{self.model}', base_url='{self.base_url}')"
@@ -358,16 +367,16 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             auto_bias = self._resolve_auto_logit_bias_sync(allowed_tokens)
             if auto_bias:
                 payload["logit_bias"] = auto_bias
-        resp = self.client.post(url, json=payload, headers=self._headers())
+        resp = self._post_with_retry(url, json=payload, headers=self._headers())
         if resp.status_code in (400, 422) and "reasoning_effort" in payload and "reasoning_effort" not in kwargs:
             self._supports_reasoning_effort = False
             payload.pop("reasoning_effort", None)
-            resp = self.client.post(url, json=payload, headers=self._headers())
+            resp = self._post_with_retry(url, json=payload, headers=self._headers())
         resp.raise_for_status()
         lps = self._extract_top_logprobs_from_response(resp.json())
         fb_payload = self._build_chat_template_fallback_payload(payload, lps, allowed_tokens, kwargs)
         if fb_payload is not None:
-            resp_fb = self.client.post(url, json=fb_payload, headers=self._headers())
+            resp_fb = self._post_with_retry(url, json=fb_payload, headers=self._headers())
             lps_fb = self._handle_chat_template_fallback_response(resp_fb, allowed_tokens)
             if lps_fb is not None:
                 return lps_fb
@@ -389,16 +398,16 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             auto_bias = await self._resolve_auto_logit_bias_async(allowed_tokens)
             if auto_bias:
                 payload["logit_bias"] = auto_bias
-        resp = await self.async_client.post(url, json=payload, headers=self._headers())
+        resp = await self._apost_with_retry(url, json=payload, headers=self._headers())
         if resp.status_code in (400, 422) and "reasoning_effort" in payload and "reasoning_effort" not in kwargs:
             self._supports_reasoning_effort = False
             payload.pop("reasoning_effort", None)
-            resp = await self.async_client.post(url, json=payload, headers=self._headers())
+            resp = await self._apost_with_retry(url, json=payload, headers=self._headers())
         resp.raise_for_status()
         lps = self._extract_top_logprobs_from_response(resp.json())
         fb_payload = self._build_chat_template_fallback_payload(payload, lps, allowed_tokens, kwargs)
         if fb_payload is not None:
-            resp_fb = await self.async_client.post(url, json=fb_payload, headers=self._headers())
+            resp_fb = await self._apost_with_retry(url, json=fb_payload, headers=self._headers())
             lps_fb = self._handle_chat_template_fallback_response(resp_fb, allowed_tokens)
             if lps_fb is not None:
                 return lps_fb
@@ -416,7 +425,7 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             payload["max_tokens"] = max_tokens
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
         payload.update(filtered_kwargs)
-        resp = self.client.post(url, json=payload, headers=self._headers())
+        resp = self._post_with_retry(url, json=payload, headers=self._headers())
         resp.raise_for_status()
         return self._extract_chat_completion(resp.json())
 
@@ -432,6 +441,6 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             payload["max_tokens"] = max_tokens
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS}
         payload.update(filtered_kwargs)
-        resp = await self.async_client.post(url, json=payload, headers=self._headers())
+        resp = await self._apost_with_retry(url, json=payload, headers=self._headers())
         resp.raise_for_status()
         return self._extract_chat_completion(resp.json())

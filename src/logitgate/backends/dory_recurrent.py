@@ -60,10 +60,7 @@ def execute_adaptive_recurrent_loops(
         except (TypeError, IndexError):
             probe_h = h
 
-        if final_norm is not None:
-            normed_last_token = final_norm(probe_h)
-        else:
-            normed_last_token = probe_h
+        normed_last_token = final_norm(probe_h) if final_norm is not None else probe_h
 
         raw_logits = lm_head(normed_last_token)
 
@@ -107,7 +104,8 @@ def execute_adaptive_recurrent_loops(
 
         prev_p_pos = p_pos
 
-    assert last_logits is not None
+    if last_logits is None:
+        raise RuntimeError("No recurrent loops were executed to produce logits.")
     return RecurrentLoopTrace(
         loops_executed=max_loops,
         entropy_trajectory=tuple(entropies),

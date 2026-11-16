@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import math
 import os
@@ -200,7 +201,7 @@ def _load_cached_mapping(target_cache: Path) -> dict[str, Any] | None:
                     merged.update(ephemeral)
                 return merged
         try:
-            with open(target_cache, "r", encoding="utf-8") as f:
+            with open(target_cache, encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 with _CALIBRATION_CACHE_LOCK:
@@ -411,7 +412,7 @@ def _debiased_multiclass_accum(
     perms = [list(range(n)), [(i + shift) % n for i in range(n)]]
     accum = {k: 0.0 for k in keys}
     uniform_lp = -math.log(float(n))
-    for top, perm in zip((top_fwd, top_perm), perms):
+    for top, perm in zip((top_fwd, top_perm), perms, strict=True):
         pass_raw = {keys[i]: extract_token_logprob(top, keys[perm[i]]) for i in range(n)}
         finite_vals = [v for v in pass_raw.values() if math.isfinite(v)]
         if not finite_vals:
@@ -541,7 +542,7 @@ def _persist_calibration_profile(
                 and st_existing.st_size <= _MAX_CACHE_BYTES
             ):
                 try:
-                    with open(target_path, "r", encoding="utf-8") as f:
+                    with open(target_path, encoding="utf-8") as f:
                         loaded = json.load(f)
                     if isinstance(loaded, dict):
                         cache_data = loaded
@@ -560,14 +561,10 @@ def _persist_calibration_profile(
                 os.replace(tmp_path, target_path)
             except BaseException:
                 if fd_owned:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.close(fd)
-                    except OSError:
-                        pass
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
                 raise
             try:
                 st = target_path.stat()

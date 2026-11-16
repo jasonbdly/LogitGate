@@ -222,7 +222,8 @@ def compile_distillation_bundle(
             profile=prof,
         )
 
-    assert dataset is not None
+    if dataset is None:
+        raise ConfigurationError("dataset must not be None")
     if include_anchors:
         anchor_bank = DistilledAnchorBank.from_dataset(
             dataset,
@@ -331,7 +332,8 @@ async def acompile_distillation_bundle(
             for r in recs
         ]
     else:
-        assert dataset is not None
+        if dataset is None:
+            raise ConfigurationError("dataset must not be None")
         if include_anchors:
             anchor_bank = DistilledAnchorBank.from_dataset(
                 dataset,

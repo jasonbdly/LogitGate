@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    HAS_TORCH = False
 
 from logitgate.backends.base import resolve_logit_backend, strip_reasoning_blocks
 from logitgate.backends.dory_recurrent import (
@@ -821,7 +829,7 @@ def test_recurrent_backend_mock_inference() -> None:
 # PrefixBroadcastLogitEvaluator Tests
 # ---------------------------------------------------------------------------
 
-def test_prefix_broadcast_evaluator_geometry():
+def test_prefix_broadcast_evaluator_geometry() -> None:
     prefix, s_fwd, s_perm = PrefixBroadcastLogitEvaluator.build_inverted_prefix_and_suffixes(
         rubric="Candidate must be factual.",
         candidate="Paris is the capital of France.",
@@ -838,20 +846,21 @@ def test_prefix_broadcast_evaluator_geometry():
     assert "Map 'B' = PASS" in s_perm
 
 
-def test_prefix_broadcast_evaluator_mock_execution():
-    torch = pytest.importorskip("torch")
+def test_prefix_broadcast_evaluator_mock_execution() -> None:
+    if not HAS_TORCH or torch is None:
+        pytest.skip("torch not available")
 
     class MockModelOutput:
-        def __init__(self, logits, past_key_values=None):
+        def __init__(self, logits: Any, past_key_values: Any = None) -> None:
             self.logits = logits
             self.past_key_values = past_key_values
 
     class MockModel(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.eval_call_count = 0
 
-        def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
+        def forward(self, input_ids: Any, past_key_values: Any = None, use_cache: bool = True, return_dict: bool = True) -> Any:
             self.eval_call_count += 1
             b, s = input_ids.shape
             v = 100
@@ -862,7 +871,7 @@ def test_prefix_broadcast_evaluator_mock_execution():
             return MockModelOutput(dummy_logits, past_key_values=kv)
 
     class MockTokenizer:
-        def encode(self, text, add_special_tokens=True, return_tensors=None):
+        def encode(self, text: str, add_special_tokens: bool = True, return_tensors: str | None = None) -> Any:
             tokens = [hash(w) % 100 for w in text.split()]
             if return_tensors == "pt":
                 return torch.tensor([tokens], dtype=torch.long)
@@ -886,26 +895,27 @@ def test_prefix_broadcast_evaluator_mock_execution():
     assert mock_model.eval_call_count == 2  # Call 1: prefix (B=1), Call 2: suffixes (B=2)
 
 
-def test_prefix_broadcast_evaluator_dynamic_cache():
-    torch = pytest.importorskip("torch")
+def test_prefix_broadcast_evaluator_dynamic_cache() -> None:
+    if not HAS_TORCH or torch is None:
+        pytest.skip("torch not available")
 
     class DummyDynamicCache:
-        def __init__(self):
+        def __init__(self) -> None:
             self.interleaved = False
 
-        def batch_repeat_interleave(self, repeats):
+        def batch_repeat_interleave(self, repeats: int) -> DummyDynamicCache:
             self.interleaved = True
             return self
 
     class MockModel(torch.nn.Module):
-        def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
+        def forward(self, input_ids: Any, past_key_values: Any = None, use_cache: bool = True, return_dict: bool = True) -> Any:
             b, s = input_ids.shape
             v = 50
             cache = past_key_values or DummyDynamicCache()
             return MagicMock(logits=torch.randn(b, s, v), past_key_values=cache)
 
     class MockTokenizer:
-        def encode(self, text, add_special_tokens=True, return_tensors=None):
+        def encode(self, text: str, add_special_tokens: bool = True, return_tensors: str | None = None) -> Any:
             tokens = [hash(w) % 50 for w in text.split()]
             if return_tensors == "pt":
                 return torch.tensor([tokens], dtype=torch.long)
@@ -924,11 +934,12 @@ def test_prefix_broadcast_evaluator_dynamic_cache():
     assert l2.shape == (50,)
 
 
-def test_prefix_broadcast_evaluator_evaluate_debiased():
-    torch = pytest.importorskip("torch")
+def test_prefix_broadcast_evaluator_evaluate_debiased() -> None:
+    if not HAS_TORCH or torch is None:
+        pytest.skip("torch not available")
 
     class MockModel(torch.nn.Module):
-        def forward(self, input_ids, past_key_values=None, use_cache=True, return_dict=True):
+        def forward(self, input_ids: Any, past_key_values: Any = None, use_cache: bool = True, return_dict: bool = True) -> Any:
             b, s = input_ids.shape
             logits = torch.zeros(b, s, 10)
             if b == 2:
@@ -941,7 +952,7 @@ def test_prefix_broadcast_evaluator_evaluate_debiased():
             return MagicMock(logits=logits, past_key_values=((torch.zeros(1, 2, 4, 16), torch.zeros(1, 2, 4, 16)),))
 
     class MockTokenizer:
-        def encode(self, text, add_special_tokens=True, return_tensors=None):
+        def encode(self, text: str, add_special_tokens: bool = True, return_tensors: str | None = None) -> Any:
             if return_tensors == "pt":
                 return torch.tensor([[0, 1]], dtype=torch.long)
             return [0, 1]
@@ -965,14 +976,15 @@ def test_prefix_broadcast_evaluator_evaluate_debiased():
 # Adaptive Recurrent Loop Early Halting Tests
 # ---------------------------------------------------------------------------
 
-def test_execute_adaptive_recurrent_loops_halts_early():
-    torch = pytest.importorskip("torch")
+def test_execute_adaptive_recurrent_loops_halts_early() -> None:
+    if not HAS_TORCH or torch is None:
+        pytest.skip("torch not available")
     h0 = torch.randn(1, 5, 64)
 
-    def recurrent_step_fn(h, loop_idx):
+    def recurrent_step_fn(h: Any, loop_idx: int) -> Any:
         return h * 0.9 + 0.1
 
-    def lm_head(h_last):
+    def lm_head(h_last: Any) -> Any:
         logits = torch.zeros(1, 1, 100)
         logits[0, 0, 0] = 8.0
         logits[0, 0, 1] = -5.0
@@ -997,16 +1009,17 @@ def test_execute_adaptive_recurrent_loops_halts_early():
     assert len(trace.entropy_trajectory) == 2
 
 
-def test_execute_adaptive_recurrent_loops_max_loops():
-    torch = pytest.importorskip("torch")
+def test_execute_adaptive_recurrent_loops_max_loops() -> None:
+    if not HAS_TORCH or torch is None:
+        pytest.skip("torch not available")
     h0 = torch.randn(1, 5, 64)
 
-    def recurrent_step_fn(h, loop_idx):
+    def recurrent_step_fn(h: Any, loop_idx: int) -> Any:
         return h + torch.randn_like(h)
 
     loop_count = 0
 
-    def lm_head(h_last):
+    def lm_head(h_last: Any) -> Any:
         nonlocal loop_count
         loop_count += 1
         logits = torch.zeros(1, 1, 100)
@@ -1037,7 +1050,7 @@ def test_execute_adaptive_recurrent_loops_max_loops():
 # PCIe Spillover Guard Tests
 # ---------------------------------------------------------------------------
 
-def test_pcie_spillover_guard_cpu():
+def test_pcie_spillover_guard_cpu() -> None:
     guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
     status = guard.inspect()
     assert isinstance(status, VRAMWatermarkStatus)
@@ -1047,7 +1060,7 @@ def test_pcie_spillover_guard_cpu():
         assert isinstance(s, VRAMWatermarkStatus)
 
 
-def test_pcie_spillover_guard_mocked_cuda():
+def test_pcie_spillover_guard_mocked_cuda() -> None:
     pytest.importorskip("torch")
     guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
 
@@ -1066,7 +1079,7 @@ def test_pcie_spillover_guard_mocked_cuda():
         mock_empty.assert_called()
 
 
-def test_pcie_spillover_guard_reserved_memory_risk():
+def test_pcie_spillover_guard_reserved_memory_risk() -> None:
     pytest.importorskip("torch")
     guard = PCIeSpilloverGuard(device_index=0, min_free_headroom_mb=512.0)
     with patch("torch.cuda.is_available", return_value=True), \
@@ -1081,7 +1094,7 @@ def test_pcie_spillover_guard_reserved_memory_risk():
 # CLI Calibration & Telemetry Tests
 # ---------------------------------------------------------------------------
 
-def test_cli_calibrate_conformal_md(capsys):
+def test_cli_calibrate_conformal_md(capsys: pytest.CaptureFixture[str]) -> None:
     ret = main([
         "calibrate",
         "--dataset",
@@ -1097,7 +1110,7 @@ def test_cli_calibrate_conformal_md(capsys):
     assert "Guaranteed Layer 1 Error: <= 5.00%" in captured
 
 
-def test_cli_calibrate_json_dataset(tmp_path, capsys):
+def test_cli_calibrate_json_dataset(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from logitgate.exceptions import CalibrationWarning
 
     dataset_path = tmp_path / "calibration.json"
@@ -1124,7 +1137,7 @@ def test_cli_calibrate_json_dataset(tmp_path, capsys):
     assert "tau_accept" in data
 
 
-def test_cli_explain_renders_telemetry(tmp_path, capsys):
+def test_cli_explain_renders_telemetry(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     trace = LayerTrace(
         layer_name="LogitGate",
         status=DecisionStatus.FAILED,

@@ -4,12 +4,14 @@ These standards apply to all code, documentation, tests, and commits in the Logi
 
 ## 1. Architecture & Concurrency Invariants
 
-- **Async HTTP Client Lifecycle (`_HTTPClientMixin`):**
-  All HTTP-backed inference clients (`OllamaBackend`, `OpenAICompatBackend`, HTTP `LlamaCppBackend`) must inherit `_HTTPClientMixin` from `logitgate.backends.base`. Auto-created `httpx.AsyncClient` instances must track the running event loop (`_async_client_loop`) and recreate cleanly when invoked across sequential `asyncio.run()` calls. Never close a user-injected `async_client`.
+- **Async HTTP Client Lifecycle & Transient Retry (`_HTTPClientMixin`):**
+  All HTTP-backed inference clients (`OllamaBackend`, `OpenAICompatBackend`, HTTP `LlamaCppBackend`) must inherit `_HTTPClientMixin` from `logitgate.backends.base`. Auto-created `httpx.AsyncClient` instances must track the running event loop (`_async_client_loop`) and recreate cleanly when invoked across sequential `asyncio.run()` calls. Never close a user-injected `client` or `async_client`. Retry only transient HTTP statuses (`{408, 429, 502, 503, 504}`) and `httpx.TransportError` failures with bounded exponential backoff, jitter, and `Retry-After` support; fail immediately on permanent `4xx` errors.
+- **Ownership-Tracked Gate & Cascade Lifecycles (`close` / `aclose`):**
+  Every `BaseGate` subclass and `Cascade` must support idempotent `close()` / `aclose()` and `with` / `async with` context managers, tracking `_owns_backend` / `_owns_cache` / `_owns_sink` so caller-supplied instances are never closed when a gate closes.
 - **In-Process Backend Thread Safety:**
   `LogitGate.aevaluate`, `ChoiceGate.aevaluate`, and `ScoreGate.aevaluate` issue forward and reverse debiasing passes concurrently via `asyncio.gather`. Any in-process backend with mutable state, lazy initialization, or C++/CUDA context state (`LlamaCppBackend`, `RecurrentPyTorchBackend`, `StubBackend`) must serialize mutations and non-thread-safe native calls with a `threading.Lock` or `threading.RLock`.
-- **Bounded Batch Concurrency:**
-  Async batch operations (`aevaluate_batch`) must bound in-flight requests with an `asyncio.Semaphore` after warming the shared prefix on item 0 to prevent KV-cache stampedes and socket exhaustion.
+- **Bounded & Fault-Isolated Batch Concurrency:**
+  Batch operations (`evaluate_batch`, `aevaluate_batch`) must support `on_error: BatchErrorPolicy = "raise" | "abstain" | "fail"`, bound async in-flight requests with an `asyncio.Semaphore` after warming the shared prefix on item 0, and never swallow `BaseException` subclasses (`asyncio.CancelledError`, `KeyboardInterrupt`) when isolating per-item `Exception`s.
 - **No Unsolicited `stdout` Writes:**
   Library modules under `src/logitgate/` must never call `print()` to `stdout`, as CLI `--json` consumers and MCP stdio transports rely on clean standard output. Use `logging.getLogger(__name__)` for operational logs, or `sys.stderr` (respecting `LOGITGATE_QUIET=1`) for one-time developer notices.
 
@@ -32,7 +34,8 @@ These standards apply to all code, documentation, tests, and commits in the Logi
   - Finite-sample split conformal thresholds (`calibrate_cascade_thresholds`) must use exact conservative order-statistic indices (`ceil((n + 1) * (1 - alpha))` and symmetric lower rank) and emit `CalibrationWarning` when calibration sample counts are insufficient for non-trivial coverage.
 - **AST & Schema Validation (`ASTGate`):**
   - In Python, `isinstance(True, int)` is `True`. JSON schema validation for `"integer"` and `"number"` types must explicitly reject `bool` (`not isinstance(val, bool)`).
-  - `forbidden_imports` checks must inspect both `ast.Import` and `ast.ImportFrom` (`node.module` and `f"{node.module}.{alias.name}"`).
+  - When `syntax=True` receives a `list` or `tuple` of code strings, parse and check each string item individually rather than calling `ast.parse(str(candidate))` on the Python list literal.
+  - `forbidden_imports` checks must inspect both `ast.Import` and `ast.ImportFrom` (`node.module` and `f"{node.module}.{alias.name}"`) as well as dynamic `__import__` / `importlib.import_module` calls.
 - **Internal Probe Isolation (`JudgeGate`):**
   - When `JudgeGate` invokes an internal self-healing `_probe_gate` to classify an untagged critique, it must pass `save_on_fail=False` so internal probes never overwrite user failure snapshots in `.logitgate/failures/latest.json`.
 
@@ -44,14 +47,19 @@ These standards apply to all code, documentation, tests, and commits in the Logi
   - Regular expressions running over untrusted model outputs must avoid nested/ambiguous quantifiers (no catastrophic backtracking), and fallback JSON scanners (`raw_decode` loops) must enforce bounded decode-attempt caps so pathological inputs (e.g., thousands of unclosed `{` or backticks) fail in `O(N)` time.
 - **Dual Raw + Normalized Security Scanning (`ASTGate`):**
   - When `normalize_text=True` strips `<think>` blocks or markdown code fences, `forbidden_patterns` must still inspect the raw unstripped candidate in addition to normalized text so disallowed content inside `<think>` tags cannot bypass Layer 0 checks.
-- **Terminal Escape Sanitization (`cli.py`):**
+- **Terminal Escape Sanitization (`src/logitgate/cli/`):**
   - Sanitize ANSI CSI/OSC escape sequences and C0/C1 control characters before rendering untrusted prompts, candidates, or backend messages to terminal `stdout`/`stderr`, and validate all numeric CLI flags against `NaN`, `±inf`, and domain bounds.
 
-## 4. Packaging, Cross-Surface Parity & Tooling
+## 4. Packaging, Modularity, Cross-Surface Parity & Strict Tooling
 
-- Core `logitgate` requires only `httpx` and `pydantic`.
-- All optional integrations (`torch`, `transformers`, `safetensors`, `huggingface_hub`, `llama_cpp`, `deepeval`, `langgraph`) must be lazily imported inside the functions or classes that use them so `pytest` passes in minimal `pip install -e ".[test]"` containers without optional extras installed.
-- **Cross-Surface Feature Propagation:** Any new gate parameter or normalization capability must be wired consistently through `Cascade`, `VerdictSnapshot` (`replay_config()` and `replay()`), `@check` (`pytest_plugin.py`), and `cli.py`.
+- Core `logitgate` requires only `httpx`, `pydantic`, and `typing-extensions`.
+- All optional integrations (`torch`, `transformers`, `peft`, `safetensors`, `huggingface_hub`, `llama_cpp`, `deepeval`, `langgraph`, `opentelemetry`) must be lazily imported inside the functions or classes that use them so `pytest` passes in minimal `pip install -e ".[test]"` containers without optional extras installed.
+- **Modular File Decomposition:** Keep gates (`logit_gate.py`, `choice_gate.py`, `score_gate.py`, `multi_rubric_gate.py`, `rank_gate.py`, `best_of_n.py`, `ast_gate.py`, `judge_gate.py`), shared calibration lifecycle helpers (`calibration/lifecycle.py`), and CLI subcommands (`cli/parser.py`, `cli/style.py`, `cli/commands/*.py`) in focused single-responsibility modules (`<= ~1,000` lines) while preserving backward-compatible re-exports (`if TYPE_CHECKING:` + `__getattr__` / `__all__`).
+- **Strict Static & Write-Time Test Quality Gates:**
+  - `pyproject.toml` enforces 13 Ruff rule families (`E4`, `E7`, `E9`, `F`, `B`, `SIM`, `UP`, `PT`, `RUF`, `PERF`, `S`, `I`, `A`) and strict Python 3.10 Mypy (`disallow_untyped_defs`, `check_untyped_defs`, `warn_return_any`, `no_implicit_optional`, `warn_redundant_casts`) across both `src/logitgate` and `tests/`.
+  - Never use bare `assert` in `src/logitgate/` (`S101`), always pass `strict=True|False` to `zip()` (`B905`), check `isinstance(x, Mapping)` before `"key" in x`, and annotate every test function (`-> None`).
+  - Write mutation-resistant unit tests as code is authored: avoid `0`/`1`/symmetric mock inputs, test exact `==` boundary ties alongside `<` and `>` on every threshold, test asymmetric `(True, False)` / `(False, True)` boolean combinations, avoid `importlib.reload()` on `logitgate.*` modules, and keep per-module `--branch` coverage `>= 93%`.
+- **Cross-Surface Feature Propagation:** Any new gate parameter or normalization capability must be wired consistently through `Cascade`, `VerdictSnapshot` (`replay_config()` and `replay()`/`areplay()`), `@check` (`pytest_plugin.py`), and `src/logitgate/cli/`.
 - **Integration Polymorphism:** `LangGraphGuardNode` must support `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers (with both sync and async callable factories), and `LogitGateSystemOneModel` must support `YesNoAnswer`, `ChoiceAnswer`, and `ScoreAnswer` schemas.
 - **Local Verification Commands:** Ensure `~/.local/bin` is on `PATH` when invoking `uv` / `uvx` in non-interactive shells (`uvx ruff check src/logitgate tests`, `uv run --with mypy mypy src/logitgate tests`, `.venv/bin/pytest -q`).
 - **Centralized GitLab CI & GitHub Storefront Syndication:**

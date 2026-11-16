@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import contextlib
 import functools
 import inspect
 import json
 import math
+import random
 import re
 import threading
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from typing import Any, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -19,6 +22,7 @@ from logitgate.exceptions import (
     BackendError,
     BackendTimeoutError,
     BackendUnavailableError,
+    ConfigurationError,
 )
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -212,10 +216,10 @@ class LogitBackend(abc.ABC):
             None, lambda: self.query_top_logprobs(prompt, top_k, allowed_tokens, **kwargs)
         )
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027
         """Closes any underlying network connections or resources."""
 
-    async def aclose(self) -> None:
+    async def aclose(self) -> None:  # noqa: B027
         """Asynchronously closes any underlying network connections or resources."""
 
     def __enter__(self) -> Self:
@@ -243,10 +247,10 @@ class GenerativeBackend(abc.ABC):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.generate(prompt, max_tokens=max_tokens, **kwargs))
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027
         """Closes any underlying network connections or resources."""
 
-    async def aclose(self) -> None:
+    async def aclose(self) -> None:  # noqa: B027
         """Asynchronously closes any underlying network connections or resources."""
 
     def __enter__(self) -> Self:
@@ -262,27 +266,173 @@ class GenerativeBackend(abc.ABC):
         await self.aclose()
 
 
+def _validate_retry_config(
+    max_retries: int,
+    retry_backoff_base: float,
+    retry_max_wait: float,
+) -> None:
+    if (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or max_retries < 0
+    ):
+        raise ConfigurationError(
+            f"max_retries must be an integer >= 0, got {max_retries!r}"
+        )
+    if (
+        isinstance(retry_backoff_base, bool)
+        or not isinstance(retry_backoff_base, (int, float))
+        or not math.isfinite(float(retry_backoff_base))
+        or float(retry_backoff_base) < 0.0
+    ):
+        raise ConfigurationError(
+            f"retry_backoff_base must be a finite float >= 0.0, got {retry_backoff_base!r}"
+        )
+    if (
+        isinstance(retry_max_wait, bool)
+        or not isinstance(retry_max_wait, (int, float))
+        or not math.isfinite(float(retry_max_wait))
+        or float(retry_max_wait) < 0.0
+    ):
+        raise ConfigurationError(
+            f"retry_max_wait must be a finite float >= 0.0, got {retry_max_wait!r}"
+        )
+
+
 class _HTTPClientMixin:
     """Shared lazy httpx.Client / httpx.AsyncClient lifecycle with event-loop affinity tracking."""
 
-    timeout: float
-    _client: httpx.Client | None
-    _async_client: httpx.AsyncClient | None
-    _async_client_loop: asyncio.AbstractEventLoop | None
-    _owns_async_client: bool
+    timeout: float = 30.0
+    max_retries: int = 2
+    retry_backoff_base: float = 0.25
+    retry_max_wait: float = 5.0
+    _client: httpx.Client | None = None
+    _owns_client: bool = True
+    _async_client: httpx.AsyncClient | None = None
+    _async_client_loop: asyncio.AbstractEventLoop | None = None
+    _owns_async_client: bool = True
     _http_lock: threading.RLock
+
+    _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({408, 429, 502, 503, 504})
+    _TRANSIENT_EXCEPTIONS: tuple[type[Exception], ...] = (
+        httpx.ConnectError,
+        httpx.ReadTimeout,
+        httpx.WriteTimeout,
+        httpx.PoolTimeout,
+        httpx.RemoteProtocolError,
+    )
 
     def _init_http_clients(
         self,
         client: httpx.Client | None = None,
         async_client: httpx.AsyncClient | None = None,
+        max_retries: int = 2,
+        retry_backoff_base: float = 0.25,
+        retry_max_wait: float = 5.0,
     ) -> None:
+        _validate_retry_config(max_retries, retry_backoff_base, retry_max_wait)
+        self.max_retries = max_retries
+        self.retry_backoff_base = float(retry_backoff_base)
+        self.retry_max_wait = float(retry_max_wait)
         self._client = client
         self._owns_client = client is None
         self._async_client = async_client
         self._async_client_loop = None
         self._owns_async_client = async_client is None
         self._http_lock = threading.RLock()
+
+    def _calculate_retry_delay(
+        self,
+        attempt: int,
+        resp: httpx.Response | None = None,
+    ) -> float:
+        if (
+            resp is not None
+            and getattr(resp, "status_code", None) in (429, 503)
+            and hasattr(resp, "headers")
+            and resp.headers is not None
+        ):
+            raw_ra = resp.headers.get("retry-after")
+            if raw_ra:
+                try:
+                    val = float(raw_ra)
+                    if math.isfinite(val) and val >= 0.0:
+                        return max(0.0, min(self.retry_max_wait, val))
+                except (ValueError, TypeError):
+                    pass
+        jitter = random.uniform(0.5, 1.0)
+        backoff = float(self.retry_backoff_base) * (2**attempt) * jitter
+        return float(max(0.0, min(self.retry_max_wait, backoff)))
+
+    def _post_with_retry(
+        self,
+        path_or_url: str,
+        *,
+        json: dict[str, Any],
+        headers: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        attempts = max(0, self.max_retries) + 1
+        resp: httpx.Response | None = None
+        for attempt in range(attempts):
+            try:
+                if headers is not None:
+                    resp = self.client.post(path_or_url, json=json, headers=headers, **kwargs)
+                else:
+                    resp = self.client.post(path_or_url, json=json, **kwargs)
+            except self._TRANSIENT_EXCEPTIONS:
+                if attempt >= self.max_retries:
+                    raise
+                delay = self._calculate_retry_delay(attempt)
+                time.sleep(delay)
+                continue
+
+            status = getattr(resp, "status_code", None)
+            is_retryable = isinstance(status, int) and status in self._RETRYABLE_STATUS_CODES
+            if not is_retryable or attempt >= self.max_retries:
+                return resp
+
+            delay = self._calculate_retry_delay(attempt, resp)
+            time.sleep(delay)
+
+        if resp is None:
+            raise BackendError("HTTP request failed with no response received after retries.")
+        return resp
+
+    async def _apost_with_retry(
+        self,
+        path_or_url: str,
+        *,
+        json: dict[str, Any],
+        headers: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        attempts = max(0, self.max_retries) + 1
+        resp: httpx.Response | None = None
+        for attempt in range(attempts):
+            try:
+                if headers is not None:
+                    resp = await self.async_client.post(path_or_url, json=json, headers=headers, **kwargs)
+                else:
+                    resp = await self.async_client.post(path_or_url, json=json, **kwargs)
+            except self._TRANSIENT_EXCEPTIONS:
+                if attempt >= self.max_retries:
+                    raise
+                delay = self._calculate_retry_delay(attempt)
+                await asyncio.sleep(delay)
+                continue
+
+            status = getattr(resp, "status_code", None)
+            is_retryable = isinstance(status, int) and status in self._RETRYABLE_STATUS_CODES
+            if not is_retryable or attempt >= self.max_retries:
+                return resp
+
+            delay = self._calculate_retry_delay(attempt, resp)
+            await asyncio.sleep(delay)
+
+        if resp is None:
+            raise BackendError("HTTP request failed with no response received after retries.")
+        return resp
 
     @property
     def client(self) -> httpx.Client:
@@ -345,10 +495,8 @@ class _HTTPClientMixin:
             if owns:
                 self._async_client = None
         if client is not None and not client.is_closed:
-            try:
+            with contextlib.suppress(RuntimeError):
                 await client.aclose()
-            except RuntimeError:
-                pass
 
 
 class StubBackend(LogitBackend, GenerativeBackend):
@@ -634,10 +782,8 @@ def resolve_logit_backend(
         prob = 0.95
         if "/" in spec and spec not in ("stub://", "stub://default"):
             part = spec.split("/")[-1]
-            try:
+            with contextlib.suppress(ValueError):
                 prob = float(part)
-            except ValueError:
-                pass
         return StubBackend(default_prob=prob, **kwargs)
 
     def _uri_model(parsed_path: str) -> str | None:

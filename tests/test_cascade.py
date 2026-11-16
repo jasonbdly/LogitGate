@@ -9,7 +9,7 @@ from logitgate.gates.logit_gate import LogitGate
 from logitgate.models import DecisionStatus
 
 
-def test_cascade_short_circuit_layer_0():
+def test_cascade_short_circuit_layer_0() -> None:
     """Layer 0 failure short-circuits before any LLM calls."""
     ast_gate = ASTGate(syntax=True)
     logit_backend = StubBackend(default_prob=0.99)
@@ -31,7 +31,7 @@ def test_cascade_short_circuit_layer_0():
     assert len(verdict.traces) == 1
 
 
-def test_cascade_short_circuit_layer_1_pass():
+def test_cascade_short_circuit_layer_1_pass() -> None:
     """Layer 1 pass short-circuits before JudgeGate (Layer 2)."""
     ast_gate = ASTGate(syntax=True)
     logit_backend = StubBackend(default_prob=0.95)
@@ -52,7 +52,7 @@ def test_cascade_short_circuit_layer_1_pass():
     assert len(verdict.traces) == 2  # ASTGate + LogitGate traces
 
 
-def test_cascade_decisive_fail_on_ambiguous_only():
+def test_cascade_decisive_fail_on_ambiguous_only() -> None:
     """
     When JudgeGate has trigger='on_ambiguous_only', a decisive failure at
     Layer 1 (prob <= fail_threshold) short-circuits without calling JudgeGate.
@@ -71,7 +71,7 @@ def test_cascade_decisive_fail_on_ambiguous_only():
     assert len(judge_backend.prompt_log) == 0  # Short-circuited!
 
 
-def test_cascade_escalate_to_layer_2():
+def test_cascade_escalate_to_layer_2() -> None:
     """
     When Layer 1 is ambiguous (prob=0.50), it escalates to Layer 2 JudgeGate
     which provides diagnostic critique.
@@ -91,6 +91,7 @@ def test_cascade_escalate_to_layer_2():
     assert verdict.status == DecisionStatus.FAILED
     assert verdict.triggered_layer == "JudgeGate"
     assert verdict.total_tokens_generated == 42
+    assert verdict.reason is not None
     assert "Missing function docstring" in verdict.reason
     assert len(judge_backend.prompt_log) == 1
     # Check that LogitGate's rubric was passed to JudgeGate
@@ -99,7 +100,7 @@ def test_cascade_escalate_to_layer_2():
 
 
 @pytest.mark.asyncio
-async def test_cascade_async_evaluation():
+async def test_cascade_async_evaluation() -> None:
     """Tests async aevaluate() through all cascade conditions."""
     ast_gate = ASTGate(syntax=True)
     logit_backend = StubBackend(default_prob=0.92)
@@ -114,7 +115,7 @@ async def test_cascade_async_evaluation():
     assert verdict.triggered_layer == "LogitGate"
 
 
-def test_cascade_multiple_logit_gates_and_semantics():
+def test_cascade_multiple_logit_gates_and_semantics() -> None:
     """Chaining multiple LogitGates enforces AND semantics where all gates must pass."""
     b1 = StubBackend(default_prob=0.95)
     b2 = StubBackend(default_prob=0.05)
@@ -132,7 +133,7 @@ def test_cascade_multiple_logit_gates_and_semantics():
     assert len(b2.prompt_log) > 0
 
 
-def test_cascade_middle_gate_failure():
+def test_cascade_middle_gate_failure() -> None:
     """Failure at an intermediate non-logit gate halts and fails the cascade."""
     from logitgate.gates.logit_gate import ScoreGate
 
@@ -149,7 +150,7 @@ def test_cascade_middle_gate_failure():
     assert verdict.triggered_layer == "ScoreGate"
 
 
-def test_cascade_preserves_explicit_judge_rubric():
+def test_cascade_preserves_explicit_judge_rubric() -> None:
     """Explicit rubric in JudgeGate is preserved rather than overwritten by upstream LogitGate."""
     logit_b = StubBackend(default_prob=0.50)  # ambiguous
     judge_b = StubBackend(diagnostic_text="[VERDICT: PASS] All requirements satisfied.")

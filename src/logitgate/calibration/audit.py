@@ -125,8 +125,7 @@ class DatasetAuditReport:
             lines.append(f"Domains ({len(self.domains)}): {dom_str}")
         if self.warnings:
             lines.append("Warnings:")
-            for w in self.warnings:
-                lines.append(f"  - {w}")
+            lines.extend(f"  - {w}" for w in self.warnings)
         else:
             lines.append("Warnings: none")
         return "\n".join(lines)
@@ -182,8 +181,7 @@ class SplitLeakageReport:
         if self.shared_domains:
             lines.append(f"Shared Domains: {', '.join(self.shared_domains)}")
         if self.warnings:
-            for w in self.warnings:
-                lines.append(f"  - {w}")
+            lines.extend(f"  - {w}" for w in self.warnings)
         return "\n".join(lines)
 
 
@@ -541,7 +539,7 @@ def _compute_exact_auroc(scores: Sequence[float], labels: Sequence[bool]) -> flo
     n_neg = len(labels) - n_pos
     if n_pos == 0 or n_neg == 0:
         return 0.5
-    paired = sorted(zip(scores, labels), key=lambda xy: xy[0])
+    paired = sorted(zip(scores, labels, strict=True), key=lambda xy: xy[0])
     n = len(paired)
     rank_sum_pos = 0.0
     i = 0
@@ -589,7 +587,7 @@ def _compute_lexical_loo_accuracy(cases: Sequence[_NormalizedCase]) -> float:
 
     v_size = max(len(vocab), 1)
     correct = 0
-    for c, toks in zip(cases, doc_tokens):
+    for c, toks in zip(cases, doc_tokens, strict=True):
         doc_len = sum(toks.values())
         if c.label:
             rem_pos_docs = total_pos_docs - 1

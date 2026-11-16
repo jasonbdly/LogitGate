@@ -332,7 +332,7 @@ class OtelSpanSink(TelemetrySink):
 
             with self._lock:
                 self._spans_emitted += 1
-        except Exception as exc:  # noqa: BLE001 - tracer/callback failures routed via on_error
+        except Exception as exc:
             _handle_sink_error(exc, self.on_error, "OtelSpanSink")
 
     def close(self) -> None:

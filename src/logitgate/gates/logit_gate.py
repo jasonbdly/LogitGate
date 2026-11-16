@@ -3,15 +3,33 @@ from __future__ import annotations
 import asyncio
 import math
 import secrets
+import sys
 import threading
 import time
-import warnings
-import weakref
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from logitgate.backends.base import LogitBackend, StubBackend, resolve_logit_backend
+from logitgate.backends.base import LogitBackend, resolve_logit_backend
+from logitgate.calibration.lifecycle import (
+    TopLogprobs,
+    _cal_lock_key,
+    _ensure_logprobs_present,
+    _get_async_cal_lock,
+    _get_sync_cal_lock,
+    _lazy_calibrate_async,
+    _lazy_calibrate_sync,
+    _permuted_key_indices,
+    _resolve_gate_temperature,
+    _resolve_logit_temperature,
+    _resolve_warm_prefix,
+    _same_nonzero_sign,
+    _should_lazy_auto_calibrate,
+    _validate_optional_bool,
+    _validate_optional_unit_float,
+    _validate_prob_threshold,
+    _warn_if_profile_model_mismatch,
+)
 from logitgate.config import (
     LogitGateDefaults,
     get_default_model,
@@ -20,8 +38,6 @@ from logitgate.config import (
 from logitgate.debiasing.inversion import (
     compile_batch_binary_prompt,
     compile_binary_prompt,
-    compile_choice_prompt,
-    compile_score_prompt,
 )
 from logitgate.debiasing.permutation import (
     combine_symmetric_log_odds,
@@ -32,15 +48,10 @@ from logitgate.debiasing.softmax import (
 )
 from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
-    extract_token_logprob,
     has_any_target_token,
-    has_finite_logprobs,
 )
-from logitgate.debiasing.softmax import (
-    softmax_probabilities as _softmax,
-)
-from logitgate.exceptions import BackendError, CalibrationWarning, ConfigurationError
-from logitgate.gates.base import BaseGate
+from logitgate.exceptions import ConfigurationError
+from logitgate.gates.base import BaseGate, BatchErrorPolicy, _make_batch_error_verdict
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
@@ -50,253 +61,31 @@ if TYPE_CHECKING:
     from logitgate.distill.anchor_bank import DistilledAnchorBank
     from logitgate.distill.bundle import DistillationBundle
     from logitgate.distill.meta_calibrator import LogitMetaCalibrator
-
-TopLogprobs = list[dict[str, Any]]
-
-
-def _ensure_logprobs_present(top_fwd: TopLogprobs, top_rev: TopLogprobs | None = None) -> None:
-    if not has_finite_logprobs(top_fwd) or (top_rev is not None and not has_finite_logprobs(top_rev)):
-        raise BackendError(
-            "Backend returned no token log-probabilities (top_logprobs is empty). "
-            "Ensure the model and inference server support logprobs."
-        )
+    from logitgate.gates.choice_gate import ChoiceGate
+    from logitgate.gates.multi_rubric_gate import MultiRubricGate
+    from logitgate.gates.score_gate import ScoreGate
 
 
-def _same_nonzero_sign(a: float, b: float) -> bool:
-    return (a > 0.0 and b > 0.0) or (a < 0.0 and b < 0.0)
+def _get_lg_mod() -> Any:
+    return sys.modules.get("logitgate.gates.logit_gate")
 
 
-def _validate_prob_threshold(name: str, value: Any) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigurationError(f"{name} must be between 0.0 and 1.0, got {value!r}")
-    vf = float(value)
-    if not math.isfinite(vf) or not (0.0 <= vf <= 1.0):
-        raise ConfigurationError(f"{name} must be between 0.0 and 1.0, got {value!r}")
-    return vf
+def _call_lazy_calibrate_sync(model_name: str, backend: LogitBackend, *, binary: bool) -> float:
+    mod = _get_lg_mod()
+    fn = getattr(mod, "_lazy_calibrate_sync", _lazy_calibrate_sync) if mod else _lazy_calibrate_sync
+    return fn(model_name, backend, binary=binary)
 
 
-def _validate_optional_bool(name: str, value: Any) -> bool | None:
-    if value is None:
-        return None
-    if not isinstance(value, bool):
-        raise ConfigurationError(f"{name} must be a bool or None, got {value!r}")
-    return value
+async def _call_lazy_calibrate_async(model_name: str, backend: LogitBackend, *, binary: bool) -> float:
+    mod = _get_lg_mod()
+    fn = getattr(mod, "_lazy_calibrate_async", _lazy_calibrate_async) if mod else _lazy_calibrate_async
+    return await fn(model_name, backend, binary=binary)
 
 
-def _validate_optional_unit_float(name: str, value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigurationError(f"{name} must be a float in (0.0, 1.0], got {value!r}")
-    vf = float(value)
-    if not math.isfinite(vf) or not (0.0 < vf <= 1.0):
-        raise ConfigurationError(f"{name} must be a float in (0.0, 1.0], got {value!r}")
-    return vf
-
-
-def _resolve_warm_prefix(warm_prefix: bool | None, backend: Any) -> bool:
-    if warm_prefix is not None:
-        return warm_prefix
-    return bool(getattr(backend, "prefers_sequential_prefix_warmup", False))
-
-
-_SYNC_CAL_META_LOCK = threading.Lock()
-_SYNC_CAL_LOCKS: dict[tuple[str, str], threading.Lock] = {}
-_ASYNC_CAL_LOCKS: weakref.WeakKeyDictionary[
-    asyncio.AbstractEventLoop, dict[tuple[str, str], asyncio.Lock]
-] = weakref.WeakKeyDictionary()
-
-
-def _cal_lock_key(model_name: str) -> tuple[str, str]:
-    from logitgate.debiasing.permutation import (
-        _cache_key_for_path,
-        get_calibration_cache_path,
-    )
-
-    return _cache_key_for_path(get_calibration_cache_path()), model_name.strip().lower()
-
-
-def _get_sync_cal_lock(key: tuple[str, str]) -> threading.Lock:
-    with _SYNC_CAL_META_LOCK:
-        lock = _SYNC_CAL_LOCKS.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _SYNC_CAL_LOCKS[key] = lock
-        return lock
-
-
-def _get_async_cal_lock(key: tuple[str, str]) -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
-    with _SYNC_CAL_META_LOCK:
-        loop_locks = _ASYNC_CAL_LOCKS.get(loop)
-        if loop_locks is None:
-            loop_locks = {}
-            _ASYNC_CAL_LOCKS[loop] = loop_locks
-        lock = loop_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            loop_locks[key] = lock
-        return lock
-
-
-def _resolve_logit_temperature(
-    logit_temperature: float | Literal["auto"] | None,
-    effective_model: str | None,
-    backend: Any,
-    *,
-    binary: bool = False,
-) -> float:
-    """Resolves logit temperature from explicit value, 'auto', global config, or model calibration."""
-    if logit_temperature == "auto":
-        from logitgate.debiasing.permutation import (
-            auto_calibrate_backend,
-            get_model_temperature,
-            has_known_or_cached_temperature,
-        )
-
-        if has_known_or_cached_temperature(effective_model, binary=binary):
-            temp = get_model_temperature(effective_model, binary=binary)
-        elif effective_model not in ("default", "stub", None, ""):
-            assert isinstance(effective_model, str)
-            cal_lock = _get_sync_cal_lock(_cal_lock_key(effective_model))
-            with cal_lock:
-                if has_known_or_cached_temperature(effective_model, binary=binary):
-                    temp = get_model_temperature(effective_model, binary=binary)
-                else:
-                    cal_res = auto_calibrate_backend(
-                        backend,
-                        model_key=effective_model,
-                        strict_cache_io=False,
-                    )
-                    temp = (
-                        cal_res.optimal_temperature
-                        if binary
-                        else (cal_res.multiclass_temperature or cal_res.optimal_temperature)
-                    )
-        else:
-            temp = 1.0
-        effective_temp = temp
-    elif logit_temperature is not None:
-        if isinstance(logit_temperature, bool) or not isinstance(logit_temperature, (int, float)):
-            raise ConfigurationError(f"logit_temperature must be a positive float, got {logit_temperature!r}")
-        try:
-            effective_temp = float(logit_temperature)
-        except (TypeError, ValueError) as exc:
-            raise ConfigurationError(f"logit_temperature must be a positive float, got {logit_temperature!r}") from exc
-    else:
-        from logitgate.debiasing.permutation import get_model_temperature
-
-        if is_temperature_configured():
-            effective_temp = LogitGateDefaults.logit_temperature
-        else:
-            effective_temp = get_model_temperature(effective_model, binary=binary)
-
-    if not math.isfinite(effective_temp) or effective_temp <= 0.0:
-        raise ConfigurationError(f"logit_temperature must be positive, got {effective_temp}")
-    return effective_temp
-
-
-def _should_lazy_auto_calibrate(
-    logit_temperature: float | Literal["auto"] | None,
-    effective_model: str | None,
-    backend: Any,
-    *,
-    binary: bool = False,
-) -> bool:
-    """Returns True when an unknown BYO model should lazily calibrate on first live evaluation."""
-    if logit_temperature is not None:
-        return False
-    if is_temperature_configured() or not LogitGateDefaults.auto_calibrate:
-        return False
-    if not effective_model or effective_model.strip().lower() in ("", "default", "stub"):
-        return False
-    if not isinstance(backend, LogitBackend):
-        return False
-    inner = getattr(backend, "inner", backend)
-    if isinstance(inner, StubBackend):
-        return False
-    from logitgate.debiasing.permutation import has_known_or_cached_temperature
-
-    return not has_known_or_cached_temperature(effective_model, binary=binary)
-
-
-def _lazy_calibrate_sync(model_name: str, backend: LogitBackend, *, binary: bool) -> float:
-    from logitgate.debiasing.permutation import (
-        auto_calibrate_backend,
-        get_model_temperature,
-        has_known_or_cached_temperature,
-    )
-
-    if has_known_or_cached_temperature(model_name, binary=binary):
-        return get_model_temperature(model_name, binary=binary)
-    with _get_sync_cal_lock(_cal_lock_key(model_name)):
-        if has_known_or_cached_temperature(model_name, binary=binary):
-            return get_model_temperature(model_name, binary=binary)
-        cal = auto_calibrate_backend(backend, model_key=model_name, strict_cache_io=False)
-        return cal.optimal_temperature if binary else (cal.multiclass_temperature or cal.optimal_temperature)
-
-
-async def _lazy_calibrate_async(model_name: str, backend: LogitBackend, *, binary: bool) -> float:
-    from logitgate.debiasing.permutation import (
-        aauto_calibrate_backend,
-        get_model_temperature,
-        has_known_or_cached_temperature,
-    )
-
-    if has_known_or_cached_temperature(model_name, binary=binary):
-        return get_model_temperature(model_name, binary=binary)
-    async with _get_async_cal_lock(_cal_lock_key(model_name)):
-        if has_known_or_cached_temperature(model_name, binary=binary):
-            return get_model_temperature(model_name, binary=binary)
-        cal = await aauto_calibrate_backend(backend, model_key=model_name, strict_cache_io=False)
-        return cal.optimal_temperature if binary else (cal.multiclass_temperature or cal.optimal_temperature)
-
-
-def _warn_if_profile_model_mismatch(
-    profile: CalibrationProfile | None,
-    effective_model: str | None,
-    gate_name: str,
-) -> None:
-    if profile is None or not profile.model or not effective_model:
-        return
-    prof_m = profile.model.strip().lower()
-    eff_m = effective_model.strip().lower()
-    if not prof_m or prof_m in ("default", "stub") or not eff_m or eff_m in ("default", "stub"):
-        return
-    if prof_m != eff_m:
-        warnings.warn(
-            f"{gate_name} was initialized for model '{effective_model}', but CalibrationProfile "
-            f"was fitted on '{profile.model}'. Thresholds and temperatures may not transfer faithfully.",
-            CalibrationWarning,
-            stacklevel=3,
-        )
-
-
-def _resolve_gate_temperature(
-    logit_temperature: float | Literal["auto"] | None,
-    effective_model: str | None,
-    backend: Any,
-    profile: CalibrationProfile | None,
-    *,
-    binary: bool,
-) -> tuple[float, bool]:
-    """Resolves gate temperature and lazy-calibration flag respecting explicit > profile > defaults."""
-    if logit_temperature is None and profile is not None:
-        temp = profile.binary_temperature if binary else profile.effective_multiclass_temperature
-        return temp, False
-    temp = _resolve_logit_temperature(
-        logit_temperature,
-        effective_model,
-        backend,
-        binary=binary,
-    )
-    needs_lazy = _should_lazy_auto_calibrate(
-        logit_temperature,
-        effective_model,
-        backend,
-        binary=binary,
-    )
-    return temp, needs_lazy
+def _call_resolve_logit_backend(backend_spec: Any, **kwargs: Any) -> LogitBackend:
+    mod = _get_lg_mod()
+    fn = getattr(mod, "resolve_logit_backend", resolve_logit_backend) if mod else resolve_logit_backend
+    return cast(LogitBackend, fn(backend_spec, **kwargs))
 
 
 class LogitGate(BaseGate):
@@ -318,16 +107,16 @@ class LogitGate(BaseGate):
             passes and averages them in log-odds space.
         query_first: When True, compiles prompt with rubric and candidate first, ensuring
             identical KV-cache prefixes across both passes.
-        logit_temperature: Post-hoc temperature scaling parameter, ``"auto"`` to calibrate via
-            micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
-            unknown BYO models when ``auto_calibrate=True``).
-        preset: Optional threshold preset (``"strict"``, ``"balanced"``, ``"fast_triage"``).
+        logit_temperature: Post-hoc temperature scaling parameter, 'auto' to calibrate via
+            micro-probes, or None to use global/model-calibrated defaults (lazy-calibrating
+            unknown BYO models when auto_calibrate=True).
+        preset: Optional threshold preset ('strict', 'balanced', 'fast_triage').
         save_on_fail: Override failure snapshot persistence for this gate.
         max_positional_bias: Optional maximum allowed positional log-odds divergence across
             opposite-polarity passes before abstaining to AMBIGUOUS.
         name: Identifier for this gate instance.
         warm_prefix: Override whether async symmetric passes run Pass 1 before Pass 2 to warm KV prefix.
-        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
+        profile: Optional CalibrationProfile (or path to JSON) supplying calibrated
             temperature and conformal cutoffs; explicit keyword arguments take precedence.
 
     Raises:
@@ -482,7 +271,7 @@ class LogitGate(BaseGate):
         effective_warm_prefix = _validate_optional_bool("warm_prefix", warm_prefix)
 
         owns_backend = not isinstance(backend, LogitBackend)
-        resolved_backend = resolve_logit_backend(backend, model=model)
+        resolved_backend = _call_resolve_logit_backend(backend, model=model)
         try:
             effective_model = (
                 model
@@ -539,6 +328,13 @@ class LogitGate(BaseGate):
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
         self.name = name
+        self._owns_backend = owns_backend
+        self._owns_cache = isinstance(cache, (str, Path))
+        self._owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+
+    @property
+    def calibration_profile(self) -> CalibrationProfile | None:
+        return self.profile
 
     def replay_config(self) -> dict[str, Any]:
         from logitgate.backends.base import infer_backend_spec
@@ -558,9 +354,6 @@ class LogitGate(BaseGate):
             config["max_positional_bias"] = self.max_positional_bias
         if self.warm_prefix is not None:
             config["warm_prefix"] = self.warm_prefix
-        # A backend *instance* carries its own model (e.g. OpenAICompatBackend(model=...)), and
-        # `infer_backend_spec` can't encode it for every scheme. Without it, replay would
-        # silently run against the scheme's default model.
         model = (
             self.model
             or getattr(self.backend, "model", None)
@@ -568,6 +361,11 @@ class LogitGate(BaseGate):
         )
         if model:
             config["model"] = model
+        if self.calibration_profile is not None:
+            config["calibration_profile"] = self.calibration_profile.model_dump(mode="json")
+        dist_bundle = getattr(self, "distillation_bundle", None)
+        if dist_bundle is not None:
+            config["distillation_bundle"] = dist_bundle.model_dump(mode="json")
         return config
 
     def _handle_failure_snapshot(
@@ -618,8 +416,6 @@ class LogitGate(BaseGate):
             f"fail_threshold={self.fail_threshold}, "
             f"backend={self.backend!r})"
         )
-
-    # -- Prompt construction & scoring (shared by sync, async, and batch paths) ------------
 
     def _binary_prompts_with_anchor_flag(
         self,
@@ -673,11 +469,6 @@ class LogitGate(BaseGate):
         *,
         boundary_nonce: str | None = None,
     ) -> tuple[str, str | None]:
-        """Returns the (forward, reverse) prompts; reverse is ``None`` without debiasing.
-
-        Forward binds A=PASS/B=FAIL, reverse binds B=PASS/A=FAIL. Both share a byte-identical
-        prefix (rubric + candidate) so the second pass is mostly a KV-cache hit.
-        """
         fwd, rev, _ = self._binary_prompts_with_anchor_flag(
             candidate,
             rubrics,
@@ -698,7 +489,6 @@ class LogitGate(BaseGate):
             top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"])
             top_rev = await self.backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"])
             return top_fwd, top_rev
-        # Issued concurrently when backend prefers parallel batching over sequential warmup.
         top_fwd, top_rev = await asyncio.gather(
             self.backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"]),
             self.backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"]),
@@ -713,12 +503,6 @@ class LogitGate(BaseGate):
         *,
         anchored: bool = False,
     ) -> Verdict:
-        """Turns first-token logprobs into a calibrated, thresholded verdict.
-
-        With a reverse pass, the forward and reverse log-odds are averaged *in log-odds space*.
-        A constant preference for token "A" shows up with opposite sign in the two passes and
-        cancels exactly (Zhao et al., 2021). Averaging probabilities would only dampen it.
-        """
         _ensure_logprobs_present(top_fwd, top_rev)
         fwd_has_target = has_any_target_token(top_fwd, ("A", "B"))
         rev_has_target = True if top_rev is None else has_any_target_token(top_rev, ("A", "B"))
@@ -869,8 +653,6 @@ class LogitGate(BaseGate):
             traces=[trace],
         )
 
-    # -- Public evaluation API --------------------------------------------------------------
-
     def _ensure_calibrated(self) -> None:
         if not self._needs_lazy_calibration or not self.model:
             return
@@ -880,7 +662,7 @@ class LogitGate(BaseGate):
             if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
                 self._needs_lazy_calibration = False
                 return
-            self.logit_temperature = _lazy_calibrate_sync(self.model, self.backend, binary=True)
+            self.logit_temperature = _call_lazy_calibrate_sync(self.model, self.backend, binary=True)
             self._needs_lazy_calibration = False
 
     async def _aensure_calibrated(self) -> None:
@@ -889,7 +671,7 @@ class LogitGate(BaseGate):
         if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
             self._needs_lazy_calibration = False
             return
-        temp = await _lazy_calibrate_async(self.model, self.backend, binary=True)
+        temp = await _call_lazy_calibrate_async(self.model, self.backend, binary=True)
         with self._calibration_lock:
             self.logit_temperature = temp
             self._needs_lazy_calibration = False
@@ -941,14 +723,35 @@ class LogitGate(BaseGate):
             **kwargs,
         )
 
-    def evaluate_batch(
-        self, candidate: Any, rubrics: Sequence[str], *, fail_fast: bool = False
+    def evaluate_batch(  # type: ignore[override]
+        self,
+        candidate: Any = None,
+        rubrics: Sequence[str] | None = None,
+        *,
+        candidates: Sequence[Any] | None = None,
+        fail_fast: bool = False,
+        on_error: BatchErrorPolicy = "raise",
+        **kwargs: Any,
     ) -> list[Verdict]:
-        """Evaluates several atomic rubrics against one candidate.
+        """Evaluates several atomic rubrics against one candidate, or a batch of candidates.
 
-        The candidate is placed first in every prompt, so all 2 x len(rubrics) queries share
-        one cached prefix and only the short rubric suffix is re-prefilled per query.
+        When rubrics is provided, evaluates the single candidate against rubrics sharing
+        one cached prefix. When rubrics is None, evaluates the batch of candidates.
         """
+        if on_error not in ("raise", "abstain", "fail"):
+            raise ConfigurationError(
+                f"on_error must be one of 'raise', 'abstain', or 'fail', got {on_error!r}"
+            )
+        # Candidate-batch mode (rubrics is None)
+        if rubrics is None:
+            target_candidates = candidates if candidates is not None else candidate
+            if target_candidates is None:
+                return []
+            if not isinstance(target_candidates, Sequence) or isinstance(target_candidates, (str, bytes, dict)):
+                target_candidates = [target_candidates]
+            return super().evaluate_batch(target_candidates, on_error=on_error, **kwargs)
+
+        # Rubric-batch mode: evaluating one candidate against multiple rubrics
         if not isinstance(fail_fast, bool):
             raise ConfigurationError(f"fail_fast must be a bool, got {fail_fast!r}")
         if isinstance(rubrics, (str, bytes)):
@@ -963,25 +766,71 @@ class LogitGate(BaseGate):
         results = []
         for idx in range(len(rubrics)):
             t0 = time.perf_counter()
-            forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-                candidate, rubrics, idx, boundary_nonce=nonce
-            )
-            top_fwd = self._query(forward)
-            top_rev = self._query(reverse) if reverse is not None else None
-            verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+            if on_error == "raise":
+                forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+                    candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                )
+                top_fwd = self._query(forward)
+                top_rev = self._query(reverse) if reverse is not None else None
+                verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+            else:
+                try:
+                    forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                    )
+                    top_fwd = self._query(forward)
+                    top_rev = self._query(reverse) if reverse is not None else None
+                    verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                except Exception as exc:
+                    verdict = _make_batch_error_verdict(self, exc, on_error, t0)
             results.append(verdict)
             if fail_fast and verdict.status == DecisionStatus.FAILED:
                 break
         return results
 
-    async def aevaluate_batch(
-        self, candidate: Any, rubrics: Sequence[str], *, fail_fast: bool = False
+    async def aevaluate_batch(  # type: ignore[override]
+        self,
+        candidate: Any = None,
+        rubrics: Sequence[str] | None = None,
+        *,
+        candidates: Sequence[Any] | None = None,
+        fail_fast: bool = False,
+        max_concurrency: int | None = None,
+        on_error: BatchErrorPolicy = "raise",
+        **kwargs: Any,
     ) -> list[Verdict]:
-        """Async `evaluate_batch`. The first rubric runs alone to warm the shared prefix.
+        """Async evaluate_batch.
 
-        Firing every query at a cold server makes each one prefill the full candidate in
-        parallel (a cache stampede). One sequential warm-up turns the rest into cache hits.
+        When rubrics is provided, evaluates the single candidate against rubrics warming
+        the shared prefix first. When rubrics is None, evaluates the batch of candidates.
         """
+        if on_error not in ("raise", "abstain", "fail"):
+            raise ConfigurationError(
+                f"on_error must be one of 'raise', 'abstain', or 'fail', got {on_error!r}"
+            )
+        if (
+            max_concurrency is not None
+            and (
+                isinstance(max_concurrency, bool)
+                or not isinstance(max_concurrency, int)
+                or max_concurrency < 1
+            )
+        ):
+            raise ConfigurationError(
+                f"max_concurrency must be an integer >= 1 or None, got {max_concurrency!r}"
+            )
+        # Candidate-batch mode (rubrics is None)
+        if rubrics is None:
+            target_candidates = candidates if candidates is not None else candidate
+            if target_candidates is None:
+                return []
+            if not isinstance(target_candidates, Sequence) or isinstance(target_candidates, (str, bytes, dict)):
+                target_candidates = [target_candidates]
+            return await super().aevaluate_batch(
+                target_candidates, max_concurrency=max_concurrency, on_error=on_error, **kwargs
+            )
+
+        # Rubric-batch mode:
         if not isinstance(fail_fast, bool):
             raise ConfigurationError(f"fail_fast must be a bool, got {fail_fast!r}")
         if isinstance(rubrics, (str, bytes)):
@@ -994,16 +843,26 @@ class LogitGate(BaseGate):
         await self._aensure_calibrated()
         nonce = secrets.token_hex(8)
 
-        sem = asyncio.Semaphore(32)
+        sem_limit = max_concurrency if max_concurrency is not None else 32
+        sem = asyncio.Semaphore(sem_limit)
 
         async def _eval_single(idx: int) -> Verdict:
             async with sem:
                 t0 = time.perf_counter()
-                forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-                    candidate, rubrics, idx, boundary_nonce=nonce
-                )
-                top_fwd, top_rev = await self._aquery_pair(forward, reverse)
-                return self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                if on_error == "raise":
+                    forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                    )
+                    top_fwd, top_rev = await self._aquery_pair(forward, reverse)
+                    return self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                try:
+                    forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
+                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                    )
+                    top_fwd, top_rev = await self._aquery_pair(forward, reverse)
+                    return self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                except Exception as exc:
+                    return _make_batch_error_verdict(self, exc, on_error, t0)
 
         first_verdict = await _eval_single(0)
         if fail_fast:
@@ -1020,1112 +879,45 @@ class LogitGate(BaseGate):
         return [first_verdict, *rest_verdicts]
 
 
-class MultiRubricGate(BaseGate):
-    """Checks several *atomic* rubrics against one candidate; passes only if every rubric passes.
-
-    Prefer this to one compound rubric ("is it typed AND documented AND safe?"). A compound
-    question blends independent signals into one logit, and a strong "yes" on two criteria can
-    mask a "no" on the third. Here each rubric gets its own debiased read, and all reads share
-    the candidate's KV-cache prefix (see `LogitGate.evaluate_batch`).
-
-    Aggregation is weakest-link: any FAILED rubric gives FAILED, otherwise any AMBIGUOUS gives
-    AMBIGUOUS, and ``probability`` is the minimum across rubrics. One trace per rubric is
-    recorded (``metadata["rubric"]``), so `logitgate explain` shows which criterion failed.
-
-    Inside a `Cascade`, a downstream `JudgeGate` inherits all rubrics as a bulleted list.
-
-    Args:
-        rubrics: Atomic yes/no criteria, one question each.
-        name: Identifier for this gate instance.
-        **options: Any `LogitGate` option (``backend``, ``model``, ``pass_threshold``,
-            ``fail_threshold``, ``symmetric_debiasing``, ``logit_temperature``, ``preset``...).
-
-    Example:
-        >>> gate = MultiRubricGate([
-        ...     "Does the function have type annotations?",
-        ...     "Does the function handle n <= 0?",
-        ... ])
-        >>> verdict = gate(candidate_code)
-        >>> [t.metadata["rubric"] for t in verdict.traces if t.status != "passed"]
-    """
-
-    def __init__(
-        self,
-        rubrics: Sequence[str],
-        name: str = "MultiRubricGate",
-        *,
-        fail_fast: bool = False,
-        **options: Any,
-    ) -> None:
-        if not isinstance(fail_fast, bool):
-            raise ConfigurationError(f"fail_fast must be a bool, got {fail_fast!r}")
-        if isinstance(rubrics, (str, bytes)):
-            raise ConfigurationError("MultiRubricGate rubrics must be a sequence of strings, not a single string")
-        cleaned = [r.strip() for r in rubrics if isinstance(r, str) and r.strip()]
-        if len(cleaned) != len(rubrics) or not cleaned:
-            raise ConfigurationError("MultiRubricGate needs one or more non-empty rubric strings")
-        self.rubrics = cleaned
-        self.name = name
-        self.fail_fast = fail_fast
-        self._gate = LogitGate(rubric=cleaned[0], name=name, **options)
-        self.save_on_fail = self._gate.save_on_fail
-
-    @property
-    def rubric(self) -> str:
-        """All criteria as one bulleted rubric, the form a downstream judge receives."""
-        return "\n".join(f"- {r}" for r in self.rubrics)
-
-    @property
-    def backend(self) -> LogitBackend:
-        return self._gate.backend
-
-    @property
-    def model(self) -> str | None:
-        return self._gate.model
-
-    @property
-    def logit_temperature(self) -> float:
-        return self._gate.logit_temperature
-
-    @property
-    def pass_threshold(self) -> float:
-        return self._gate.pass_threshold
-
-    @property
-    def fail_threshold(self) -> float:
-        return self._gate.fail_threshold
-
-    @property
-    def symmetric_debiasing(self) -> bool:
-        return self._gate.symmetric_debiasing
-
-    @property
-    def warm_prefix(self) -> bool | None:
-        return self._gate.warm_prefix
-
-    @property
-    def profile(self) -> CalibrationProfile | None:
-        return self._gate.profile
-
-    @property
-    def adaptive_controller(self) -> AdaptiveConformalController | None:
-        return self._gate.adaptive_controller
-
-    @property
-    def anchor_bank(self) -> DistilledAnchorBank | None:
-        return self._gate.anchor_bank
-
-    @property
-    def meta_calibrator(self) -> LogitMetaCalibrator | None:
-        return self._gate.meta_calibrator
-
-    @property
-    def distillation_bundle(self) -> DistillationBundle | None:
-        return self._gate.distillation_bundle
-
-    @property
-    def telemetry_sink(self) -> Any:
-        return self._gate.telemetry_sink
-
-    @property
-    def cache(self) -> Any:
-        return self._gate.cache
-
-    @cache.setter
-    def cache(self, val: Any) -> None:
-        self._gate.cache = val
-
-    def __repr__(self) -> str:
-        return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
-
-    def evaluate_each(self, candidate: Any) -> list[Verdict]:
-        """Per-rubric verdicts, in `rubrics` order."""
-        return self._gate.evaluate_batch(candidate, self.rubrics, fail_fast=self.fail_fast)
-
-    async def aevaluate_each(self, candidate: Any) -> list[Verdict]:
-        return await self._gate.aevaluate_batch(candidate, self.rubrics, fail_fast=self.fail_fast)
-
-    def _aggregate(self, verdicts: Sequence[Verdict], t0: float) -> Verdict:
-        traces: list[LayerTrace] = []
-        for i, (rubric, v) in enumerate(zip(self.rubrics, verdicts)):
-            for trace in v.traces:
-                traces.append(trace.model_copy(update={
-                    "layer_name": f"{self.name}[{i}]",
-                    "metadata": {**trace.metadata, "rubric": rubric},
-                }))
-        statuses = {v.status for v in verdicts}
-        if DecisionStatus.FAILED in statuses:
-            status = DecisionStatus.FAILED
-        elif DecisionStatus.AMBIGUOUS in statuses:
-            status = DecisionStatus.AMBIGUOUS
-        else:
-            status = DecisionStatus.PASSED
-        if self._gate.adaptive_controller is not None and traces:
-            traces[0] = traces[0].model_copy(
-                update={"metadata": {**traces[0].metadata, "raw_l1_status": status.value}}
-            )
-        probs = [v.probability for v in verdicts if v.probability is not None]
-        unresolved = [
-            f"{v.status.value.upper()} {rubric!r} (P={v.probability:.4f})"
-            for rubric, v in zip(self.rubrics, verdicts)
-            if not v.passed and v.probability is not None
-        ]
-        total = len(self.rubrics)
-        evaluated = len(verdicts)
-        passed_count = sum(v.passed for v in verdicts)
-        if evaluated < total:
-            reason = f"{passed_count}/{total} rubrics passed (short-circuited at {evaluated}/{total})"
-        else:
-            reason = f"{passed_count}/{total} rubrics passed"
-        if unresolved:
-            reason += "; " + "; ".join(unresolved)
-        return Verdict(
-            passed=status == DecisionStatus.PASSED,
-            status=status,
-            probability=min(probs) if probs else None,
-            triggered_layer=self.name,
-            total_latency_ms=(time.perf_counter() - t0) * 1000.0,
-            total_tokens_generated=0,
-            reason=reason,
-            traces=traces,
-        )
-
-    def replay_config(self) -> dict[str, Any]:
-        config = {k: v for k, v in self._gate.replay_config().items() if k != "rubric"}
-        return {
-            **config,
-            "gate_type": "MultiRubricGate",
-            "rubrics": list(self.rubrics),
-            "fail_fast": self.fail_fast,
-        }
-
-    def _snapshot(
-        self,
-        candidate: Any,
-        verdict: Verdict,
-        kwargs: dict[str, Any],
-        *,
-        _is_cache_hit: bool = False,
-    ) -> Verdict:
-        from logitgate.cache import store_cached_verdict
-        from logitgate.telemetry.sinks import emit_verdict_telemetry
-
-        call_kw = kwargs
-        if _is_cache_hit:
-            raw_tags = kwargs.get("telemetry_tags")
-            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
-            merged_tags["cache_hit"] = True
-            call_kw = {**kwargs, "telemetry_tags": merged_tags}
-        else:
-            store_cached_verdict(
-                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
-            )
-
-        emit_verdict_telemetry(
-            verdict,
-            candidate=candidate,
-            gate_name=self.name,
-            gate_type="MultiRubricGate",
-            rubric=self.rubric,
-            model=self.model,
-            backend=self.backend,
-            gate_sink=self.telemetry_sink,
-            call_kwargs=call_kw,
-        )
-        if verdict.passed:
-            return verdict
-        return persist_failure_snapshot(
-            verdict,
-            candidate=candidate,
-            rubric=self.rubric,
-            gate_config=self.replay_config(),
-            save_on_fail=kwargs.get("save_on_fail", self.save_on_fail),
-            test_name=kwargs.get("test_name"),
-            snapshot_dir=kwargs.get("snapshot_dir"),
-        )
-
-    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        from logitgate.cache import lookup_cached_verdict
-
-        self._gate._ensure_calibrated()
-        hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
-        )
-        if hit is not None:
-            return self._snapshot(candidate, hit, kwargs, _is_cache_hit=True)
-        t0 = time.perf_counter()
-        return self._snapshot(candidate, self._aggregate(self.evaluate_each(candidate), t0), kwargs)
-
-    async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        from logitgate.cache import lookup_cached_verdict
-
-        await self._gate._aensure_calibrated()
-        hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
-        )
-        if hit is not None:
-            return self._snapshot(candidate, hit, kwargs, _is_cache_hit=True)
-        t0 = time.perf_counter()
-        return self._snapshot(candidate, self._aggregate(await self.aevaluate_each(candidate), t0), kwargs)
-
-
-class ChoiceGate(BaseGate):
-    """Discrete K-ary categorical decision and routing gate.
-
-    Evaluates K discrete options from first-token logits, cancelling label order
-    and position bias via symmetric permutation debiasing (Zheng et al., 2023).
-
-    Args:
-        question: Decision question or routing prompt.
-        options: Mapping of option tokens (e.g., 'A', 'B', 'C') to their descriptions.
-        backend: Backend instance or specifier URI.
-        model: Optional model identifier string for the backend.
-        symmetric_debiasing: When True, queries options in multiple label permutations
-            and averages logprobs before softmax normalization.
-        permutation_mode: Multi-option debiasing schedule (``"derangement"``,
-            ``"cyclic"``, or ``"reverse"``).
-        query_first: When True, compiles prompt with question and candidate first.
-        logit_temperature: Temperature scaling factor, ``"auto"`` to calibrate via
-            micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
-            unknown BYO models when ``auto_calibrate=True``).
-        name: Identifier for this gate instance.
-        min_confidence: Optional minimum top-choice probability required to avoid abstaining (AMBIGUOUS).
-        min_margin: Optional minimum top-2 probability margin required to avoid abstaining (AMBIGUOUS).
-        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
-            multiclass temperature and selective confidence/margin cutoffs.
-
-    Raises:
-        ConfigurationError: If question is empty, options has fewer than 2 items, or logit_temperature <= 0.
-    """
-
-    def __init__(
-        self,
-        question: str,
-        options: Mapping[str, str],
-        backend: str | LogitBackend | None = None,
-        model: str | None = None,
-        symmetric_debiasing: bool | None = True,
-        permutation_mode: Literal["derangement", "cyclic", "reverse"] = "derangement",
-        query_first: bool = True,
-        logit_temperature: float | Literal["auto"] | None = None,
-        name: str = "ChoiceGate",
-        *,
-        min_confidence: float | None = None,
-        min_margin: float | None = None,
-        save_on_fail: bool | None = None,
-        warm_prefix: bool | None = None,
-        profile: CalibrationProfile | str | Path | None = None,
-        telemetry_sink: Any = None,
-        cache: Any = None,
-    ) -> None:
-        from logitgate.calibration.profile import resolve_calibration_profile
-        from logitgate.telemetry.sinks import resolve_telemetry_sink
-
-        loaded_profile = resolve_calibration_profile(profile)
-        resolved_sink = resolve_telemetry_sink(telemetry_sink)
-        if not isinstance(question, str) or not question.strip():
-            raise ConfigurationError("question cannot be empty or whitespace")
-        if permutation_mode not in ("derangement", "cyclic", "reverse"):
-            raise ConfigurationError(
-                f"Invalid permutation_mode '{permutation_mode}'. Must be one of ['derangement', 'cyclic', 'reverse']"
-            )
-        if not isinstance(options, Mapping) or len(options) < 2:
-            raise ConfigurationError(
-                f"ChoiceGate requires at least 2 options, got {len(options) if isinstance(options, Mapping) else type(options).__name__}"
-            )
-        invalid_keys = [k for k in options if not isinstance(k, str) or len(k.strip()) != 1]
-        if invalid_keys:
-            raise ConfigurationError(
-                f"ChoiceGate option keys must be single characters (e.g. 'A', 'B', 'C'), got: {invalid_keys}"
-            )
-        raw_min_conf = (
-            min_confidence
-            if min_confidence is not None
-            else (loaded_profile.choice_min_confidence if loaded_profile is not None else None)
-        )
-        raw_min_margin = (
-            min_margin
-            if min_margin is not None
-            else (loaded_profile.choice_min_margin if loaded_profile is not None else None)
-        )
-        effective_min_conf = _validate_optional_unit_float("min_confidence", raw_min_conf)
-        effective_min_margin = _validate_optional_unit_float("min_margin", raw_min_margin)
-        effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
-        effective_warm_prefix = _validate_optional_bool("warm_prefix", warm_prefix)
-        normalized_options: dict[str, str] = {}
-        seen_upper: set[str] = set()
-        for k, v in options.items():
-            if not isinstance(v, str) or not v.strip():
-                raise ConfigurationError(f"ChoiceGate option description for '{k}' must be a non-empty string")
-            k_clean = k.strip()
-            k_upper = k_clean.upper()
-            if k_upper in seen_upper:
-                raise ConfigurationError(
-                    f"ChoiceGate option keys must be case-insensitively unique, got duplicate for '{k_clean}'"
-                )
-            seen_upper.add(k_upper)
-            normalized_options[k_clean] = v
-
-        owns_backend = not isinstance(backend, LogitBackend)
-        resolved_backend = resolve_logit_backend(backend, model=model)
-        try:
-            effective_model = (
-                model
-                or getattr(resolved_backend, "model", None)
-                or getattr(resolved_backend, "model_name", None)
-                or get_default_model()
-            )
-            effective_temp, needs_lazy = _resolve_gate_temperature(
-                logit_temperature,
-                effective_model,
-                resolved_backend,
-                loaded_profile,
-                binary=False,
-            )
-            from logitgate.cache import resolve_verdict_cache
-
-            resolved_cache = resolve_verdict_cache(cache)
-        except BaseException:
-            if owns_backend:
-                resolved_backend.close()
-            raise
-
-        _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
-        self.backend = resolved_backend
-        self.model = effective_model
-        self.profile = loaded_profile
-        self.question = question.strip()
-        self.options = normalized_options
-        self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
-        self.permutation_mode = permutation_mode
-        self.query_first = query_first
-        self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = needs_lazy
-        self._calibration_lock = threading.Lock()
-        self.min_confidence = effective_min_conf
-        self.min_margin = effective_min_margin
-        self.save_on_fail = effective_save_on_fail
-        self.warm_prefix = effective_warm_prefix
-        self.telemetry_sink = resolved_sink
-        self.cache = resolved_cache
-        self.name = name
-
-    def replay_config(self) -> dict[str, Any]:
-        from logitgate.backends.base import infer_backend_spec
-
-        config: dict[str, Any] = {
-            "gate_type": "ChoiceGate",
-            "question": self.question,
-            "options": dict(self.options),
-            "backend": infer_backend_spec(self.backend),
-            "symmetric_debiasing": self.symmetric_debiasing,
-            "permutation_mode": self.permutation_mode,
-            "query_first": self.query_first,
-            "logit_temperature": self.logit_temperature,
-            "name": self.name,
-        }
-        if self.min_confidence is not None:
-            config["min_confidence"] = self.min_confidence
-        if self.min_margin is not None:
-            config["min_margin"] = self.min_margin
-        if self.warm_prefix is not None:
-            config["warm_prefix"] = self.warm_prefix
-        model = (
-            self.model
-            or getattr(self.backend, "model", None)
-            or getattr(self.backend, "model_name", None)
-        )
-        if model:
-            config["model"] = model
-        return config
-
-    def _handle_failure_snapshot(
-        self, candidate: Any, verdict: Verdict, *, _is_cache_hit: bool = False, **kwargs: Any
-    ) -> Verdict:
-        from logitgate.cache import store_cached_verdict
-        from logitgate.telemetry.sinks import emit_verdict_telemetry
-
-        call_kw = kwargs
-        if _is_cache_hit:
-            raw_tags = kwargs.get("telemetry_tags")
-            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
-            merged_tags["cache_hit"] = True
-            call_kw = {**kwargs, "telemetry_tags": merged_tags}
-        else:
-            store_cached_verdict(
-                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
-            )
-
-        emit_verdict_telemetry(
-            verdict,
-            candidate=candidate,
-            gate_name=self.name,
-            gate_type="ChoiceGate",
-            rubric=self.question,
-            model=self.model,
-            backend=self.backend,
-            gate_sink=self.telemetry_sink,
-            call_kwargs=call_kw,
-        )
-        if verdict.passed:
-            return verdict
-        return persist_failure_snapshot(
-            verdict,
-            candidate=candidate,
-            rubric=self.question,
-            gate_config=self.replay_config(),
-            save_on_fail=kwargs.get("save_on_fail", self.save_on_fail),
-            test_name=kwargs.get("test_name"),
-            snapshot_dir=kwargs.get("snapshot_dir"),
-        )
-
-    def __repr__(self) -> str:
-        q_repr = repr(self.question[:40] + "..." if len(self.question) > 40 else self.question)
-        return f"ChoiceGate(question={q_repr}, options={list(self.options.keys())!r}, backend={self.backend!r})"
-
-    def _permuted_key_indices(self) -> list[list[int]]:
-        """Returns the list of pass permutations where ``perm[i]`` is the key index assigned to option ``i``.
-
-        - ``derangement`` (2 passes): Pass 1 is identity ``i -> i``; Pass 2 shifts by ``max(1, n // 2)``
-          so ``i -> (i + shift) % n``. Unlike list reversal on odd ``n``, this guarantees zero fixed
-          points (no middle option stays pinned to the same letter and line in both passes).
-        - ``cyclic`` (n passes): Runs all ``n`` cyclic shifts ``(i + s) % n`` for ``s in 0..n-1`` so
-          every option visits every letter and slot position exactly once (Zheng et al., 2023).
-        - ``reverse`` (2 passes): Legacy list reversal ``i -> n - 1 - i``.
-        """
-        n = len(self.options)
-        identity = list(range(n))
-        if not self.symmetric_debiasing:
-            return [identity]
-        if self.permutation_mode == "cyclic":
-            return [[(i + s) % n for i in range(n)] for s in range(n)]
-        if self.permutation_mode == "reverse":
-            return [identity, [n - 1 - i for i in range(n)]]
-        shift = max(1, n // 2)
-        return [identity, [(i + shift) % n for i in range(n)]]
-
-    def _choice_prompts_list(
-        self, candidate: Any, *, boundary_nonce: str | None = None
-    ) -> list[str]:
-        keys = list(self.options.keys())
-        values = list(self.options.values())
-        n = len(keys)
-        prompts: list[str] = []
-        for perm in self._permuted_key_indices():
-            # perm[i] is the key index where option i's description is placed
-            slot_to_desc: dict[str, str] = {}
-            for key_idx in range(n):
-                opt_idx = perm.index(key_idx)
-                slot_to_desc[keys[key_idx]] = values[opt_idx]
-            prompts.append(
-                compile_choice_prompt(
-                    question=self.question,
-                    candidate=candidate,
-                    options=slot_to_desc,
-                    query_first=self.query_first,
-                    boundary_nonce=boundary_nonce,
-                )
-            )
-        return prompts
-
-    def _choice_prompts(self, candidate: Any) -> tuple[str, str | None]:
-        prompts = self._choice_prompts_list(candidate)
-        return prompts[0], (prompts[1] if len(prompts) > 1 else None)
-
-    def _verdict_from_logprobs_list(self, top_list: list[TopLogprobs], t0: float) -> Verdict:
-        if not top_list or any(not has_finite_logprobs(top) for top in top_list):
-            raise BackendError(
-                "Backend returned no token log-probabilities (top_logprobs is empty). "
-                "Ensure the model and inference server support logprobs."
-            )
-        keys = list(self.options)
-        perms = self._permuted_key_indices()[: len(top_list)]
-        accum = {k: 0.0 for k in keys}
-        for top, perm in zip(top_list, perms):
-            # In this pass, option i sits under keys[perm[i]]
-            pass_raw = {keys[i]: extract_token_logprob(top, keys[perm[i]]) for i in range(len(keys))}
-            m_pass = max(pass_raw.values())
-            lse_pass = m_pass + math.log(sum(math.exp(v - m_pass) for v in pass_raw.values()))
-            for k in keys:
-                accum[k] += (pass_raw[k] - lse_pass) / float(len(perms))
-
-        choice_probs = _softmax(accum, self.logit_temperature)
-        best_choice, max_prob = max(choice_probs.items(), key=lambda kv: kv[1])
-        prob_rounded = round(max_prob, 4)
-        rounded = {k: round(v, 4) for k, v in choice_probs.items()}
-        sorted_probs = sorted(choice_probs.values(), reverse=True)
-        margin = round(sorted_probs[0] - sorted_probs[1], 4) if len(sorted_probs) >= 2 else 1.0
-        latency = (time.perf_counter() - t0) * 1000.0
-
-        all_have_targets = all(has_any_target_token(top, keys) for top in top_list)
-        abstained_reason: str | None = None
-        if not all_have_targets:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-            selected_choice: str | None = None
-            abstained_reason = "unobserved_target_tokens"
-            reason = "ChoiceGate abstained (AMBIGUOUS): unobserved_target_tokens"
-        elif self.min_confidence is not None and prob_rounded < self.min_confidence:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-            selected_choice = best_choice
-            abstained_reason = f"below_min_confidence ({prob_rounded:.4f} < {self.min_confidence:.4f})"
-            reason = (
-                f"ChoiceGate abstained on '{best_choice}' "
-                f"(P={prob_rounded:.4f} < min_confidence={self.min_confidence:.4f})"
-            )
-        elif self.min_margin is not None and margin < self.min_margin:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-            selected_choice = best_choice
-            abstained_reason = f"below_min_margin ({margin:.4f} < {self.min_margin:.4f})"
-            reason = (
-                f"ChoiceGate abstained on '{best_choice}' "
-                f"(margin={margin:.4f} < min_margin={self.min_margin:.4f})"
-            )
-        else:
-            status = DecisionStatus.PASSED
-            passed = True
-            selected_choice = best_choice
-            reason = f"ChoiceGate selected '{best_choice}' with P={max_prob:.4f}"
-
-        meta: dict[str, Any] = {
-            "choice_probabilities": rounded,
-            "permutation_mode": self.permutation_mode,
-            "top2_margin": margin,
-        }
-        if abstained_reason is not None:
-            meta["abstained_reason"] = abstained_reason
-
-        trace = LayerTrace(
-            layer_name=self.name,
-            status=status,
-            latency_ms=latency,
-            calibrated_prob=prob_rounded,
-            metadata=meta,
-        )
-        return Verdict(
-            passed=passed,
-            status=status,
-            probability=prob_rounded,
-            choice=selected_choice,
-            choice_probabilities=rounded,
-            triggered_layer=self.name,
-            total_latency_ms=latency,
-            total_tokens_generated=0,
-            reason=reason,
-            traces=[trace],
-        )
-
-    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
-        top_list = [top_fwd] if top_rev is None else [top_fwd, top_rev]
-        return self._verdict_from_logprobs_list(top_list, t0)
-
-    def _ensure_calibrated(self) -> None:
-        if not self._needs_lazy_calibration or not self.model:
-            return
-        with self._calibration_lock:
-            if not self._needs_lazy_calibration:
-                return
-            if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
-                self._needs_lazy_calibration = False
-                return
-            self.logit_temperature = _lazy_calibrate_sync(self.model, self.backend, binary=False)
-            self._needs_lazy_calibration = False
-
-    async def _aensure_calibrated(self) -> None:
-        if not self._needs_lazy_calibration or not self.model:
-            return
-        if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
-            self._needs_lazy_calibration = False
-            return
-        temp = await _lazy_calibrate_async(self.model, self.backend, binary=False)
-        with self._calibration_lock:
-            self.logit_temperature = temp
-            self._needs_lazy_calibration = False
-
-    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        from logitgate.cache import lookup_cached_verdict
-
-        self._ensure_calibrated()
-        hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
-        )
-        if hit is not None:
-            return self._handle_failure_snapshot(
-                candidate, hit, _is_cache_hit=True, **kwargs
-            )
-        t0 = time.perf_counter()
-        keys = list(self.options)
-        top_k = max(10, 2 * len(keys))
-        nonce = secrets.token_hex(8)
-        prompts = self._choice_prompts_list(candidate, boundary_nonce=nonce)
-        top_list = [
-            self.backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
-            for p in prompts
-        ]
-        return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs_list(top_list, t0), **kwargs
-        )
-
-    async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        from logitgate.cache import lookup_cached_verdict
-
-        await self._aensure_calibrated()
-        hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
-        )
-        if hit is not None:
-            return self._handle_failure_snapshot(
-                candidate, hit, _is_cache_hit=True, **kwargs
-            )
-        t0 = time.perf_counter()
-        keys = list(self.options)
-        top_k = max(10, 2 * len(keys))
-        nonce = secrets.token_hex(8)
-        prompts = self._choice_prompts_list(candidate, boundary_nonce=nonce)
-        if len(prompts) == 1:
-            top_list = [await self.backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)]
-        elif _resolve_warm_prefix(self.warm_prefix, self.backend):
-            first = await self.backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)
-            rest = list(
-                await asyncio.gather(
-                    *[self.backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts[1:]]
-                )
-            )
-            top_list = [first, *rest]
-        else:
-            top_list = list(
-                await asyncio.gather(
-                    *[self.backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts]
-                )
-            )
-        return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs_list(top_list, t0), **kwargs
-        )
-
-
-class ScoreGate(BaseGate):
-    """Continuous probability-weighted rubric scoring gate.
-
-    Computes expected continuous quality score:
-        E[S] = sum_{s=min_score}^{max_score} s * P(s)
-    from first-token logits as formalized by Liu et al. (2023, G-Eval).
-    Supports temperature scaling and optional symmetric scale reversal debiasing
-    (evaluating both standard 1..5 and inverted 5..1 scale mappings).
-
-    Args:
-        rubric: Evaluation rubric describing scoring expectations.
-        min_score: Minimum integer score rating (default: 1).
-        max_score: Maximum integer score rating (default: 5).
-        threshold: Score threshold required for a PASSED verdict (default: 3.5, or
-            ``profile.score_threshold`` when a `CalibrationProfile` provides one).
-        backend: Backend instance or specifier URI.
-        model: Optional model identifier string for the backend.
-        symmetric_debiasing: When True, queries both normal and inverted scale prompts
-            and averages logprobs to eliminate scale-end anchoring bias.
-        query_first: When True, compiles prompt with rubric and candidate first.
-        logit_temperature: Temperature scaling factor, ``"auto"`` to calibrate via
-            micro-probes, or ``None`` to use global/model-calibrated defaults (lazy-calibrating
-            unknown BYO models when ``auto_calibrate=True``).
-        save_on_fail: Override failure snapshot persistence for this gate.
-        name: Identifier for this gate instance.
-        fail_threshold: Optional lower cutoff below or at which scores return FAILED; scores in
-            ``(fail_threshold, threshold)`` abstain as AMBIGUOUS.
-        profile: Optional `CalibrationProfile` (or path to JSON) supplying calibrated
-            multiclass temperature and score cutoffs.
-
-    Raises:
-        ConfigurationError: If rubric is empty, min_score >= max_score, threshold is out of bounds,
-            or logit_temperature <= 0.
-    """
-
-    def __init__(
-        self,
-        rubric: str,
-        min_score: int = 1,
-        max_score: int = 5,
-        threshold: float | None = None,
-        backend: str | LogitBackend | None = None,
-        model: str | None = None,
-        symmetric_debiasing: bool | None = True,
-        query_first: bool = True,
-        logit_temperature: float | Literal["auto"] | None = None,
-        save_on_fail: bool | None = None,
-        name: str = "ScoreGate",
-        *,
-        fail_threshold: float | None = None,
-        max_score_std: float | None = None,
-        warm_prefix: bool | None = None,
-        profile: CalibrationProfile | str | Path | None = None,
-        telemetry_sink: Any = None,
-        cache: Any = None,
-    ) -> None:
-        from logitgate.calibration.profile import resolve_calibration_profile
-        from logitgate.telemetry.sinks import resolve_telemetry_sink
-
-        loaded_profile = resolve_calibration_profile(profile)
-        resolved_sink = resolve_telemetry_sink(telemetry_sink)
-        if not isinstance(rubric, str) or not rubric.strip():
-            raise ConfigurationError("rubric cannot be empty or whitespace")
-        if (
-            isinstance(min_score, bool)
-            or not isinstance(min_score, int)
-            or isinstance(max_score, bool)
-            or not isinstance(max_score, int)
-        ):
-            raise ConfigurationError(
-                f"min_score and max_score must be integers, got min_score={min_score!r}, max_score={max_score!r}"
-            )
-        if min_score >= max_score:
-            raise ConfigurationError(f"min_score ({min_score}) must be strictly less than max_score ({max_score})")
-        if min_score < 0 or max_score > 9:
-            raise ConfigurationError(
-                f"ScoreGate requires single-digit integer bounds (0 <= min_score < max_score <= 9), "
-                f"got min_score={min_score}, max_score={max_score}"
-            )
-
-        raw_threshold: Any = (
-            threshold
-            if threshold is not None
-            else (
-                loaded_profile.score_threshold
-                if loaded_profile is not None and loaded_profile.score_threshold is not None
-                else 3.5
-            )
-        )
-        if (
-            isinstance(raw_threshold, bool)
-            or not isinstance(raw_threshold, (int, float))
-            or not math.isfinite(float(raw_threshold))
-            or not (min_score <= float(raw_threshold) <= max_score)
-        ):
-            raise ConfigurationError(
-                f"threshold ({raw_threshold}) must be between min_score ({min_score}) and max_score ({max_score})"
-            )
-        raw_fail_threshold: Any = (
-            fail_threshold
-            if fail_threshold is not None
-            else (loaded_profile.score_fail_threshold if loaded_profile is not None else None)
-        )
-        effective_fail_thresh: float | None = None
-        if raw_fail_threshold is not None:
-            if (
-                isinstance(raw_fail_threshold, bool)
-                or not isinstance(raw_fail_threshold, (int, float))
-                or not math.isfinite(float(raw_fail_threshold))
-                or not (min_score <= float(raw_fail_threshold) <= float(raw_threshold))
-            ):
-                raise ConfigurationError(
-                    f"fail_threshold ({raw_fail_threshold!r}) must be between min_score ({min_score}) and threshold ({raw_threshold})"
-                )
-            effective_fail_thresh = float(raw_fail_threshold)
-        effective_max_std: float | None = None
-        if max_score_std is not None:
-            if (
-                isinstance(max_score_std, bool)
-                or not isinstance(max_score_std, (int, float))
-                or not math.isfinite(float(max_score_std))
-                or float(max_score_std) <= 0.0
-            ):
-                raise ConfigurationError(
-                    f"max_score_std must be a positive float, got {max_score_std!r}"
-                )
-            effective_max_std = float(max_score_std)
-        effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
-        effective_warm_prefix = _validate_optional_bool("warm_prefix", warm_prefix)
-
-        owns_backend = not isinstance(backend, LogitBackend)
-        resolved_backend = resolve_logit_backend(backend, model=model)
-        try:
-            effective_model = (
-                model
-                or getattr(resolved_backend, "model", None)
-                or getattr(resolved_backend, "model_name", None)
-                or get_default_model()
-            )
-            effective_temp, needs_lazy = _resolve_gate_temperature(
-                logit_temperature,
-                effective_model,
-                resolved_backend,
-                loaded_profile,
-                binary=False,
-            )
-            from logitgate.cache import resolve_verdict_cache
-
-            resolved_cache = resolve_verdict_cache(cache)
-        except BaseException:
-            if owns_backend:
-                resolved_backend.close()
-            raise
-
-        _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
-        self.backend = resolved_backend
-        self.model = effective_model
-        self.profile = loaded_profile
-        self.rubric = rubric.strip()
-        self.min_score = min_score
-        self.max_score = max_score
-        self.threshold = float(raw_threshold)
-        self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
-        self.query_first = query_first
-        self.logit_temperature = effective_temp
-        self._needs_lazy_calibration = needs_lazy
-        self._calibration_lock = threading.Lock()
-        self.fail_threshold = effective_fail_thresh
-        self.max_score_std = effective_max_std
-        self.warm_prefix = effective_warm_prefix
-        self.save_on_fail = effective_save_on_fail
-        self.telemetry_sink = resolved_sink
-        self.cache = resolved_cache
-        self.name = name
-
-    def replay_config(self) -> dict[str, Any]:
-        from logitgate.backends.base import infer_backend_spec
-
-        config: dict[str, Any] = {
-            "gate_type": "ScoreGate",
-            "rubric": self.rubric,
-            "backend": infer_backend_spec(self.backend),
-            "min_score": self.min_score,
-            "max_score": self.max_score,
-            "threshold": self.threshold,
-            "symmetric_debiasing": self.symmetric_debiasing,
-            "query_first": self.query_first,
-            "logit_temperature": self.logit_temperature,
-            "name": self.name,
-        }
-        if self.fail_threshold is not None:
-            config["fail_threshold"] = self.fail_threshold
-        if self.max_score_std is not None:
-            config["max_score_std"] = self.max_score_std
-        if self.warm_prefix is not None:
-            config["warm_prefix"] = self.warm_prefix
-        model = (
-            self.model
-            or getattr(self.backend, "model", None)
-            or getattr(self.backend, "model_name", None)
-        )
-        if model:
-            config["model"] = model
-        return config
-
-    def _handle_failure_snapshot(
-        self, candidate: Any, verdict: Verdict, *, _is_cache_hit: bool = False, **kwargs: Any
-    ) -> Verdict:
-        from logitgate.cache import store_cached_verdict
-        from logitgate.telemetry.sinks import emit_verdict_telemetry
-
-        call_kw = kwargs
-        if _is_cache_hit:
-            raw_tags = kwargs.get("telemetry_tags")
-            merged_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
-            merged_tags["cache_hit"] = True
-            call_kw = {**kwargs, "telemetry_tags": merged_tags}
-        else:
-            store_cached_verdict(
-                self, candidate, verdict, gate_cache=self.cache, call_kwargs=kwargs
-            )
-
-        emit_verdict_telemetry(
-            verdict,
-            candidate=candidate,
-            gate_name=self.name,
-            gate_type="ScoreGate",
-            rubric=self.rubric,
-            model=self.model,
-            backend=self.backend,
-            gate_sink=self.telemetry_sink,
-            call_kwargs=call_kw,
-        )
-        if verdict.passed:
-            return verdict
-        return persist_failure_snapshot(
-            verdict,
-            candidate=candidate,
-            rubric=self.rubric,
-            gate_config=self.replay_config(),
-            save_on_fail=kwargs.get("save_on_fail", self.save_on_fail),
-            test_name=kwargs.get("test_name"),
-            snapshot_dir=kwargs.get("snapshot_dir"),
-        )
-
-    def __repr__(self) -> str:
-        rubric_repr = repr(self.rubric[:40] + "..." if len(self.rubric) > 40 else self.rubric)
-        return (
-            f"ScoreGate(rubric={rubric_repr}, "
-            f"range=[{self.min_score}..{self.max_score}], "
-            f"threshold={self.threshold}, "
-            f"backend={self.backend!r})"
-        )
-
-    def _score_prompts(self, candidate: Any, *, boundary_nonce: str | None = None) -> tuple[str, str | None]:
-        def build(inverted: bool) -> str:
-            return compile_score_prompt(
-                rubric=self.rubric,
-                candidate=candidate,
-                min_score=self.min_score,
-                max_score=self.max_score,
-                query_first=self.query_first,
-                inverted=inverted,
-                boundary_nonce=boundary_nonce,
-            )
-
-        return build(False), (build(True) if self.symmetric_debiasing else None)
-
-    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
-        _ensure_logprobs_present(top_fwd, top_rev)
-        scores = range(self.min_score, self.max_score + 1)
-        fwd_raw = {s: extract_token_logprob(top_fwd, str(s)) for s in scores}
-        m_fwd = max(fwd_raw.values())
-        lse_fwd = m_fwd + math.log(sum(math.exp(v - m_fwd) for v in fwd_raw.values()))
-        combined = {s: v - lse_fwd for s, v in fwd_raw.items()}
-        if top_rev is not None:
-            # On the inverted scale, quality s is written as token (max + min - s).
-            mirror = self.max_score + self.min_score
-            rev_raw = {s: extract_token_logprob(top_rev, str(mirror - s)) for s in scores}
-            m_rev = max(rev_raw.values())
-            lse_rev = m_rev + math.log(sum(math.exp(v - m_rev) for v in rev_raw.values()))
-            combined = {s: (combined[s] + (rev_raw[s] - lse_rev)) / 2.0 for s in scores}
-
-        score_probs = _softmax(combined, self.logit_temperature)
-        expected_score_raw = sum(s * prob for s, prob in score_probs.items())
-        expected_score = round(expected_score_raw, 4)
-        score_variance = max(0.0, sum(((s - expected_score_raw) ** 2) * prob for s, prob in score_probs.items()))
-        score_std = round(math.sqrt(score_variance), 4)
-        score_tokens = [str(s) for s in scores]
-        fwd_has_target = has_any_target_token(top_fwd, score_tokens)
-        rev_has_target = True if top_rev is None else has_any_target_token(top_rev, score_tokens)
-
-        abstained_reason: str | None = None
-        if not fwd_has_target or not rev_has_target:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-            abstained_reason = "unobserved_target_tokens"
-        elif self.max_score_std is not None and score_std > self.max_score_std:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-            abstained_reason = f"score_std_exceeded ({score_std:.4f} > {self.max_score_std:.4f})"
-        elif expected_score >= self.threshold:
-            status = DecisionStatus.PASSED
-            passed = True
-        elif self.fail_threshold is not None and expected_score > self.fail_threshold:
-            status = DecisionStatus.AMBIGUOUS
-            passed = False
-        else:
-            status = DecisionStatus.FAILED
-            passed = False
-
-        latency = (time.perf_counter() - t0) * 1000.0
-        meta: dict[str, Any] = {
-            "expected_score": expected_score,
-            "score_std": score_std,
-            "token_probabilities": {str(k): round(v, 4) for k, v in score_probs.items()},
-        }
-        if abstained_reason is not None:
-            meta["abstained_reason"] = abstained_reason
-        thresh_desc = (
-            f"threshold={self.threshold}, fail_thresh={self.fail_threshold}"
-            if self.fail_threshold is not None
-            else f"threshold={self.threshold}"
-        )
-        reason = f"ScoreGate E[S]={expected_score:.2f} ({thresh_desc})"
-        if abstained_reason is not None:
-            reason += f"; abstained={abstained_reason}"
-
-        trace = LayerTrace(
-            layer_name=self.name,
-            status=status,
-            latency_ms=latency,
-            metadata=meta,
-        )
-        return Verdict(
-            passed=passed,
-            status=status,
-            score=None if abstained_reason == "unobserved_target_tokens" else expected_score,
-            triggered_layer=self.name,
-            total_latency_ms=latency,
-            total_tokens_generated=0,
-            reason=reason,
-            traces=[trace],
-        )
-
-    def _ensure_calibrated(self) -> None:
-        if not self._needs_lazy_calibration or not self.model:
-            return
-        with self._calibration_lock:
-            if not self._needs_lazy_calibration:
-                return
-            if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
-                self._needs_lazy_calibration = False
-                return
-            self.logit_temperature = _lazy_calibrate_sync(self.model, self.backend, binary=False)
-            self._needs_lazy_calibration = False
-
-    async def _aensure_calibrated(self) -> None:
-        if not self._needs_lazy_calibration or not self.model:
-            return
-        if not LogitGateDefaults.auto_calibrate or is_temperature_configured():
-            self._needs_lazy_calibration = False
-            return
-        temp = await _lazy_calibrate_async(self.model, self.backend, binary=False)
-        with self._calibration_lock:
-            self.logit_temperature = temp
-            self._needs_lazy_calibration = False
-
-    def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        from logitgate.cache import lookup_cached_verdict
-
-        self._ensure_calibrated()
-        hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
-        )
-        if hit is not None:
-            return self._handle_failure_snapshot(
-                candidate, hit, _is_cache_hit=True, **kwargs
-            )
-        t0 = time.perf_counter()
-        tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
-        top_k = max(10, 2 * len(tokens))
-        nonce = secrets.token_hex(8)
-        forward, reverse = self._score_prompts(candidate, boundary_nonce=nonce)
-        top_fwd = self.backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
-        top_rev = (
-            self.backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
-            if reverse is not None
-            else None
-        )
-        return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs
-        )
-
-    async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
-        from logitgate.cache import lookup_cached_verdict
-
-        await self._aensure_calibrated()
-        hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
-        )
-        if hit is not None:
-            return self._handle_failure_snapshot(
-                candidate, hit, _is_cache_hit=True, **kwargs
-            )
-        t0 = time.perf_counter()
-        tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
-        top_k = max(10, 2 * len(tokens))
-        nonce = secrets.token_hex(8)
-        forward, reverse = self._score_prompts(candidate, boundary_nonce=nonce)
-        top_rev: TopLogprobs | None = None
-        if reverse is None:
-            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
-        elif _resolve_warm_prefix(self.warm_prefix, self.backend):
-            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
-            top_rev = await self.backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
-        else:
-            top_fwd, top_rev = await asyncio.gather(
-                self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens),
-                self.backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens),
-            )
-        return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs
-        )
+def __getattr__(name: str) -> Any:
+    if name == "ChoiceGate":
+        from logitgate.gates.choice_gate import ChoiceGate
+
+        globals()["ChoiceGate"] = ChoiceGate
+        return ChoiceGate
+    if name == "ScoreGate":
+        from logitgate.gates.score_gate import ScoreGate
+
+        globals()["ScoreGate"] = ScoreGate
+        return ScoreGate
+    if name == "MultiRubricGate":
+        from logitgate.gates.multi_rubric_gate import MultiRubricGate
+
+        globals()["MultiRubricGate"] = MultiRubricGate
+        return MultiRubricGate
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+__all__ = [
+    "ChoiceGate",
+    "LogitGate",
+    "MultiRubricGate",
+    "ScoreGate",
+    "TopLogprobs",
+    "_cal_lock_key",
+    "_ensure_logprobs_present",
+    "_get_async_cal_lock",
+    "_get_sync_cal_lock",
+    "_lazy_calibrate_async",
+    "_lazy_calibrate_sync",
+    "_permuted_key_indices",
+    "_resolve_gate_temperature",
+    "_resolve_logit_temperature",
+    "_resolve_warm_prefix",
+    "_same_nonzero_sign",
+    "_should_lazy_auto_calibrate",
+    "_validate_optional_bool",
+    "_validate_optional_unit_float",
+    "_validate_prob_threshold",
+    "_warn_if_profile_model_mismatch",
+    "resolve_logit_backend",
+]

@@ -48,6 +48,13 @@ def min_samples_per_class(target_risk_alpha: float) -> int:
     return math.ceil((1.0 - a) / a - 1e-9)
 
 
+def _conformal_quantile(scores: list[float], half_alpha: float) -> tuple[float, bool]:
+    """Returns the ⌈(m+1)(1-a)⌉-th order statistic, and whether that rank exists."""
+    m = len(scores)
+    rank = math.ceil((m + 1) * (1.0 - half_alpha) - 1e-9)
+    return scores[max(min(rank, m), 1) - 1], rank <= m
+
+
 @dataclass(frozen=True, slots=True)
 class ConformalCascadeThresholds:
     """Layer-1 accept/reject cutoffs fitted on a labeled holdout set.
@@ -115,6 +122,7 @@ def calibrate_cascade_thresholds(
             f"target_risk_alpha must be strictly between 0.0 and 1.0, got {target_risk_alpha}"
         )
 
+    probs: list[float] = []
     for p in calibrated_probs:
         if isinstance(p, bool):
             raise CalibrationError(
@@ -130,6 +138,7 @@ def calibrate_cascade_thresholds(
             raise CalibrationError(
                 f"calibrated_probs must contain finite probabilities in [0.0, 1.0], got {p}"
             )
+        probs.append(pf)
 
     for y in ground_truth_labels:
         if not isinstance(y, bool) and not (isinstance(y, int) and y in (0, 1)):
@@ -138,9 +147,9 @@ def calibrate_cascade_thresholds(
             )
 
     # For ground truth False (0), high P(Pass) is a false-acceptance risk
-    neg_scores = sorted(float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if not y)
+    neg_scores = sorted(p for p, y in zip(probs, ground_truth_labels, strict=True) if not y)
     # For ground truth True (1), low P(Pass) is a false-rejection risk
-    pos_scores = sorted(1.0 - float(p) for p, y in zip(calibrated_probs, ground_truth_labels) if y)
+    pos_scores = sorted(1.0 - p for p, y in zip(probs, ground_truth_labels, strict=True) if y)
 
     if not neg_scores or not pos_scores:
         raise CalibrationError(
@@ -150,14 +159,8 @@ def calibrate_cascade_thresholds(
     half_alpha = target_risk_alpha / 2.0
     required = min_samples_per_class(target_risk_alpha)
 
-    def _conformal_quantile(scores: list[float]) -> tuple[float, bool]:
-        """Returns the ⌈(m+1)(1-a)⌉-th order statistic, and whether that rank exists."""
-        m = len(scores)
-        rank = math.ceil((m + 1) * (1.0 - half_alpha) - 1e-9)
-        return scores[max(min(rank, m), 1) - 1], rank <= m
-
-    q_accept, accept_ok = _conformal_quantile(neg_scores)
-    q_reject, reject_ok = _conformal_quantile(pos_scores)
+    q_accept, accept_ok = _conformal_quantile(neg_scores, half_alpha)
+    q_reject, reject_ok = _conformal_quantile(pos_scores, half_alpha)
     raw_accept, raw_reject = q_accept, 1.0 - q_reject
 
     tau_accept = _strictly_above4(raw_accept)
@@ -200,7 +203,7 @@ def calibrate_cascade_thresholds(
             stacklevel=2,
         )
 
-    escalated = sum(1 for p in calibrated_probs if tau_reject < p < tau_accept)
+    escalated = sum(1 for p in probs if tau_reject < p < tau_accept)
     return ConformalCascadeThresholds(
         tau_reject=tau_reject,
         tau_accept=tau_accept,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -9,7 +10,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -57,14 +58,10 @@ def _atomic_write_text(path: Path, content: str) -> None:
         os.replace(tmp_path, path)
     except BaseException:
         if fd_owned:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise
 
 
@@ -408,6 +405,50 @@ class VerdictSnapshot(BaseModel):
         gate_type = gate_kwargs.get("gate_type")
         owns_logit_backend = not isinstance(effective_backend, LogitBackend)
 
+        if gate_type == "ASTGate":
+            from logitgate.gates.ast_gate import ASTGate
+
+            ast_allowed = {
+                "syntax",
+                "json_schema",
+                "required_sections",
+                "forbidden_patterns",
+                "required_patterns",
+                "forbidden_imports",
+                "max_length",
+                "min_length",
+                "normalize",
+                "name",
+            }
+            ast_init = {k: v for k, v in gate_kwargs.items() if k in ast_allowed}
+            return ASTGate(**ast_init), False
+
+        profile_spec = gate_kwargs.get("calibration_profile")
+        if profile_spec is None:
+            profile_spec = gate_kwargs.get("profile")
+        reconstructed_profile = None
+        if profile_spec is not None:
+            from logitgate.calibration.profile import CalibrationProfile
+
+            if isinstance(profile_spec, CalibrationProfile):
+                reconstructed_profile = profile_spec
+            elif isinstance(profile_spec, dict):
+                reconstructed_profile = CalibrationProfile.model_validate(profile_spec)
+            elif isinstance(profile_spec, (str, Path)):
+                reconstructed_profile = CalibrationProfile.load(profile_spec)
+
+        bundle_spec = gate_kwargs.get("distillation_bundle")
+        reconstructed_bundle = None
+        if bundle_spec is not None:
+            from logitgate.distill.bundle import DistillationBundle
+
+            if isinstance(bundle_spec, DistillationBundle):
+                reconstructed_bundle = bundle_spec
+            elif isinstance(bundle_spec, dict):
+                reconstructed_bundle = DistillationBundle.model_validate(bundle_spec)
+            elif isinstance(bundle_spec, (str, Path)):
+                reconstructed_bundle = DistillationBundle.load(bundle_spec)
+
         if gate_type == "JudgeGate":
             from logitgate.gates.judge_gate import JudgeGate
 
@@ -445,6 +486,8 @@ class VerdictSnapshot(BaseModel):
                 "name",
             }
             score_init = {k: v for k, v in gate_kwargs.items() if k in score_allowed}
+            if reconstructed_profile is not None:
+                score_init["profile"] = reconstructed_profile
             return (
                 ScoreGate(
                     rubric=self.rubric,
@@ -470,6 +513,8 @@ class VerdictSnapshot(BaseModel):
                 "name",
             }
             choice_init = {k: v for k, v in gate_kwargs.items() if k in choice_allowed}
+            if reconstructed_profile is not None:
+                choice_init["profile"] = reconstructed_profile
             return (
                 ChoiceGate(
                     question=gate_kwargs.get("question") or self.rubric,
@@ -562,6 +607,61 @@ class VerdictSnapshot(BaseModel):
             best_gate._replay_extra_backends = extra_backends  # type: ignore[attr-defined]
             return best_gate, owns_logit_backend
 
+        if gate_type == "Cascade" and isinstance(gate_kwargs.get("layers"), list) and gate_kwargs["layers"]:
+            from logitgate.cascade import Cascade
+
+            layers_cfg = gate_kwargs["layers"]
+            rebuilt_layers: list[Any] = []
+            built_children: list[tuple[Any, bool]] = []
+            try:
+                for layer_cfg in layers_cfg:
+                    if not isinstance(layer_cfg, dict):
+                        continue
+                    c_is_judge = layer_cfg.get("gate_type") == "JudgeGate"
+                    if isinstance(effective_backend, (LogitBackend, GenerativeBackend)) and (
+                        isinstance(effective_backend, GenerativeBackend)
+                        if c_is_judge
+                        else isinstance(effective_backend, LogitBackend)
+                    ):
+                        c_backend = effective_backend
+                        c_model = effective_model
+                    else:
+                        hint = effective_backend if isinstance(effective_backend, str) else None
+                        c_backend, c_model = self._resolve_replay_backend_and_model(
+                            hint, effective_model, layer_cfg, prefer_judge=c_is_judge
+                        )
+                    child_gate, child_owns = self._build_replay_gate(layer_cfg, c_backend, c_model)
+                    built_children.append((child_gate, child_owns))
+                    rebuilt_layers.append(child_gate)
+
+                if not rebuilt_layers:
+                    raise ValueError("Cascade snapshot 'layers' contains no valid gate configs")
+
+                cascade_gate = Cascade(
+                    gates=rebuilt_layers,
+                    rubric=self.rubric,
+                    save_failures=False,
+                )
+            except BaseException:
+                for child, owns_child in reversed(built_children):
+                    if child is not None and owns_child:
+                        c_b = getattr(child, "backend", None)
+                        if c_b is not None and hasattr(c_b, "close"):
+                            c_b.close()
+                raise
+
+            extra_backends = []
+            for child, owns_child in built_children:
+                if child is not None and owns_child:
+                    c_b = getattr(child, "backend", None)
+                    if c_b is not None and c_b not in extra_backends:
+                        extra_backends.append(c_b)
+                    for nested_b in getattr(child, "_replay_extra_backends", ()):
+                        if nested_b not in extra_backends:
+                            extra_backends.append(nested_b)
+            cascade_gate._replay_extra_backends = extra_backends
+            return cascade_gate, owns_logit_backend
+
         allowed_keys = {
             "pass_threshold",
             "fail_threshold",
@@ -574,9 +674,13 @@ class VerdictSnapshot(BaseModel):
             "name",
         }
         init_kwargs = {k: v for k, v in gate_kwargs.items() if k in allowed_keys}
+        if reconstructed_profile is not None:
+            init_kwargs["profile"] = reconstructed_profile
 
         rubrics = gate_kwargs.get("rubrics")
         if isinstance(rubrics, list) and rubrics:
+            if reconstructed_bundle is not None:
+                init_kwargs["distillation_bundle"] = reconstructed_bundle
             return (
                 MultiRubricGate(
                     rubrics=rubrics,
@@ -587,6 +691,9 @@ class VerdictSnapshot(BaseModel):
                 ),
                 owns_logit_backend,
             )
+
+        if reconstructed_bundle is not None:
+            init_kwargs["distillation_bundle"] = reconstructed_bundle
 
         return (
             LogitGate(
@@ -613,17 +720,21 @@ class VerdictSnapshot(BaseModel):
         )
         gate, owns_backend = self._build_replay_gate(gate_kwargs, effective_backend, effective_model)
         try:
-            return gate.evaluate(
-                self.candidate,
-                save_on_fail=False,
-                _suppress_telemetry=True,
-                _bypass_cache=True,
+            return cast(
+                Verdict,
+                gate.evaluate(
+                    self.candidate,
+                    save_on_fail=False,
+                    _suppress_telemetry=True,
+                    _bypass_cache=True,
+                ),
             )
         finally:
-            if owns_backend:
+            if owns_backend and getattr(gate, "backend", None) is not None:
                 gate.backend.close()
             for extra_backend in getattr(gate, "_replay_extra_backends", ()):
-                extra_backend.close()
+                if not (owns_backend and extra_backend is getattr(gate, "backend", None)):
+                    extra_backend.close()
 
     async def areplay(
         self,
@@ -637,17 +748,21 @@ class VerdictSnapshot(BaseModel):
         )
         gate, owns_backend = self._build_replay_gate(gate_kwargs, effective_backend, effective_model)
         try:
-            return await gate.aevaluate(
-                self.candidate,
-                save_on_fail=False,
-                _suppress_telemetry=True,
-                _bypass_cache=True,
+            return cast(
+                Verdict,
+                await gate.aevaluate(
+                    self.candidate,
+                    save_on_fail=False,
+                    _suppress_telemetry=True,
+                    _bypass_cache=True,
+                ),
             )
         finally:
-            if owns_backend:
+            if owns_backend and getattr(gate, "backend", None) is not None:
                 await gate.backend.aclose()
             for extra_backend in getattr(gate, "_replay_extra_backends", ()):
-                await extra_backend.aclose()
+                if not (owns_backend and extra_backend is getattr(gate, "backend", None)):
+                    await extra_backend.aclose()
 
     def _merge_explained_verdict(self, judge: Any, judge_verdict: Verdict) -> Verdict:
         combined_traces = list(self.verdict.traces) + list(judge_verdict.traces)

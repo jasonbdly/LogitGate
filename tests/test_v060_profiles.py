@@ -445,7 +445,7 @@ def test_calibrate_choice_thresholds_guarantees_and_gate_wiring() -> None:
     assert ct.min_confidence <= 0.70
 
     selective_errors = 0
-    for probs, gt in zip(test_p, test_gt):
+    for probs, gt in zip(test_p, test_gt, strict=True):
         best_k, max_p = max(probs.items(), key=lambda kv: kv[1])
         sp = sorted(probs.values(), reverse=True)
         marg = round(sp[0] - sp[1], 4)

@@ -646,5 +646,5 @@ class RollingDriftMonitor(TelemetrySink):
                 controller_to_boost.apply_drift_boost(boost_amount)
             if callback_to_fire is not None and report_to_fire is not None:
                 callback_to_fire(report_to_fire)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _handle_sink_error(exc, self._on_error, "RollingDriftMonitor")

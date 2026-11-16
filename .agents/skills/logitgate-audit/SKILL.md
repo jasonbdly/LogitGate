@@ -54,11 +54,12 @@ When executing a full audit, launch five parallel read-only `research` subagents
 
 ## Track 3: Packaging, CLI, Integrations, & CI Parity
 
-**Scope:** `pyproject.toml`, `.gitlab-ci.yml`, `src/logitgate/cli.py`, `src/logitgate/benchmark.py`, `src/logitgate/integrations/`, `README.md`, `docs/`, `tests/`
+**Scope:** `pyproject.toml`, `.gitlab-ci.yml`, `src/logitgate/cli/`, `src/logitgate/benchmark.py`, `src/logitgate/integrations/`, `README.md`, `docs/`, `tests/`
 
 **Checklist:**
-1. **Minimal Environment Import Isolation:**
-   - Verify `pytest` passes when all optional dependencies (`torch`, `transformers`, `safetensors`, `huggingface_hub`, `llama_cpp`, `deepeval`, `langgraph`) are absent, matching `.gitlab-ci.yml`'s `pip install -e ".[test]"` environment.
+1. **Minimal Environment Import Isolation & Strict Static Analysis:**
+   - Verify `pytest` passes when all optional dependencies (`torch`, `transformers`, `peft`, `safetensors`, `huggingface_hub`, `llama_cpp`, `deepeval`, `langgraph`, `opentelemetry`) are blocked via `sys.meta_path`, matching `.gitlab-ci.yml`'s `pip install -e ".[test]"` environment.
+   - Verify `uvx ruff check src/logitgate tests` (all 13 rule families) and `uv run --with mypy mypy src/logitgate tests` (strict `py310` `disallow_untyped_defs`) pass with zero issues, every module in `src/logitgate/` maintains `>= 93%` `--branch` coverage, and touched modules pass AST mutation auditing (`>= 92%` non-equivalent kill rate).
 2. **CLI Exit Codes, Validation & Output Sanitization:**
    - Verify `logitgate eval`, `explain`, `calibrate`, and `benchmark` honor `--json` (zero extra `stdout` noise) and exit codes (`0` pass, `1` fail/invalid input, `2` backend error).
    - Verify CLI numeric arguments reject `NaN`, `±inf`, and out-of-range values, and terminal output sanitizes ANSI CSI/OSC and C0/C1 control sequences from untrusted prompts/candidates.
@@ -75,7 +76,7 @@ When executing a full audit, launch five parallel read-only `research` subagents
 
 ## Track 4: Adversarial Security, Prompt Injection, & DoS/ReDoS
 
-**Scope:** `src/logitgate/debiasing/inversion.py`, `src/logitgate/gates/ast_gate.py`, `src/logitgate/gates/judge_gate.py`, `src/logitgate/backends/base.py`, `src/logitgate/snapshot.py`, `src/logitgate/cli.py`
+**Scope:** `src/logitgate/debiasing/inversion.py`, `src/logitgate/gates/ast_gate.py`, `src/logitgate/gates/judge_gate.py`, `src/logitgate/backends/base.py`, `src/logitgate/snapshot.py`, `src/logitgate/cli/`
 
 **Checklist:**
 1. **Prompt Injection & Delimiter Spoofing:**

@@ -238,7 +238,7 @@ class DoryForCausalLM(nn.Module):
 
         # Recurrent block (40 layers, looped k times with reinjection)
         state = input_h
-        for loop_idx in range(k):
+        for _ in range(k):
             combined = justnorm(state + input_h)
             h = combined
             for layer in self.layers[n_in : n_in + n_rec]:
@@ -247,7 +247,7 @@ class DoryForCausalLM(nn.Module):
 
         # Output block (16 layers)
         h = state
-        for layer in self.layers[n_in + n_rec:]:
+        for layer in self.layers[n_in + n_rec :]:
             h = layer(h)
 
         # LM Head with learned logit_scale on last token for next-token prediction
@@ -255,7 +255,7 @@ class DoryForCausalLM(nn.Module):
         last_h = h if kwargs.get("return_full_logits") else h[:, -1:, :]
         logits = self.lm_head(last_h)
         logits = logits.float() * (self.logit_scale.float() / self.std)
-        return logits
+        return cast(torch.Tensor, logits)
 
     @torch.no_grad()
     def generate(

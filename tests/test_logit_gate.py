@@ -12,7 +12,7 @@ from logitgate.integrations.deepeval import LogitGateSystemOneModel, NoulQuestio
 from logitgate.models import DecisionStatus
 
 
-def test_logit_gate_threshold_bands():
+def test_logit_gate_threshold_bands() -> None:
     # 1. High confidence Pass (prob = 0.95 >= 0.85)
     backend_pass = StubBackend(default_prob=0.95)
     gate_pass = LogitGate(
@@ -24,6 +24,7 @@ def test_logit_gate_threshold_bands():
     v_pass = gate_pass.evaluate("Safe code")
     assert v_pass.passed is True
     assert v_pass.status == DecisionStatus.PASSED
+    assert v_pass.probability is not None
     assert v_pass.probability >= 0.85
     assert len(backend_pass.prompt_log) == 2  # Symmetric debiasing (Pass 1 and Pass 2)
 
@@ -38,6 +39,7 @@ def test_logit_gate_threshold_bands():
     v_fail = gate_fail.evaluate("Unsafe code")
     assert v_fail.passed is False
     assert v_fail.status == DecisionStatus.FAILED
+    assert v_fail.probability is not None
     assert v_fail.probability <= 0.20
 
     # 3. Ambiguous band (fail_thresh < prob < pass_thresh, e.g. prob = 0.50)
@@ -51,10 +53,11 @@ def test_logit_gate_threshold_bands():
     v_ambiguous = gate_ambiguous.evaluate("Borderline code")
     assert v_ambiguous.passed is False
     assert v_ambiguous.status == DecisionStatus.AMBIGUOUS
+    assert v_ambiguous.probability is not None
     assert 0.20 < v_ambiguous.probability < 0.85
 
 
-def test_choice_gate():
+def test_choice_gate() -> None:
     # StubBackend returning high prob for Option B:
     # Pass 1 (identity): A=Opt0, B=Opt1, C=Opt2 -> Option B is under 'B' (-0.1)
     forward_lps = [
@@ -86,11 +89,12 @@ def test_choice_gate():
     assert verdict.status == DecisionStatus.PASSED
     assert verdict.choice == "B"
     assert "choice_probabilities" in verdict.__dict__ or verdict.choice_probabilities is not None
+    assert verdict.choice_probabilities is not None
     assert verdict.choice_probabilities["B"] > verdict.choice_probabilities["A"]
     assert verdict.choice_probabilities["B"] > verdict.choice_probabilities["C"]
 
 
-def test_score_gate_expected_value():
+def test_score_gate_expected_value() -> None:
     # Discrete distribution: 80% weight on score '4', 20% weight on score '5'
     # E[S] = 4 * 0.8 + 5 * 0.2 = 3.2 + 1.0 = 4.2
     top_lps = [
@@ -113,7 +117,7 @@ def test_score_gate_expected_value():
     assert pytest.approx(verdict.score, abs=0.05) == 4.2
 
 
-def test_ollama_backend_payload_think_suppression():
+def test_ollama_backend_payload_think_suppression() -> None:
     """
     Verifies OllamaBackend constructs query payloads with
     think=False to suppress reasoning tokens on classification calls.
@@ -133,7 +137,7 @@ def test_ollama_backend_payload_think_suppression():
     assert "Do not think or explain" in payload["messages"][0]["content"]
 
 
-def test_logit_gate_batch_evaluate_prefix_cache_sharing():
+def test_logit_gate_batch_evaluate_prefix_cache_sharing() -> None:
     """
     Verifies that evaluate_batch records 6 prompts in StubBackend for 3 rubrics,
     all sharing the exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
@@ -161,7 +165,7 @@ def test_logit_gate_batch_evaluate_prefix_cache_sharing():
 
 
 @pytest.mark.asyncio
-async def test_logit_gate_batch_aevaluate_prefix_cache_sharing():
+async def test_logit_gate_batch_aevaluate_prefix_cache_sharing() -> None:
     """
     Verifies that aevaluate_batch records 6 prompts in StubBackend for 3 rubrics,
     all sharing the exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
@@ -188,7 +192,7 @@ async def test_logit_gate_batch_aevaluate_prefix_cache_sharing():
 
 
 @pytest.mark.asyncio
-async def test_choice_gate_aevaluate_and_temperature():
+async def test_choice_gate_aevaluate_and_temperature() -> None:
     # Pass 1 (identity): Option B is under 'B' (-0.2)
     forward_lps = [
         {"token": "A", "logprob": -2.0},
@@ -216,6 +220,7 @@ async def test_choice_gate_aevaluate_and_temperature():
     assert verdict.passed is True
     assert verdict.status == DecisionStatus.PASSED
     assert verdict.choice == "B"
+    assert verdict.choice_probabilities is not None
     assert verdict.choice_probabilities["B"] > 0.60
 
     # Low temperature = 0.1 (sharpens probabilities towards 1.0)
@@ -231,12 +236,13 @@ async def test_choice_gate_aevaluate_and_temperature():
     )
     verdict_sharp = await gate_sharp.aevaluate("Candidate design doc")
     assert verdict_sharp.choice == "B"
+    assert verdict_sharp.choice_probabilities is not None
     assert verdict_sharp.choice_probabilities["B"] > verdict.choice_probabilities["B"]
     assert verdict_sharp.choice_probabilities["B"] > 0.99
 
 
 @pytest.mark.asyncio
-async def test_score_gate_aevaluate():
+async def test_score_gate_aevaluate() -> None:
     top_lps = [
         {"token": "1", "logprob": -10.0},
         {"token": "2", "logprob": -10.0},
@@ -257,7 +263,7 @@ async def test_score_gate_aevaluate():
     assert pytest.approx(verdict.score, abs=0.05) == 4.3
 
 
-def test_score_gate_symmetric_debiasing_and_temperature():
+def test_score_gate_symmetric_debiasing_and_temperature() -> None:
     # Pass 1: standard scale (1..5) where 5 is highest quality
     top1 = [
         {"token": "1", "logprob": -10.0},
@@ -308,12 +314,14 @@ def test_score_gate_symmetric_debiasing_and_temperature():
         logit_temperature=0.2,
     )
     verdict_cold = gate_cold.evaluate("High quality code")
+    assert verdict_cold.score is not None
+    assert verdict.score is not None
     assert verdict_cold.score > verdict.score
     assert pytest.approx(verdict_cold.score, abs=0.02) == 5.0
 
 
 @pytest.mark.asyncio
-async def test_score_gate_symmetric_debiasing_async():
+async def test_score_gate_symmetric_debiasing_async() -> None:
     top1 = [
         {"token": "1", "logprob": -10.0},
         {"token": "2", "logprob": -10.0},
@@ -346,7 +354,7 @@ async def test_score_gate_symmetric_debiasing_async():
 
 
 @pytest.mark.asyncio
-async def test_ast_gate_aevaluate():
+async def test_ast_gate_aevaluate() -> None:
     gate = ASTGate(syntax=True, forbidden_imports=["os", "subprocess"])
     # 1. Valid code passes
     v_ok = await gate.aevaluate("def add(a: int, b: int) -> int:\n    return a + b")
@@ -357,17 +365,19 @@ async def test_ast_gate_aevaluate():
     v_syntax = await gate.aevaluate("def invalid_syntax(:")
     assert v_syntax.passed is False
     assert v_syntax.status == DecisionStatus.FAILED
+    assert v_syntax.reason is not None
     assert "Syntax error" in v_syntax.reason
 
     # 3. Forbidden import fails
     v_import = await gate.aevaluate("import os\nos.system('echo hi')")
     assert v_import.passed is False
     assert v_import.status == DecisionStatus.FAILED
+    assert v_import.reason is not None
     assert "Forbidden import" in v_import.reason
 
 
 @pytest.mark.asyncio
-async def test_deepeval_system_one_multi_question_batching():
+async def test_deepeval_system_one_multi_question_batching() -> None:
     backend = StubBackend(default_prob=0.90)
     model = LogitGateSystemOneModel(
         model_name="test-model",
@@ -400,7 +410,7 @@ async def test_deepeval_system_one_multi_question_batching():
         assert pref == prefixes[0]
 
 
-def test_logit_gate_telemetry_populated():
+def test_logit_gate_telemetry_populated() -> None:
     # Symmetric LogitGate
     gate_sym = LogitGate(rubric="Test rubric", backend=StubBackend(default_prob=0.88), symmetric_debiasing=True)
     verdict_sym = gate_sym.evaluate("Candidate text")
@@ -419,7 +429,7 @@ def test_logit_gate_telemetry_populated():
     assert trace_asym.shannon_entropy is not None
 
 
-def test_choice_gate_derangement_and_cyclic_cancel_middle_slot_bias():
+def test_choice_gate_derangement_and_cyclic_cancel_middle_slot_bias() -> None:
     """Verifies that odd-K ChoiceGate moves the middle option ('B') so a pure slot-'B' bias does not win."""
     # Suppose true signal favors Option C (+1.5), while A and B have 0.0 signal,
     # AND the model has a +2.0 bias toward picking whichever option sits in the middle slot 'B'.
@@ -454,6 +464,7 @@ def test_choice_gate_derangement_and_cyclic_cancel_middle_slot_bias():
     )
     v_cyclic = gate_cyclic.evaluate("input")
     assert v_cyclic.choice == "C"
+    assert v_cyclic.choice_probabilities is not None
     assert v_cyclic.choice_probabilities["C"] > v_cyclic.choice_probabilities["B"]
     assert v_cyclic.choice_probabilities["B"] == pytest.approx(v_cyclic.choice_probabilities["A"], abs=1e-4)
 
@@ -471,7 +482,7 @@ def test_choice_gate_derangement_and_cyclic_cancel_middle_slot_bias():
     assert v_derange.choice == "C"
 
 
-def test_logit_gate_abstains_when_target_tokens_unobserved_or_max_bias_exceeded():
+def test_logit_gate_abstains_when_target_tokens_unobserved_or_max_bias_exceeded() -> None:
     """LogitGate returns AMBIGUOUS when a pass misses both A and B in top_logprobs or exceeds max_positional_bias."""
     # 1. Pass 1 has 'A', Pass 2 only returns chatty non-target tokens ('The', 'Yes')
     fwd = [{"token": "A", "logprob": -0.01}, {"token": "B", "logprob": -6.0}]

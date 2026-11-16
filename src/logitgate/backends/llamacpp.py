@@ -290,10 +290,8 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             "temperature": 0.0,
             "logprobs": True,
             "top_logprobs": effective_top_k,
+            **{k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS},
         }
-        for k, v in kwargs.items():
-            if k not in EXCLUDED_INTERNAL_KWARGS:
-                call_kwargs[k] = v
         if "logit_bias" not in call_kwargs:
             auto_bias = self._resolve_in_process_logit_bias(allowed_tokens)
             if auto_bias:
@@ -307,12 +305,12 @@ class LlamaCppBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
 
     def _in_process_generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         messages = [{"role": "user", "content": prompt}]
-        call_kwargs: dict[str, Any] = {"temperature": 0.0}
+        call_kwargs: dict[str, Any] = {
+            "temperature": 0.0,
+            **{k: v for k, v in kwargs.items() if k not in EXCLUDED_INTERNAL_KWARGS},
+        }
         if max_tokens is not None:
             call_kwargs["max_tokens"] = max_tokens
-        for k, v in kwargs.items():
-            if k not in EXCLUDED_INTERNAL_KWARGS:
-                call_kwargs[k] = v
         with self._llm_lock:
             res = self.llm.create_chat_completion(
                 messages=messages,

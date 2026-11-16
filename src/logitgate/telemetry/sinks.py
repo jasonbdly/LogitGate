@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import contextlib
 import json
 import math
 import os
@@ -102,10 +103,8 @@ def open_append_nofollow(target: Path) -> IO[str]:
             raise OSError(f"Telemetry path is not a regular file: '{target}'")
         return os.fdopen(fd, "a", encoding="utf-8")
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.close(fd)
-        except OSError:
-            pass
         raise
 
 
@@ -131,10 +130,8 @@ def read_regular_text_nofollow(target: Path, *, max_bytes: int, label: str) -> s
             return handle.read(max_bytes + 1)
     finally:
         if fd >= 0:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
 
 
 def rotate_jsonl_files(target: Path, backup_count: int) -> None:
@@ -155,6 +152,42 @@ def rotate_jsonl_files(target: Path, backup_count: int) -> None:
             os.replace(src, dst)
 
 
+def rotate_jsonl_stream_if_needed(
+    path: Path,
+    handle: IO[str] | None,
+    incoming_bytes: int,
+    max_bytes: int | None,
+    backup_count: int,
+) -> IO[str] | None:
+    """Rotates target file if adding incoming_bytes would exceed max_bytes.
+
+    If rotation occurs and handle is open, handle is closed and None is returned.
+    Otherwise the existing handle is returned untouched.
+    """
+    if max_bytes is None:
+        return handle
+    current_size = 0
+    if handle is not None:
+        handle.flush()
+        try:
+            current_size = os.fstat(handle.fileno()).st_size
+        except OSError:
+            current_size = 0
+    elif path.exists() and not path.is_symlink():
+        try:
+            current_size = path.stat().st_size
+        except OSError:
+            current_size = 0
+    if current_size > 0 and current_size + incoming_bytes > max_bytes:
+        if handle is not None:
+            try:
+                handle.close()
+            finally:
+                handle = None
+        rotate_jsonl_files(path, backup_count)
+    return handle
+
+
 class TelemetrySink(abc.ABC):
     """Abstract base class for structured `LogitGate` telemetry sinks."""
 
@@ -166,7 +199,7 @@ class TelemetrySink(abc.ABC):
         """Async hook; defaults to synchronous `emit` for fast non-blocking sinks."""
         self.emit(record)
 
-    def flush(self) -> None:
+    def flush(self) -> None:  # noqa: B027
         """Flushes any buffered records."""
 
     def close(self) -> None:
@@ -257,27 +290,13 @@ class JsonlTelemetrySink(TelemetrySink):
         return self._handle
 
     def _rotate_if_needed_locked(self, incoming_bytes: int) -> None:
-        if self.max_bytes is None:
-            return
-        current_size = 0
-        if self._handle is not None:
-            self._handle.flush()
-            try:
-                current_size = os.fstat(self._handle.fileno()).st_size
-            except OSError:
-                current_size = 0
-        elif self.path.exists() and not self.path.is_symlink():
-            try:
-                current_size = self.path.stat().st_size
-            except OSError:
-                current_size = 0
-        if current_size > 0 and current_size + incoming_bytes > self.max_bytes:
-            if self._handle is not None:
-                try:
-                    self._handle.close()
-                finally:
-                    self._handle = None
-            rotate_jsonl_files(self.path, self.backup_count)
+        self._handle = rotate_jsonl_stream_if_needed(
+            path=self.path,
+            handle=self._handle,
+            incoming_bytes=incoming_bytes,
+            max_bytes=self.max_bytes,
+            backup_count=self.backup_count,
+        )
 
     def emit(self, record: TelemetryRecord) -> None:
         try:
@@ -299,7 +318,7 @@ class JsonlTelemetrySink(TelemetrySink):
                 if self.fsync:
                     os.fsync(handle.fileno())
                 self._records_written += 1
-        except Exception as exc:  # noqa: BLE001 - user filter_fn or sink I/O routed via on_error
+        except Exception as exc:
             _handle_sink_error(exc, self.on_error, "JsonlTelemetrySink")
 
     def flush(self) -> None:
@@ -407,7 +426,7 @@ class CallbackTelemetrySink(TelemetrySink):
                 max_candidate_chars=self.max_candidate_chars,
             )
             self.callback(prepared)
-        except Exception as exc:  # noqa: BLE001 - arbitrary user callback routed via on_error
+        except Exception as exc:
             _handle_sink_error(exc, self.on_error, "CallbackTelemetrySink")
 
 
@@ -432,7 +451,7 @@ class CompositeTelemetrySink(TelemetrySink):
         for sink in self.sinks:
             try:
                 sink.emit(record)
-            except Exception as exc:  # noqa: BLE001 - isolate sibling sinks before re-raising
+            except Exception as exc:
                 if first_err is None:
                     first_err = exc
         if first_err is not None:
@@ -443,7 +462,7 @@ class CompositeTelemetrySink(TelemetrySink):
         for sink in self.sinks:
             try:
                 await sink.aemit(record)
-            except Exception as exc:  # noqa: BLE001 - isolate sibling sinks before re-raising
+            except Exception as exc:
                 if first_err is None:
                     first_err = exc
         if first_err is not None:

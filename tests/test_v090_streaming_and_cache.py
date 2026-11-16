@@ -262,7 +262,7 @@ def test_stream_guard_async_early_abort_and_aclose() -> None:
         )
         with pytest.raises(StreamAbortedError) as exc_info:
             async for chunk in astream:
-                yielded.append(chunk)
+                yielded.append(chunk)  # noqa: PERF401 - loop preserves yielded items before exception
         assert exc_info.value.chunk_index == 1
         assert len(yielded) == 1
         assert "DROP TABLE" not in yielded[0]["response"]

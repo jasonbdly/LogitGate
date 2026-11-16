@@ -359,8 +359,8 @@ def mcnemar_exact_test(
             f"correct_a and correct_b must have equal length: {len(correct_a)} != {len(correct_b)}"
         )
 
-    a_only = sum(1 for a, b in zip(correct_a, correct_b) if bool(a) and not bool(b))
-    b_only = sum(1 for a, b in zip(correct_a, correct_b) if bool(b) and not bool(a))
+    a_only = sum(1 for a, b in zip(correct_a, correct_b, strict=True) if bool(a) and not bool(b))
+    b_only = sum(1 for a, b in zip(correct_a, correct_b, strict=True) if bool(b) and not bool(a))
     n_disc = a_only + b_only
 
     if n_disc == 0:
@@ -419,18 +419,18 @@ def compute_calibration_metrics(
     n = len(clean_probs)
 
     # 1. Brier score
-    brier = statistics.fmean((p - (1.0 if y else 0.0)) ** 2 for p, y in zip(clean_probs, clean_labels))
+    brier = statistics.fmean((p - (1.0 if y else 0.0)) ** 2 for p, y in zip(clean_probs, clean_labels, strict=True))
 
     # 2. Equal-width ECE
     bin_p: list[list[float]] = [[] for _ in range(n_bins)]
     bin_y: list[list[float]] = [[] for _ in range(n_bins)]
-    for p, y in zip(clean_probs, clean_labels):
+    for p, y in zip(clean_probs, clean_labels, strict=True):
         bin_idx = min(int(p * n_bins), n_bins - 1)
         bin_p[bin_idx].append(p)
         bin_y[bin_idx].append(1.0 if y else 0.0)
 
     ece = 0.0
-    for bp, by in zip(bin_p, bin_y):
+    for bp, by in zip(bin_p, bin_y, strict=True):
         if bp:
             weight = len(bp) / n
             ece += weight * abs(statistics.fmean(bp) - statistics.fmean(by))
@@ -441,7 +441,7 @@ def compute_calibration_metrics(
     if n_pos == 0 or n_neg == 0:
         auroc: float | None = None
     else:
-        paired = sorted(zip(clean_probs, clean_labels), key=lambda xy: xy[0])
+        paired = sorted(zip(clean_probs, clean_labels, strict=True), key=lambda xy: xy[0])
         rank_sum_pos = 0.0
         i = 0
         while i < n:
@@ -456,7 +456,7 @@ def compute_calibration_metrics(
         auroc = u_stat / (n_pos * n_neg)
 
     # 4. AURC (Area Under Selective Risk-Coverage Curve)
-    indexed = list(enumerate(zip(clean_probs, clean_labels)))
+    indexed = list(enumerate(zip(clean_probs, clean_labels, strict=True)))
     indexed.sort(key=lambda x: (-abs(x[1][0] - 0.5), x[0]))
 
     cum_errors = 0
@@ -492,7 +492,7 @@ class ModeStats:
 
     def summary(self) -> dict[str, Any]:
         n = len(self.latencies_ms)
-        decisive = [c for c, amb in zip(self.correct, self.ambiguous) if not amb]
+        decisive = [c for c, amb in zip(self.correct, self.ambiguous, strict=True) if not amb]
         sel_risk = round(1.0 - sum(decisive) / len(decisive), 4) if decisive else 0.0
         cov = round(1.0 - sum(self.ambiguous) / n, 4) if n > 0 else 0.0
         acc_ci = wilson_confidence_interval(sum(self.correct), n) if n > 0 else (0.0, 1.0)
@@ -547,7 +547,7 @@ class BenchmarkReport:
                         continue
                     if len(s.correct) == n_j:
                         acc_m = sum(s.correct) / n_j
-                        diffs = [float(a) - float(b) for a, b in zip(s.correct, judge_stats.correct)]
+                        diffs = [float(a) - float(b) for a, b in zip(s.correct, judge_stats.correct, strict=True)]
                         ci = bootstrap_metric_ci(diffs, n_resamples=1000, confidence=0.95, seed=42)
                         mcnemar = mcnemar_exact_test(s.correct, judge_stats.correct)
                         comparisons[f"{m}_vs_judge"] = {

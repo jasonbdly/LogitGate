@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import math
 import os
@@ -23,6 +24,7 @@ from logitgate.backends.base import (
 from logitgate.calibration.conformal import (
     ConformalCascadeThresholds,
     _ceil4,
+    _conformal_quantile,
     _floor4,
     _strictly_above4,
     _strictly_below4,
@@ -146,7 +148,7 @@ def calibrate_choice_thresholds(
 
     extracted: list[tuple[float, float, bool]] = []
     max_k = 2
-    for probs, gt in zip(choice_probs_list, ground_truth_choices):
+    for probs, gt in zip(choice_probs_list, ground_truth_choices, strict=True):
         if not isinstance(probs, Mapping) or len(probs) < 2:
             raise CalibrationError(
                 "Each entry in choice_probs_list must be a mapping with at least 2 option probabilities."
@@ -305,7 +307,7 @@ def calibrate_score_thresholds(
     bool_labels: list[bool] = []
     min_f = float(min_score)
     max_f = float(max_score)
-    for raw_s, raw_y in zip(expected_scores, ground_truth_labels):
+    for raw_s, raw_y in zip(expected_scores, ground_truth_labels, strict=True):
         if isinstance(raw_s, bool):
             raise CalibrationError(
                 f"expected_scores must contain finite floats in [{min_score}, {max_score}], got {raw_s!r}"
@@ -327,8 +329,8 @@ def calibrate_score_thresholds(
         rounded_scores.append(round(sf, 4))
         bool_labels.append(bool(raw_y))
 
-    neg_scores = sorted(s for s, y in zip(rounded_scores, bool_labels) if not y)
-    pos_losses = sorted(round(max_f - s, 4) for s, y in zip(rounded_scores, bool_labels) if y)
+    neg_scores = sorted(s for s, y in zip(rounded_scores, bool_labels, strict=True) if not y)
+    pos_losses = sorted(round(max_f - s, 4) for s, y in zip(rounded_scores, bool_labels, strict=True) if y)
     if not neg_scores or not pos_losses:
         raise CalibrationError(
             "Calibration set must contain both positive and negative ground truth labels."
@@ -337,13 +339,8 @@ def calibrate_score_thresholds(
     half_alpha = alpha / 2.0
     required = min_samples_per_class(alpha)
 
-    def _conformal_quantile(scores: list[float]) -> tuple[float, bool]:
-        m = len(scores)
-        rank = math.ceil((m + 1) * (1.0 - half_alpha) - 1e-9)
-        return scores[max(min(rank, m), 1) - 1], rank <= m
-
-    q_accept, accept_ok = _conformal_quantile(neg_scores)
-    q_reject, reject_ok = _conformal_quantile(pos_losses)
+    q_accept, accept_ok = _conformal_quantile(neg_scores, half_alpha)
+    q_reject, reject_ok = _conformal_quantile(pos_losses, half_alpha)
     raw_accept = q_accept
     raw_reject = round(max_f - q_reject, 4)
 
@@ -643,14 +640,10 @@ class CalibrationProfile(BaseModel):
                 os.replace(tmp_path, target)
             except BaseException:
                 if fd_owned:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.close(fd)
-                    except OSError:
-                        pass
-                try:
+                with contextlib.suppress(OSError):
                     tmp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
                 raise
         except CalibrationError:
             raise
@@ -837,7 +830,8 @@ def _prepare_calibration_samples(
         except (OSError, ValueError) as exc:
             raise CalibrationError(f"Failed to load calibration dataset '{dataset}': {exc}") from exc
     else:
-        assert samples is not None
+        if samples is None:
+            raise ConfigurationError("Calibration requires either 'dataset' or 'samples'.")
         raw_samples = samples
 
     if not raw_samples:

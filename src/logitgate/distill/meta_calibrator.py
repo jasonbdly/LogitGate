@@ -100,9 +100,11 @@ def _pass_distribution_stats(
     if residual_tail > 1e-12:
         entropy -= residual_tail * math.log(residual_tail)
 
-    target_mass = min(1.0, sum(math.exp(v) for v in target_by_raw.values() if v > -50.0))
+    raw_target = sum(math.exp(v) for v in target_by_raw.values() if v > -50.0)
     if total_obs > 1.0 and total_obs > 0.0:
-        target_mass = min(1.0, target_mass / total_obs)
+        target_mass = max(0.0, min(1.0, raw_target / total_obs))
+    else:
+        target_mass = max(0.0, min(1.0, raw_target))
     non_target_mass = max(0.0, min(1.0, 1.0 - target_mass))
     return entropy, non_target_mass
 
@@ -140,7 +142,7 @@ def extract_logit_features(
 def _solve_linear_system(mat: list[list[float]], rhs: list[float]) -> list[float]:
     """Solves ``mat @ x = rhs`` via Gaussian elimination with partial pivoting."""
     d = len(rhs)
-    a = [row[:] + [rhs[i]] for i, row in enumerate(mat)]
+    a = [[*row, rhs[i]] for i, row in enumerate(mat)]
     for col in range(d):
         pivot = max(range(col, d), key=lambda r: abs(a[r][col]))
         if abs(a[pivot][col]) < 1e-12:
@@ -183,7 +185,7 @@ def _fit_ridge_logistic(
 
     def _loss(params: list[float]) -> float:
         nll = 0.0
-        for x, y in zip(features, labels):
+        for x, y in zip(features, labels, strict=True):
             z = params[0] + sum(params[j + 1] * x[j] for j in range(5))
             # Numerically stable binary cross-entropy: max(z, 0) - z*y + log(1 + exp(-|z|))
             yv = 1.0 if y else 0.0
@@ -196,7 +198,7 @@ def _fit_ridge_logistic(
         grad = [reg[k] * theta[k] for k in range(6)]
         hess = [[(reg[r] if r == c else 0.0) for c in range(6)] for r in range(6)]
 
-        for x, y in zip(features, labels):
+        for x, y in zip(features, labels, strict=True):
             row = (1.0, x[0], x[1], x[2], x[3], x[4])
             z = sum(theta[k] * row[k] for k in range(6))
             p = clamped_sigmoid(z)
@@ -238,8 +240,8 @@ def _fit_ridge_logistic(
 
 
 def _auroc_binary(scores: Sequence[float], labels: Sequence[bool]) -> float:
-    pos = [s for s, y in zip(scores, labels) if y]
-    neg = [s for s, y in zip(scores, labels) if not y]
+    pos = [s for s, y in zip(scores, labels, strict=True) if y]
+    neg = [s for s, y in zip(scores, labels, strict=True) if not y]
     if not pos or not neg:
         return 0.5
     wins = 0.0
@@ -256,7 +258,7 @@ def _brier_score(probs: Sequence[float], labels: Sequence[bool]) -> float:
     if not probs:
         return 0.25
     return round(
-        sum((p - (1.0 if y else 0.0)) ** 2 for p, y in zip(probs, labels)) / float(len(probs)),
+        sum((p - (1.0 if y else 0.0)) ** 2 for p, y in zip(probs, labels, strict=True)) / float(len(probs)),
         4,
     )
 
@@ -359,7 +361,7 @@ class LogitMetaCalibrator(BaseModel):
 
         feat_tuples: list[tuple[float, float, float, float, float]] = []
         bool_labels: list[bool] = []
-        for f, y in zip(features, labels):
+        for f, y in zip(features, labels, strict=True):
             tup = f.as_tuple() if isinstance(f, LogitFeatureVector) else tuple(float(v) for v in f)
             if len(tup) != 5 or any(not math.isfinite(v) for v in tup):
                 raise CalibrationError("All 5 features in each sample must be finite floats.")

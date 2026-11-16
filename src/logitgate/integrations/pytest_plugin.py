@@ -12,24 +12,36 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal
 
 from logitgate.backends.base import LogitBackend
 from logitgate.gates.base import BaseGate
-from logitgate.models import Verdict
+from logitgate.models import DecisionStatus, Verdict
 
 _CHECK_SNAPSHOT_PATHS: list[str] = []
 
 
 def check(
-    rubric: str,
+    rubric: str = "",
     threshold: float | None = None,
     backend: str | LogitBackend | None = None,
     ast_check: bool | Any = False,
     save_snapshot: bool | None = None,
     model: str | None = None,
     normalize: bool | Callable[[Any], Any] = False,
+    *,
+    calibration_profile: Any = None,
+    distillation_bundle: Any = None,
+    choices: Mapping[str, str] | None = None,
+    pass_choices: Sequence[str] | None = None,
+    min_confidence: float | None = None,
+    min_margin: float | None = None,
+    score_range: tuple[int, int] | None = None,
+    score_threshold: float | None = None,
+    rubrics: Sequence[str] | None = None,
+    aggregation: Literal["all", "any", "mean"] = "all",
+    cache: Any = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Asserts that a test function's *return value* satisfies ``rubric``.
 
@@ -49,9 +61,145 @@ def check(
 
     def _gate() -> BaseGate:
         from logitgate.gates.ast_gate import ASTGate
-        from logitgate.gates.logit_gate import LogitGate
+        from logitgate.gates.logit_gate import (
+            ChoiceGate,
+            LogitGate,
+            MultiRubricGate,
+            ScoreGate,
+        )
 
-        gate: BaseGate = LogitGate(rubric=rubric, pass_threshold=threshold, backend=backend, model=model)
+        class _PassChoicesChoiceGate(ChoiceGate):
+            def __init__(self, *args: Any, pass_choices: Sequence[str] | None = None, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.pass_choices = set(pass_choices) if pass_choices is not None else None
+
+            def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+                v = super().evaluate(candidate, **kwargs)
+                if self.pass_choices is not None and v.passed and v.choice not in self.pass_choices:
+                    return v.model_copy(update={
+                        "passed": False,
+                        "status": DecisionStatus.FAILED,
+                        "reason": f"ChoiceGate selected '{v.choice}', not in pass_choices {sorted(self.pass_choices)}",
+                    })
+                return v
+
+            async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
+                v = await super().aevaluate(candidate, **kwargs)
+                if self.pass_choices is not None and v.passed and v.choice not in self.pass_choices:
+                    return v.model_copy(update={
+                        "passed": False,
+                        "status": DecisionStatus.FAILED,
+                        "reason": f"ChoiceGate selected '{v.choice}', not in pass_choices {sorted(self.pass_choices)}",
+                    })
+                return v
+
+        class _AggregatedMultiRubricGate(MultiRubricGate):
+            def __init__(self, rubrics: Sequence[str], aggregation: str = "all", **options: Any) -> None:
+                super().__init__(rubrics=rubrics, **options)
+                self.aggregation = aggregation
+
+            def _aggregate(self, verdicts: Sequence[Verdict], t0: float) -> Verdict:
+                base_v = super()._aggregate(verdicts, t0)
+                if self.aggregation == "all":
+                    return base_v
+                probs = [v.probability for v in verdicts if v.probability is not None]
+                passed_count = sum(v.passed for v in verdicts)
+                total = len(self.rubrics)
+                if self.aggregation == "any":
+                    passed = any(v.passed for v in verdicts)
+                    status = DecisionStatus.PASSED if passed else (
+                        DecisionStatus.AMBIGUOUS if any(v.status == DecisionStatus.AMBIGUOUS for v in verdicts) else DecisionStatus.FAILED
+                    )
+                    prob = max(probs) if probs else base_v.probability
+                    reason = f"{passed_count}/{total} rubrics passed (any passed: {passed})"
+                    return base_v.model_copy(update={
+                        "passed": passed,
+                        "status": status,
+                        "probability": prob,
+                        "reason": reason,
+                    })
+                if self.aggregation == "mean":
+                    mean_prob = sum(probs) / len(probs) if probs else (base_v.probability or 0.0)
+                    pass_thresh = self.pass_threshold
+                    passed = mean_prob >= pass_thresh if pass_thresh is not None else (passed_count > total / 2)
+                    status = DecisionStatus.PASSED if passed else DecisionStatus.FAILED
+                    reason = f"mean probability={mean_prob:.4f} across {total} rubrics (threshold={pass_thresh})"
+                    return base_v.model_copy(update={
+                        "passed": passed,
+                        "status": status,
+                        "probability": round(mean_prob, 4),
+                        "reason": reason,
+                    })
+                return base_v
+
+        gate: BaseGate
+        if choices is not None:
+            if pass_choices is not None:
+                gate = _PassChoicesChoiceGate(
+                    question=rubric,
+                    options=choices,
+                    pass_choices=pass_choices,
+                    backend=backend,
+                    model=model,
+                    min_confidence=min_confidence,
+                    min_margin=min_margin,
+                    profile=calibration_profile,
+                    cache=cache,
+                )
+            else:
+                gate = ChoiceGate(
+                    question=rubric,
+                    options=choices,
+                    backend=backend,
+                    model=model,
+                    min_confidence=min_confidence,
+                    min_margin=min_margin,
+                    profile=calibration_profile,
+                    cache=cache,
+                )
+        elif score_range is not None:
+            eff_thresh = score_threshold if score_threshold is not None else threshold
+            gate = ScoreGate(
+                rubric=rubric,
+                min_score=score_range[0],
+                max_score=score_range[1],
+                threshold=eff_thresh,
+                backend=backend,
+                model=model,
+                profile=calibration_profile,
+                cache=cache,
+            )
+        elif rubrics is not None:
+            gate_opts: dict[str, Any] = {
+                "backend": backend,
+                "model": model,
+                "pass_threshold": threshold,
+                "profile": calibration_profile,
+                "distillation_bundle": distillation_bundle,
+                "cache": cache,
+            }
+            if aggregation != "all":
+                gate = _AggregatedMultiRubricGate(
+                    rubrics=rubrics,
+                    aggregation=aggregation,
+                    **gate_opts,
+                )
+            else:
+                gate = MultiRubricGate(
+                    rubrics=rubrics,
+                    **gate_opts,
+                )
+        else:
+            gate = LogitGate(
+                rubric=rubric,
+                pass_threshold=threshold,
+                backend=backend,
+                model=model,
+                profile=calibration_profile,
+                distillation_bundle=distillation_bundle,
+                cache=cache,
+            )
+
         if ast_check is True:
             return ASTGate(syntax=True, normalize=normalize) >> gate
         if isinstance(ast_check, ASTGate):
@@ -91,7 +239,8 @@ def check(
         if verdict.passed:
             return
         prob = f"{verdict.probability:.4f}" if verdict.probability is not None else "n/a"
-        message = f"LogitGate check failed [{verdict.status.value}, P={prob}]: {rubric}\n  {verdict.reason}"
+        effective_rubric = rubric or (", ".join(rubrics) if rubrics else "Evaluation")
+        message = f"LogitGate check failed [{verdict.status.value}, P={prob}]: {effective_rubric}\n  {verdict.reason}"
         snapshot_path = verdict.traces[-1].metadata.get("snapshot_path") if verdict.traces else None
         if snapshot_path:
             if str(snapshot_path) not in _CHECK_SNAPSHOT_PATHS:
@@ -140,6 +289,7 @@ def check(
                 _raise_if_failed(await gate().aevaluate(res, save_on_fail=_save(), test_name=fn.__name__))
                 return res
 
+            async_wrapper._logitgate_gate = gate  # type: ignore[attr-defined]
             return async_wrapper
 
         @functools.wraps(fn)
@@ -148,7 +298,10 @@ def check(
             _raise_if_failed(gate().evaluate(res, save_on_fail=_save(), test_name=fn.__name__))
             return res
 
+        sync_wrapper._logitgate_gate = gate  # type: ignore[attr-defined]
         return sync_wrapper
+
+    return decorator
 
     return decorator
 

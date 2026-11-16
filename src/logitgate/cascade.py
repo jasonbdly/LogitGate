@@ -3,8 +3,12 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Generator, Sequence
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal, cast
 
+from typing_extensions import Self
+
+from logitgate.calibration.lifecycle import _same_nonzero_sign
 from logitgate.debiasing.permutation import compute_shannon_entropy
 from logitgate.debiasing.softmax import clamped_sigmoid
 from logitgate.exceptions import ConfigurationError
@@ -57,11 +61,6 @@ def _verdict_fields(source: Verdict, **overrides: Any) -> dict[str, Any]:
     }
     fields.update(overrides)
     return fields
-
-
-def _same_nonzero_sign(a: float, b: float) -> bool:
-    """Underflow-safe check that two floats share the same strictly non-zero sign."""
-    return (a > 0.0 and b > 0.0) or (a < 0.0 and b < 0.0)
 
 
 def _select_upstream_logit_trace(upstream: Verdict | None) -> LayerTrace | None:
@@ -194,20 +193,57 @@ class Cascade(BaseGate):
 
     def __init__(
         self,
-        gates: Sequence[BaseGate],
+        gates: Sequence[BaseGate] | None = None,
         name: str = "Cascade",
         *,
+        rubric: str | None = None,
+        backend: Any = None,
+        model: str | None = None,
+        judge_backend: Any = None,
+        judge_model: str | None = None,
+        distillation_bundle: Any = None,
         fuse_logits: bool = True,
         prior_weight: float = 0.30,
         telemetry_sink: Any = None,
         cache: Any = None,
+        save_failures: bool | None = None,
+        **kwargs: Any,
     ) -> None:
         from logitgate.cache import resolve_verdict_cache
         from logitgate.telemetry.sinks import resolve_telemetry_sink
 
-        if not gates:
+        owns_gates = False
+        if gates is None:
+            if rubric is not None:
+                from logitgate.gates.judge_gate import JudgeGate
+                from logitgate.gates.logit_gate import LogitGate
+
+                l1_kw: dict[str, Any] = {
+                    "backend": backend,
+                    "model": model,
+                    "distillation_bundle": distillation_bundle,
+                }
+                for k in ("pass_threshold", "fail_threshold", "logit_temperature", "profile"):
+                    if k in kwargs:
+                        l1_kw[k] = kwargs[k]
+                l1 = LogitGate(rubric=rubric, **l1_kw)
+                l2_kw: dict[str, Any] = {
+                    "backend": judge_backend,
+                    "model": judge_model,
+                }
+                if "trigger" in kwargs:
+                    l2_kw["trigger"] = kwargs["trigger"]
+                l2 = JudgeGate(rubric=rubric, **l2_kw)
+                resolved_gates: list[BaseGate] = [l1, l2]
+                owns_gates = True
+            else:
+                raise ConfigurationError("Cascade requires at least one gate")
+        else:
+            resolved_gates = list(gates)
+
+        if not resolved_gates:
             raise ConfigurationError("Cascade requires at least one gate")
-        if any(not isinstance(g, BaseGate) for g in gates):
+        if any(not isinstance(g, BaseGate) for g in resolved_gates):
             raise ConfigurationError("Cascade gates must all inherit from BaseGate")
         if not isinstance(fuse_logits, bool):
             raise ConfigurationError(f"fuse_logits must be a bool, got {type(fuse_logits).__name__}")
@@ -227,12 +263,220 @@ class Cascade(BaseGate):
             if owns_sink and resolved_sink not in (None, False):
                 resolved_sink.close()  # type: ignore[union-attr]
             raise
-        self.gates = list(gates)
+        self.gates = resolved_gates
         self.name = name
         self.fuse_logits = fuse_logits
         self.prior_weight = pw
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
+        self.save_failures = save_failures
+        self._owns_telemetry_sink = owns_sink
+        self._owns_cache = isinstance(cache, (str, Path)) or hasattr(cache, "__fspath__")
+        self._owns_gates = owns_gates
+        self._closed = False
+        self._replay_extra_backends: list[Any] = []
+        self.rubric = rubric or next(
+            (
+                r
+                for g in self.gates
+                if isinstance(r := (getattr(g, "rubric", None) or getattr(g, "question", None)), str) and r
+            ),
+            None,
+        )
+
+    def close(self) -> None:
+        """Closes owned resources including telemetry sink, cache, and child gates."""
+        if self._closed:
+            return
+        self._closed = True
+        if (
+            self._owns_cache
+            and self.cache is not None
+            and not isinstance(self.cache, bool)
+            and hasattr(self.cache, "close")
+            and callable(self.cache.close)
+        ):
+            self.cache.close()
+        if (
+            self._owns_telemetry_sink
+            and self.telemetry_sink is not None
+            and not isinstance(self.telemetry_sink, bool)
+            and hasattr(self.telemetry_sink, "close")
+            and callable(self.telemetry_sink.close)
+        ):
+            self.telemetry_sink.close()
+        for g in self.gates:
+            if hasattr(g, "close") and callable(g.close):
+                g.close()
+            if self._owns_gates and hasattr(g, "backend"):
+                b = getattr(g, "backend", None)
+                if b is not None and hasattr(b, "close") and callable(b.close):
+                    b.close()
+        for b in getattr(self, "_replay_extra_backends", ()):
+            if hasattr(b, "close") and callable(b.close):
+                b.close()
+
+    async def aclose(self) -> None:
+        """Asynchronously closes owned resources including telemetry sink, cache, and child gates."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._owns_cache and self.cache is not None and not isinstance(self.cache, bool):
+            if hasattr(self.cache, "aclose") and callable(self.cache.aclose):
+                await self.cache.aclose()
+            elif hasattr(self.cache, "close") and callable(self.cache.close):
+                self.cache.close()
+        if self._owns_telemetry_sink and self.telemetry_sink is not None and not isinstance(self.telemetry_sink, bool):
+            if hasattr(self.telemetry_sink, "aclose") and callable(self.telemetry_sink.aclose):
+                await self.telemetry_sink.aclose()
+            elif hasattr(self.telemetry_sink, "close") and callable(self.telemetry_sink.close):
+                self.telemetry_sink.close()
+        for g in self.gates:
+            if hasattr(g, "aclose") and callable(g.aclose):
+                await g.aclose()
+            elif hasattr(g, "close") and callable(g.close):
+                g.close()
+            if self._owns_gates and hasattr(g, "backend"):
+                b = getattr(g, "backend", None)
+                if b is not None:
+                    if hasattr(b, "aclose") and callable(b.aclose):
+                        await b.aclose()
+                    elif hasattr(b, "close") and callable(b.close):
+                        b.close()
+        for b in getattr(self, "_replay_extra_backends", ()):
+            if hasattr(b, "aclose") and callable(b.aclose):
+                await b.aclose()
+            elif hasattr(b, "close") and callable(b.close):
+                b.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        await self.aclose()
+
+    def evaluate_batch(
+        self,
+        candidates: Sequence[Any],
+        *,
+        on_error: Literal["raise", "abstain", "fail"] = "raise",
+        **kwargs: Any,
+    ) -> list[Verdict]:
+        if on_error not in ("raise", "abstain", "fail"):
+            raise ConfigurationError(f"Invalid on_error={on_error!r}: must be 'raise', 'abstain', or 'fail'")
+        results: list[Verdict] = []
+        for c in candidates:
+            try:
+                results.append(self.evaluate(c, **kwargs))
+            except BaseException as exc:
+                if isinstance(exc, Exception) and on_error in ("abstain", "fail"):
+                    status = (
+                        getattr(DecisionStatus, "ABSTAINED", DecisionStatus.AMBIGUOUS)
+                        if on_error == "abstain"
+                        else DecisionStatus.FAILED
+                    )
+                    reason_str = f"{type(exc).__name__}: {exc}"
+                    trace = LayerTrace(
+                        layer_name="Cascade",
+                        status=status,
+                        latency_ms=0.0,
+                        diagnostic_report=reason_str,
+                        metadata={"abstained_reason": reason_str, "error": reason_str},
+                    )
+                    v = Verdict(
+                        passed=False,
+                        status=status,
+                        triggered_layer="Cascade",
+                        total_latency_ms=0.0,
+                        reason=reason_str,
+                        traces=[trace],
+                    )
+                    object.__setattr__(v, "abstained_reason", reason_str)
+                    results.append(v)
+                else:
+                    raise
+        return results
+
+    async def aevaluate_batch(
+        self,
+        candidates: Sequence[Any],
+        *,
+        max_concurrency: int | None = None,
+        on_error: Literal["raise", "abstain", "fail"] = "raise",
+        **kwargs: Any,
+    ) -> list[Verdict]:
+        import asyncio
+
+        if on_error not in ("raise", "abstain", "fail"):
+            raise ConfigurationError(f"Invalid on_error={on_error!r}: must be 'raise', 'abstain', or 'fail'")
+        if max_concurrency is not None and (
+            isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency < 1
+        ):
+            raise ConfigurationError(f"max_concurrency must be an integer >= 1, got {max_concurrency!r}")
+
+        sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+
+        async def _eval_one(c: Any) -> Verdict:
+            async def _run() -> Verdict:
+                return await self.aevaluate(c, **kwargs)
+
+            try:
+                if sem is not None:
+                    async with sem:
+                        return await _run()
+                return await _run()
+            except BaseException as exc:
+                if isinstance(exc, Exception) and on_error in ("abstain", "fail"):
+                    status = (
+                        getattr(DecisionStatus, "ABSTAINED", DecisionStatus.AMBIGUOUS)
+                        if on_error == "abstain"
+                        else DecisionStatus.FAILED
+                    )
+                    reason_str = f"{type(exc).__name__}: {exc}"
+                    trace = LayerTrace(
+                        layer_name="Cascade",
+                        status=status,
+                        latency_ms=0.0,
+                        diagnostic_report=reason_str,
+                        metadata={"abstained_reason": reason_str, "error": reason_str},
+                    )
+                    v = Verdict(
+                        passed=False,
+                        status=status,
+                        triggered_layer="Cascade",
+                        total_latency_ms=0.0,
+                        reason=reason_str,
+                        traces=[trace],
+                    )
+                    object.__setattr__(v, "abstained_reason", reason_str)
+                    return v
+                raise
+
+        return list(await asyncio.gather(*[_eval_one(c) for c in candidates]))
+
+    def replay_config(self) -> dict[str, Any]:
+        layers = [cfg for g in self.gates if (cfg := g.replay_config()) is not None]
+        return {
+            "gate_type": "Cascade",
+            "rubric": self.rubric,
+            "layers": layers,
+        }
 
     def _effective_cache(self) -> Any:
         if self.cache is not None:
@@ -356,7 +600,7 @@ class Cascade(BaseGate):
         try:
             request = next(pipeline)
         except StopIteration as done:  # pragma: no cover - the first gate always runs
-            return done.value
+            return cast(Verdict, done.value)
         while True:
             gate, current_candidate, gate_kwargs = request
             # Evaluate outside the try so a StopIteration leaking from a gate is never
@@ -365,7 +609,7 @@ class Cascade(BaseGate):
             try:
                 request = pipeline.send(verdict)
             except StopIteration as done:
-                return done.value
+                return cast(Verdict, done.value)
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import _resolve_active_cache, lookup_cached_verdict
@@ -387,14 +631,14 @@ class Cascade(BaseGate):
         try:
             request = next(pipeline)
         except StopIteration as done:  # pragma: no cover - the first gate always runs
-            return done.value
+            return cast(Verdict, done.value)
         while True:
             gate, current_candidate, gate_kwargs = request
             verdict = await gate.aevaluate(current_candidate, **gate_kwargs)
             try:
                 request = pipeline.send(verdict)
             except StopIteration as done:
-                return done.value
+                return cast(Verdict, done.value)
 
     def _pipeline(self, candidate: Any, kwargs: dict[str, Any]) -> _Pipeline:
         from logitgate.cache import _resolve_active_cache, store_cached_verdict
@@ -492,7 +736,10 @@ class Cascade(BaseGate):
                 shadow_audited = False
                 audit_sampling_prob = 1.0
                 if not normal_escalate:
-                    assert upstream is not None and upstream_gate is not None
+                    if upstream is None or upstream_gate is None:
+                        raise RuntimeError(
+                            "Internal cascade state invariant violated: expected upstream verdict and gate"
+                        )
                     if is_cascade_audit and upstream_aci is not None and upstream_aci.should_audit_fast_path():
                         shadow_audited = True
                         audit_sampling_prob = float(upstream_aci.audit_sample_rate)
@@ -777,6 +1024,8 @@ class Cascade(BaseGate):
                 if g_save is not None:
                     effective_save = g_save
                     break
+        if effective_save is None and getattr(self, "save_failures", None) is not None:
+            effective_save = self.save_failures
         fallback_rubric = next(
             (
                 r
@@ -785,10 +1034,18 @@ class Cascade(BaseGate):
             ),
             "Cascade evaluation",
         )
+        gate_type = None
+        replayable_layers = [cfg for g in self.gates if (cfg := g.replay_config()) is not None]
+        if len(replayable_layers) >= 2:
+            gate_type = "Cascade"
+            cascade_cfg = self.replay_config()
+            gate_config["gate_type"] = "Cascade"
+            gate_config["layers"] = cascade_cfg.get("layers", [])
         return persist_failure_snapshot(
             verdict,
             candidate=candidate,
             rubric=rubric or fallback_rubric,
+            gate_type=gate_type,
             gate_config=gate_config,
             save_on_fail=effective_save,
             test_name=kwargs.get("test_name"),

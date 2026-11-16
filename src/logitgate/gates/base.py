@@ -2,10 +2,26 @@ from __future__ import annotations
 
 import abc
 import asyncio
-from collections.abc import AsyncIterable, Awaitable, Callable, Iterable, Mapping
+import contextlib
+import sys
+import time
+from collections.abc import (
+    AsyncIterable,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
-from logitgate.models import Verdict
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
+
+from logitgate.exceptions import ConfigurationError
+from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
 if TYPE_CHECKING:
     from logitgate.cascade import Cascade
@@ -14,21 +30,62 @@ if TYPE_CHECKING:
 _T_Stream = TypeVar("_T_Stream")
 
 EscalationPolicy = Literal["on_ambiguous_or_fail", "on_ambiguous_only", "adjudicate", "always"]
-"""When a generative (tier 2) gate runs inside a `Cascade`, relative to the upstream verdict.
-
-- ``on_ambiguous_or_fail``: run on AMBIGUOUS or FAILED upstream. A decisive upstream FAILED
-  is preserved unless ``can_override_fail=True``; the generative layer contributes the diagnostic.
-- ``on_ambiguous_only``: run only on AMBIGUOUS upstream. A decisive FAILED terminates the
-  cascade without paying for generation.
-- ``adjudicate``: run on AMBIGUOUS or FAILED upstream, and allow the generative judge to
-  overturn a Tier-1 false negative (while still fast-pathing Tier-1 passes and never
-  overturning Tier-0 deterministic failures).
-- ``always``: run on every input that reaches it; its verdict is authoritative.
-"""
+BatchErrorPolicy = Literal["raise", "abstain", "fail"]
 
 TIER_DETERMINISTIC = 0
 TIER_LOGIT = 1
 TIER_GENERATIVE = 2
+
+
+def _make_batch_error_verdict(
+    gate: BaseGate,
+    exc: Exception,
+    on_error: BatchErrorPolicy,
+    t0: float,
+) -> Verdict:
+    latency = (time.perf_counter() - t0) * 1000.0
+    err_msg = f"{type(exc).__name__}: {exc}"
+    status = (
+        getattr(DecisionStatus, "ABSTAINED", DecisionStatus.AMBIGUOUS)
+        if on_error == "abstain"
+        else DecisionStatus.FAILED
+    )
+    trace = LayerTrace(
+        layer_name=gate.name,
+        status=status,
+        latency_ms=latency,
+        diagnostic_report=err_msg,
+        failure_code="BATCH_EVAL_ERROR" if on_error == "fail" else None,
+        metadata={"abstained_reason": err_msg} if on_error == "abstain" else {},
+    )
+    verdict = Verdict(
+        status=status,
+        passed=False,
+        probability=0.0 if on_error == "fail" else None,
+        triggered_layer=gate.name,
+        total_latency_ms=latency,
+        total_tokens_generated=0,
+        reason=err_msg,
+        traces=[trace],
+    )
+    if on_error == "abstain":
+        object.__setattr__(verdict, "abstained_reason", err_msg)
+    return verdict
+
+
+def _safe_close(obj: Any) -> None:
+    if hasattr(obj, "close"):
+        with contextlib.suppress(Exception):
+            obj.close()
+
+
+async def _safe_aclose(obj: Any) -> None:
+    if hasattr(obj, "aclose"):
+        with contextlib.suppress(Exception):
+            await obj.aclose()
+    elif hasattr(obj, "close"):
+        with contextlib.suppress(Exception):
+            obj.close()
 
 
 class BaseGate(abc.ABC):
@@ -36,24 +93,6 @@ class BaseGate(abc.ABC):
 
     All gates support composition via the `>>` and `|` operators to construct
     multi-layer decision pipelines (e.g., `ASTGate >> LogitGate >> JudgeGate`).
-
-    Routing traits
-    --------------
-    `Cascade` never inspects concrete gate classes. It routes on three class-level traits,
-    so wrappers, decorators, and third-party gates get the same short-circuiting as the
-    built-ins by declaring them:
-
-    - ``layer_tier``: cost tier. ``0`` = deterministic CPU checks (failures are final; asking
-      an LLM to second-guess a syntax error wastes money), ``1`` = single forward-pass logit
-      reads (failures may be escalated), ``2`` = autoregressive generation (runs only when its
-      ``escalation_policy`` admits the upstream verdict).
-    - ``can_fast_path``: whether a PASSED verdict from this gate is trusted enough to skip an
-      immediately downstream generative gate. Deterministic gates set this to ``False``: a
-      passing schema check says nothing about semantics, so the judge must still run.
-    - ``escalation_policy``: only consulted on tier-2 gates. See `EscalationPolicy`.
-
-    The defaults (tier 1, fast-path enabled) match how `Cascade` has always treated
-    unrecognized gates, so existing custom gates keep their behavior.
     """
 
     name: str = "BaseGate"
@@ -90,13 +129,197 @@ class BaseGate(abc.ABC):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.evaluate(candidate, **kwargs))
 
-    def replay_config(self) -> dict[str, Any] | None:
-        """Returns the gate constructor config needed to replay this gate from a snapshot.
+    def evaluate_batch(
+        self,
+        candidates: Sequence[Any],
+        *,
+        on_error: BatchErrorPolicy = "raise",
+        **kwargs: Any,
+    ) -> list[Verdict]:
+        """Evaluates a batch of candidates synchronously with fault isolation.
 
-        `VerdictSnapshot.replay()` reconstructs `LogitGate`, `MultiRubricGate`, `ChoiceGate`,
-        `ScoreGate`, and `JudgeGate`, so gates supporting faithful reconstruction return a
-        config dict. Everything else returns ``None`` and is recorded in the snapshot by name only.
+        Args:
+            candidates: Sequence of candidate artifacts to evaluate.
+            on_error: Error policy when evaluation of an item raises an exception:
+                - 'raise': propagate the exception immediately.
+                - 'abstain': record an ABSTAINED verdict for that item and continue.
+                - 'fail': record a FAILED verdict for that item and continue.
+            **kwargs: Extra evaluation parameters passed to `evaluate`.
+
+        Returns:
+            List of verdicts in the same order as candidates.
         """
+        if on_error not in ("raise", "abstain", "fail"):
+            raise ConfigurationError(
+                f"on_error must be one of 'raise', 'abstain', or 'fail', got {on_error!r}"
+            )
+        results: list[Verdict] = []
+        for cand in candidates:
+            t0 = time.perf_counter()
+            if on_error == "raise":
+                results.append(self.evaluate(cand, **kwargs))
+            else:
+                try:
+                    results.append(self.evaluate(cand, **kwargs))
+                except Exception as exc:
+                    results.append(_make_batch_error_verdict(self, exc, on_error, t0))
+        return results
+
+    async def aevaluate_batch(
+        self,
+        candidates: Sequence[Any],
+        *,
+        max_concurrency: int | None = None,
+        on_error: BatchErrorPolicy = "raise",
+        **kwargs: Any,
+    ) -> list[Verdict]:
+        """Evaluates a batch of candidates asynchronously with fault isolation and concurrency control.
+
+        Args:
+            candidates: Sequence of candidate artifacts to evaluate.
+            max_concurrency: Maximum number of concurrent evaluation tasks (>= 1 or None).
+            on_error: Error policy when evaluation of an item raises an exception:
+                - 'raise': propagate the exception immediately.
+                - 'abstain': record an ABSTAINED verdict for that item and continue.
+                - 'fail': record a FAILED verdict for that item and continue.
+            **kwargs: Extra evaluation parameters passed to `aevaluate`.
+
+        Returns:
+            List of verdicts in the same order as candidates.
+        """
+        if on_error not in ("raise", "abstain", "fail"):
+            raise ConfigurationError(
+                f"on_error must be one of 'raise', 'abstain', or 'fail', got {on_error!r}"
+            )
+        if (
+            max_concurrency is not None
+            and (
+                isinstance(max_concurrency, bool)
+                or not isinstance(max_concurrency, int)
+                or max_concurrency < 1
+            )
+        ):
+            raise ConfigurationError(
+                f"max_concurrency must be an integer >= 1 or None, got {max_concurrency!r}"
+            )
+        if not candidates:
+            return []
+
+        async def _eval_one(cand: Any) -> Verdict:
+            t0 = time.perf_counter()
+            if on_error == "raise":
+                return await self.aevaluate(cand, **kwargs)
+            try:
+                return await self.aevaluate(cand, **kwargs)
+            except Exception as exc:
+                return _make_batch_error_verdict(self, exc, on_error, t0)
+
+        if max_concurrency is not None:
+            sem = asyncio.Semaphore(max_concurrency)
+
+            async def _sem_eval(cand: Any) -> Verdict:
+                async with sem:
+                    return await _eval_one(cand)
+
+            return list(await asyncio.gather(*[_sem_eval(c) for c in candidates]))
+        return list(await asyncio.gather(*[_eval_one(c) for c in candidates]))
+
+    def close(self) -> None:
+        """Safely close any owned resources (backend, cache, child gates). Idempotent."""
+        if getattr(self, "_is_closed", False):
+            return
+        self._is_closed = True
+
+        # Close child gates if present
+        closed_children: set[int] = set()
+        for child_attr in ("rank_gate", "pre_gate", "post_gate", "_gate"):
+            child = getattr(self, child_attr, None)
+            if child is not None and id(child) not in closed_children:
+                closed_children.add(id(child))
+                _safe_close(child)
+        for child in getattr(self, "gates", ()) or ():
+            if child is not None and id(child) not in closed_children:
+                closed_children.add(id(child))
+                _safe_close(child)
+
+        # Close backend if this gate owns it
+        if getattr(self, "_owns_backend", False):
+            backend = getattr(self, "backend", None)
+            if backend is not None:
+                _safe_close(backend)
+
+        # Close cache if this gate owns it
+        if getattr(self, "_owns_cache", False):
+            cache = getattr(self, "cache", None)
+            if cache is not None:
+                _safe_close(cache)
+
+        # Close telemetry sink if this gate owns it
+        if getattr(self, "_owns_sink", False):
+            sink = getattr(self, "telemetry_sink", None)
+            if sink is not None:
+                _safe_close(sink)
+
+    async def aclose(self) -> None:
+        """Safely and asynchronously close any owned resources. Idempotent."""
+        if getattr(self, "_is_closed", False):
+            return
+        self._is_closed = True
+
+        # Close child gates if present
+        closed_children: set[int] = set()
+        for child_attr in ("rank_gate", "pre_gate", "post_gate", "_gate"):
+            child = getattr(self, child_attr, None)
+            if child is not None and id(child) not in closed_children:
+                closed_children.add(id(child))
+                await _safe_aclose(child)
+        for child in getattr(self, "gates", ()) or ():
+            if child is not None and id(child) not in closed_children:
+                closed_children.add(id(child))
+                await _safe_aclose(child)
+
+        # Close backend if this gate owns it
+        if getattr(self, "_owns_backend", False):
+            backend = getattr(self, "backend", None)
+            if backend is not None:
+                await _safe_aclose(backend)
+
+        # Close cache if this gate owns it
+        if getattr(self, "_owns_cache", False):
+            cache = getattr(self, "cache", None)
+            if cache is not None:
+                await _safe_aclose(cache)
+
+        # Close telemetry sink if this gate owns it
+        if getattr(self, "_owns_sink", False):
+            sink = getattr(self, "telemetry_sink", None)
+            if sink is not None:
+                await _safe_aclose(sink)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        await self.aclose()
+
+    def replay_config(self) -> dict[str, Any] | None:
+        """Returns the gate constructor config needed to replay this gate from a snapshot."""
         return None
 
     def as_conditional_edge(
@@ -160,12 +383,9 @@ class BaseGate(abc.ABC):
         return self.evaluate(candidate, **kwargs)
 
     def __rshift__(self, other: BaseGate) -> Cascade:
-        """Chains this gate with another gate into a cascaded routing pipeline.
-
-        Example:
-            >>> pipeline = ASTGate(syntax=True) >> LogitGate(rubric="Clean code")
-        """
+        """Chains this gate with another gate into a cascaded routing pipeline."""
         from logitgate.cascade import Cascade
+
         if isinstance(self, Cascade) and isinstance(other, Cascade):
             eff_sink = (
                 self.telemetry_sink if self.telemetry_sink is not None else other.telemetry_sink
@@ -181,7 +401,7 @@ class BaseGate(abc.ABC):
             )
         if isinstance(self, Cascade):
             return Cascade(
-                gates=list(self.gates) + [other],
+                gates=[*list(self.gates), other],
                 name=self.name,
                 fuse_logits=self.fuse_logits,
                 prior_weight=self.prior_weight,
@@ -190,7 +410,7 @@ class BaseGate(abc.ABC):
             )
         if isinstance(other, Cascade):
             return Cascade(
-                gates=[self] + list(other.gates),
+                gates=[self, *list(other.gates)],
                 fuse_logits=other.fuse_logits,
                 prior_weight=other.prior_weight,
                 telemetry_sink=other.telemetry_sink,

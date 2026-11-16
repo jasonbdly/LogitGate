@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import math
 import os
@@ -212,10 +213,8 @@ def _write_text_nofollow(path: Path, content: str, *, mode: int = 0o644) -> None
             handle.flush()
     finally:
         if fd >= 0:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
 
 
 def emit_deployment_manifests(
@@ -431,7 +430,7 @@ class HuggingFaceLogitBackend(LogitBackend):
             top_vals, top_indices = torch.topk(log_probs, k=eff_k)
             selected_ids: dict[int, float] = {
                 int(idx_t.item()): float(val_t.item())
-                for val_t, idx_t in zip(top_vals, top_indices)
+                for val_t, idx_t in zip(top_vals, top_indices, strict=True)
             }
             # Ensure surface variants of allowed_tokens are observable even on uncalibrated tiny models.
             if allowed_tokens:
@@ -569,7 +568,7 @@ def train_distillation_lora(
             # Keep tail containing the decision mapping and candidate suffix.
             prompt_ids = prompt_ids[-(cfg.max_seq_len - 1) :]
         target_id = id_a if ex.target_token == "A" else id_b
-        seq_ids = prompt_ids + [target_id]
+        seq_ids = [*prompt_ids, target_id]
         seq_labels = [-100] * len(prompt_ids) + [target_id]
         encoded_samples.append((seq_ids, seq_labels))
 

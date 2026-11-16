@@ -92,7 +92,7 @@ except ImportError:
         pass
 
     class LLMTestCase:  # type: ignore[no-redef]
-        def __init__(self, input: str = "", actual_output: str = "") -> None:
+        def __init__(self, input: str = "", actual_output: str = "") -> None:  # noqa: A002
             self.input = input
             self.actual_output = actual_output
 
@@ -134,16 +134,16 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
             self.model_name = model_name or get_default_model() or "qwen2.5:7b"
             self.backend = OllamaBackend(base_url=api_base, model=self.model_name)
         else:
-            import os
-
             from logitgate.backends.base import resolve_logit_backend
             from logitgate.backends.ollama import OllamaBackend
-            from logitgate.config import LogitGateDefaults, get_default_model
-
-            has_global_backend = (
-                LogitGateDefaults.backend is not None
-                or bool(os.environ.get("LOGITGATE_BACKEND"))
+            from logitgate.config import (
+                get_default_backend,
+                get_default_model,
+                is_backend_implicit,
             )
+
+            global_backend = get_default_backend()
+            has_global_backend = bool(global_backend) and not is_backend_implicit()
             if has_global_backend:
                 self.backend = resolve_logit_backend(None, model=model_name)
                 self.model_name = (
@@ -262,7 +262,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                 save_on_fail=False,
             )
             verdicts = gate.evaluate_batch(state, statements)
-            for q_id, verdict in zip(binary_qids, verdicts):
+            for q_id, verdict in zip(binary_qids, verdicts, strict=True):
                 p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
                 nouls[q_id] = NoulAnswer(probability=round(p, 4))
         elif len(binary_qids) == 1:
@@ -375,7 +375,7 @@ class LogitGateSystemOneModel(DeepEvalBaseSystemOneModel):
                 save_on_fail=False,
             )
             verdicts = await gate.aevaluate_batch(state, statements)
-            for q_id, verdict in zip(binary_qids, verdicts):
+            for q_id, verdict in zip(binary_qids, verdicts, strict=True):
                 p = verdict.probability if verdict.probability is not None else (1.0 if verdict.passed else 0.0)
                 nouls[q_id] = NoulAnswer(probability=round(p, 4))
         elif len(binary_qids) == 1:

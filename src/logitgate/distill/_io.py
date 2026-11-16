@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import stat
@@ -42,10 +43,8 @@ def atomic_write_json_nofollow(
         tmp_path = Path(tmp_name)
         fd_owned = True
         try:
-            try:
+            with contextlib.suppress(AttributeError, OSError):
                 os.fchmod(fd, 0o600)
-            except (AttributeError, OSError):
-                pass
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 fd_owned = False
                 handle.write(payload)
@@ -57,14 +56,10 @@ def atomic_write_json_nofollow(
             os.replace(tmp_path, target)
         except BaseException:
             if fd_owned:
-                try:
+                with contextlib.suppress(OSError):
                     os.close(fd)
-                except OSError:
-                    pass
-            try:
+            with contextlib.suppress(OSError):
                 tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise
     except ConfigurationError:
         raise
@@ -120,10 +115,8 @@ def read_json_object_nofollow(
         ) from exc
     finally:
         if fd >= 0:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
 
     if len(raw.encode("utf-8")) > max_bytes:
         raise ConfigurationError(

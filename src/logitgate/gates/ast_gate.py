@@ -6,6 +6,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -300,8 +301,47 @@ class ASTGate(BaseGate):
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
         self.name = name
+        self._owns_backend = False
+        self._owns_cache = isinstance(cache, (str, Path))
+        self._owns_sink = owns_sink
         self._forbidden_res = [(p, _compile_user_pattern(p)) for p in self.forbidden_patterns or []]
         self._required_res = [(s, _compile_user_pattern(s)) for s in self.required_sections or []]
+
+    def replay_config(self) -> dict[str, Any]:
+        """Returns the gate constructor config needed to replay this gate from a snapshot."""
+        config: dict[str, Any] = {
+            "gate_type": "ASTGate",
+            "name": self.name,
+            "syntax": self.syntax,
+        }
+        effective_schema = None
+        if isinstance(self.json_schema, type) and issubclass(self.json_schema, BaseModel):
+            effective_schema = self.json_schema.model_json_schema()
+        elif isinstance(self.json_schema, dict):
+            effective_schema = self.json_schema
+        elif (pyd_model := getattr(self, "pydantic_model", None)) is not None:
+            effective_schema = pyd_model.model_json_schema()
+
+        if effective_schema is not None:
+            config["json_schema"] = effective_schema
+        if self.required_sections:
+            config["required_sections"] = list(self.required_sections)
+        req_pats = getattr(self, "required_patterns", None)
+        if req_pats:
+            config["required_patterns"] = list(req_pats)
+        if self.forbidden_patterns:
+            config["forbidden_patterns"] = list(self.forbidden_patterns)
+        if self.forbidden_imports:
+            config["forbidden_imports"] = list(self.forbidden_imports)
+        if self.max_length is not None:
+            config["max_length"] = self.max_length
+        if self.min_length is not None:
+            config["min_length"] = self.min_length
+        if isinstance(self.normalize, bool) and self.normalize:
+            config["normalize"] = self.normalize
+        if self.acyclic_dag:
+            config["acyclic_dag"] = self.acyclic_dag
+        return config
 
     def __repr__(self) -> str:
         features = []
@@ -508,7 +548,7 @@ class ASTGate(BaseGate):
             if res is False:
                 return False, f"Validator '{val_name}' rejected artifact", None
             return True, "", None
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:
             return False, f"Validator raised exception: {type(ex).__name__}: {ex}", None
 
     def normalize_input(self, candidate: Any) -> Any:
@@ -596,7 +636,7 @@ class ASTGate(BaseGate):
         if callable(self.normalize):
             try:
                 candidate = self.normalize(candidate)
-            except Exception as ex:  # noqa: BLE001
+            except Exception as ex:
                 return self._fail(
                     f"Normalizer raised exception: {ex}",
                     ASTFailureCode.CUSTOM_VALIDATOR_FAILED,
@@ -806,32 +846,82 @@ class ASTGate(BaseGate):
 
         # 1. Syntax Check
         parsed_ast: ast.AST | None = None
+        is_str_sequence = (
+            isinstance(candidate, (list, tuple))
+            and len(candidate) > 0
+            and all(isinstance(elem, str) for elem in candidate)
+        )
+
         if self.syntax or self.forbidden_imports:
-            try:
-                parsed_ast = ast.parse(candidate_str)
-            except SyntaxError as e:
-                if self.syntax:
-                    err = f"Syntax error at line {e.lineno}, offset {e.offset}: {e.msg}"
-                    return self._fail(
-                        err,
-                        ASTFailureCode.SYNTAX_ERROR,
-                        t0,
-                        {"lineno": e.lineno, "offset": e.offset, "msg": e.msg},
-                        candidate=orig_candidate, call_kwargs=kwargs,
-                    )
-            except (ValueError, RecursionError, MemoryError) as e:
-                if self.syntax:
-                    err = f"Syntax error: {type(e).__name__}: {e}"
-                    return self._fail(
-                        err,
-                        ASTFailureCode.SYNTAX_ERROR,
-                        t0,
-                        {"msg": str(e)},
-                        candidate=orig_candidate, call_kwargs=kwargs,
-                    )
+            if is_str_sequence:
+                for idx, elem in enumerate(candidate):
+                    elem_ast: ast.AST | None = None
+                    try:
+                        elem_ast = ast.parse(elem)
+                    except SyntaxError as e:
+                        if self.syntax:
+                            err = f"Syntax error at line {e.lineno}, offset {e.offset}: {e.msg}"
+                            return self._fail(
+                                err,
+                                ASTFailureCode.SYNTAX_ERROR,
+                                t0,
+                                {"lineno": e.lineno, "offset": e.offset, "msg": e.msg, "index": idx},
+                                candidate=orig_candidate,
+                                call_kwargs=kwargs,
+                            )
+                    except (ValueError, RecursionError, MemoryError) as e:
+                        if self.syntax:
+                            err = f"Syntax error: {type(e).__name__}: {e}"
+                            return self._fail(
+                                err,
+                                ASTFailureCode.SYNTAX_ERROR,
+                                t0,
+                                {"msg": str(e), "index": idx},
+                                candidate=orig_candidate,
+                                call_kwargs=kwargs,
+                            )
+                    if self.forbidden_imports:
+                        elem_imports = self._extract_imports_from_source(elem, parsed_ast=elem_ast)
+                        for imp in sorted(elem_imports):
+                            for forbidden in self.forbidden_imports:
+                                if imp == forbidden or imp.startswith(f"{forbidden}."):
+                                    err = f"Forbidden import detected: '{imp}'"
+                                    return self._fail(
+                                        err,
+                                        ASTFailureCode.FORBIDDEN_IMPORT,
+                                        t0,
+                                        {"forbidden_import": imp, "index": idx},
+                                        candidate=orig_candidate,
+                                        call_kwargs=kwargs,
+                                    )
+            else:
+                try:
+                    parsed_ast = ast.parse(candidate_str)
+                except SyntaxError as e:
+                    if self.syntax:
+                        err = f"Syntax error at line {e.lineno}, offset {e.offset}: {e.msg}"
+                        return self._fail(
+                            err,
+                            ASTFailureCode.SYNTAX_ERROR,
+                            t0,
+                            {"lineno": e.lineno, "offset": e.offset, "msg": e.msg},
+                            candidate=orig_candidate,
+                            call_kwargs=kwargs,
+                        )
+                except (ValueError, RecursionError, MemoryError) as e:
+                    if self.syntax:
+                        err = f"Syntax error: {type(e).__name__}: {e}"
+                        return self._fail(
+                            err,
+                            ASTFailureCode.SYNTAX_ERROR,
+                            t0,
+                            {"msg": str(e)},
+                            candidate=orig_candidate,
+                            call_kwargs=kwargs,
+                        )
 
         # 2. Forbidden Imports
-        if self.forbidden_imports:
+        if self.forbidden_imports and not is_str_sequence:
             found_imports = self._extract_imports_from_source(candidate_str, parsed_ast=parsed_ast)
             if self.normalize is True and raw_text_without_think and raw_text_without_think != candidate_str:
                 for match in _FENCED_BLOCK_RE.finditer(raw_text_without_think):
@@ -848,7 +938,8 @@ class ASTGate(BaseGate):
                             ASTFailureCode.FORBIDDEN_IMPORT,
                             t0,
                             {"forbidden_import": imp},
-                            candidate=orig_candidate, call_kwargs=kwargs,
+                            candidate=orig_candidate,
+                            call_kwargs=kwargs,
                         )
 
         # 3. Forbidden Patterns

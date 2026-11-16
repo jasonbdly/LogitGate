@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -103,7 +104,7 @@ def _callable_fingerprint(fn: Callable[..., Any]) -> dict[str, Any]:
     return {"fn": f"{module}.{qualname}", "repr": repr(fn)[:200]}
 
 
-def _canonicalize_value(val: Any, *, _depth: int = 0) -> Any:
+def _canonicalize_value(val: Any, *, _depth: int = 0) -> dict[str, Any]:
     if _depth > 16:
         return {"t": "depth_capped", "v": repr(val)[:256]}
     if val is None or isinstance(val, bool):
@@ -364,10 +365,8 @@ def _prepare_secure_sqlite_path(raw_path: str | Path) -> Path:
         st_fd = os.fstat(fd)
         if not stat.S_ISREG(st_fd.st_mode):
             raise ConfigurationError(f"VerdictCache target is not a regular file: {path}")
-        try:
+        with contextlib.suppress(OSError):
             os.fchmod(fd, 0o600)
-        except OSError:
-            pass
     finally:
         os.close(fd)
     return path
@@ -486,10 +485,8 @@ class VerdictCache:
         with self._lock:
             self._closed = True
             if self._conn is not None:
-                try:
+                with contextlib.suppress(sqlite3.Error):
                     self._conn.close()
-                except sqlite3.Error:
-                    pass
                 self._conn = None
 
     def compute_key(

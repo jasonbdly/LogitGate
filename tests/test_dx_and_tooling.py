@@ -510,7 +510,7 @@ def test_readme_python_examples_run(clean_config: Any, monkeypatch: pytest.Monke
     for i, block in enumerate(blocks):
         try:
             exec(compile(block, f"README.md[python block {i}]", "exec"), namespace)  # noqa: S102 - trusted repo docs
-        except Exception as exc:  # noqa: BLE001 - surface which block broke
+        except Exception as exc:
             pytest.fail(f"README python block {i} failed: {type(exc).__name__}: {exc}\n---\n{block}")
 
 

@@ -13,7 +13,7 @@ from logitgate.calibration.conformal import (
 from logitgate.exceptions import CalibrationWarning
 
 
-def test_calibrate_cascade_thresholds_guarantees():
+def test_calibrate_cascade_thresholds_guarantees() -> None:
     # 20 samples: 10 positives, 10 negatives
     calibrated_probs = [
         0.05, 0.08, 0.12, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45,  # Negatives (y=False)
@@ -35,7 +35,7 @@ def test_calibrate_cascade_thresholds_guarantees():
     assert 0.0 <= thresholds.empirical_escalation_rate <= 1.0
 
 
-def test_calibrate_cascade_thresholds_validation_errors():
+def test_calibrate_cascade_thresholds_validation_errors() -> None:
     with pytest.raises(ValueError, match="at least 10 samples"):
         calibrate_cascade_thresholds([0.5] * 5, [True] * 5)
 
@@ -46,7 +46,7 @@ def test_calibrate_cascade_thresholds_validation_errors():
         calibrate_cascade_thresholds([0.5] * 12, [True] * 12)
 
 
-def test_conformal_non_crossing_correction():
+def test_conformal_non_crossing_correction() -> None:
     # Ambiguous model where raw conformal thresholds cross (tau_reject >= tau_accept)
     calibrated_probs = [0.4] * 10 + [0.4] * 10
     labels = [False] * 10 + [True] * 10
@@ -64,7 +64,7 @@ def test_conformal_non_crossing_correction():
     assert thresholds.empirical_escalation_rate == 1.0
 
 
-def test_load_calibration_dataset_markdown(tmp_path: Path):
+def test_load_calibration_dataset_markdown(tmp_path: Path) -> None:
     md_content = """# Test Dataset
 | Rubric | Candidate | Ground Truth |
 | :--- | :--- | :--- |
@@ -82,7 +82,7 @@ def test_load_calibration_dataset_markdown(tmp_path: Path):
     assert samples[2] == ("Square of 3 is 9?", "3 * 3 = 9", True)
 
 
-def test_load_calibration_dataset_markdown_sections(tmp_path: Path):
+def test_load_calibration_dataset_markdown_sections(tmp_path: Path) -> None:
     md_path = tmp_path / "sections.md"
     md_path.write_text("""# Epistemic Test Cases
 
@@ -102,7 +102,7 @@ def test_load_calibration_dataset_markdown_sections(tmp_path: Path):
     assert samples[1] == ("Is 2 + 2 = 4?", "2 + 2 = 5", False)
 
 
-def test_load_calibration_dataset_json_and_jsonl(tmp_path: Path):
+def test_load_calibration_dataset_json_and_jsonl(tmp_path: Path) -> None:
     # 1. JSON List
     json_list_path = tmp_path / "data_list.json"
     json_list_path.write_text(json.dumps([
@@ -139,12 +139,12 @@ def test_load_calibration_dataset_json_and_jsonl(tmp_path: Path):
     assert samples_jsonl[1] == ("R2", "Out2", False)
 
 
-def test_load_calibration_dataset_missing_file():
+def test_load_calibration_dataset_missing_file() -> None:
     with pytest.raises(FileNotFoundError):
         load_calibration_dataset("non_existent_file.xyz")
 
 
-def test_load_epistemic_reasoning_test_cases_md():
+def test_load_epistemic_reasoning_test_cases_md() -> None:
     samples = load_calibration_dataset("EPISTEMIC_REASONING_TEST_CASES.md")
     assert len(samples) >= 15
     # Ensure balanced positive and negative ground truths

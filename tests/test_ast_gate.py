@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 from logitgate.gates.ast_gate import ASTFailureCode, ASTGate
 from logitgate.models import DecisionStatus
 
 
-def test_syntax_check():
+def test_syntax_check() -> None:
     gate = ASTGate(syntax=True)
 
     valid_code = "def add(a: int, b: int) -> int:\n    return a + b\n"
@@ -17,10 +19,11 @@ def test_syntax_check():
     v_fail = gate.evaluate(invalid_code)
     assert v_fail.passed is False
     assert v_fail.status == DecisionStatus.FAILED
+    assert v_fail.reason is not None
     assert "Syntax error" in v_fail.reason
 
 
-def test_forbidden_imports():
+def test_forbidden_imports() -> None:
     gate = ASTGate(forbidden_imports=["subprocess", "os.system"])
 
     clean_code = "import math\nfrom typing import List\nx = math.sqrt(4)\n"
@@ -29,16 +32,18 @@ def test_forbidden_imports():
     dirty_code = "import subprocess\nsubprocess.run(['ls'])\n"
     v_fail = gate.evaluate(dirty_code)
     assert v_fail.passed is False
+    assert v_fail.reason is not None
     assert "Forbidden import detected: 'subprocess'" in v_fail.reason
 
     # Test regex fallback for non-parsable or partial snippet
     partial_code = "from subprocess import Popen"
     v_fail_from = gate.evaluate(partial_code)
     assert v_fail_from.passed is False
+    assert v_fail_from.reason is not None
     assert "subprocess" in v_fail_from.reason
 
 
-def test_forbidden_patterns_and_required_sections():
+def test_forbidden_patterns_and_required_sections() -> None:
     gate = ASTGate(
         forbidden_patterns=[r"eval\(.*?\)", r"exec\(.*?\)", r"TODO"],
         required_sections=["## Architecture", "## Security"],
@@ -51,16 +56,18 @@ def test_forbidden_patterns_and_required_sections():
     missing_doc = "## Architecture\nMicroservices"
     v_missing = gate.evaluate(missing_doc)
     assert v_missing.passed is False
+    assert v_missing.reason is not None
     assert "Missing required section: '## Security'" in v_missing.reason
 
     # Forbidden pattern present
     forbidden_doc = "## Architecture\nMicroservices\n\n## Security\nTLS.\n# TODO: fix later"
     v_patt = gate.evaluate(forbidden_doc)
     assert v_patt.passed is False
+    assert v_patt.reason is not None
     assert "Forbidden pattern matched" in v_patt.reason
 
 
-def test_acyclic_dag_check():
+def test_acyclic_dag_check() -> None:
     gate = ASTGate(acyclic_dag=True)
 
     # Valid DAG
@@ -77,6 +84,7 @@ def test_acyclic_dag_check():
     ]
     v_missing = gate.evaluate(missing_dep_tasks)
     assert v_missing.passed is False
+    assert v_missing.reason is not None
     assert "Missing dependency" in v_missing.reason
 
     # Cycle in DAG
@@ -86,16 +94,17 @@ def test_acyclic_dag_check():
     ]
     v_cycle = gate.evaluate(cyclic_tasks)
     assert v_cycle.passed is False
+    assert v_cycle.reason is not None
     assert "Cycle detected" in v_cycle.reason
 
 
-def test_custom_validators():
-    def must_be_even(n: int):
+def test_custom_validators() -> None:
+    def must_be_even(n: int) -> tuple[bool, str]:
         if n % 2 != 0:
             return False, "Number must be even"
         return True, ""
 
-    def must_be_positive(n: int):
+    def must_be_positive(n: int) -> bool:
         return n > 0
 
     gate = ASTGate(validators=[must_be_even, must_be_positive])
@@ -104,13 +113,14 @@ def test_custom_validators():
 
     v_odd = gate.evaluate(3)
     assert v_odd.passed is False
+    assert v_odd.reason is not None
     assert "Number must be even" in v_odd.reason
 
     v_neg = gate.evaluate(-2)
     assert v_neg.passed is False
 
 
-def test_ast_failure_codes():
+def test_ast_failure_codes() -> None:
     gate = ASTGate(syntax=True, name="TestAST")
     verdict = gate.evaluate("def invalid_syntax(:")
     assert verdict.passed is False
@@ -120,21 +130,21 @@ def test_ast_failure_codes():
     assert trace.metadata.get("failure_code") == ASTFailureCode.SYNTAX_ERROR
 
 
-def test_ast_forbidden_import_code():
+def test_ast_forbidden_import_code() -> None:
     gate = ASTGate(forbidden_imports=["os", "sys"])
     verdict = gate.evaluate("import os\nprint(1)")
     assert verdict.passed is False
     assert verdict.traces[0].failure_code == ASTFailureCode.FORBIDDEN_IMPORT
 
 
-def test_ast_json_schema_failure_code():
+def test_ast_json_schema_failure_code() -> None:
     gate = ASTGate(json_schema={"required": ["name", "age"]})
     verdict = gate.evaluate('{"name": "Alice"}')
     assert verdict.passed is False
     assert verdict.traces[0].failure_code == ASTFailureCode.JSON_SCHEMA_VALIDATION_ERROR
 
 
-def test_all_ast_failure_codes():
+def test_all_ast_failure_codes() -> None:
     # 1. Max length
     g_len = ASTGate(max_length=5)
     v_len = g_len.evaluate("123456")
@@ -159,7 +169,7 @@ def test_all_ast_failure_codes():
     assert v_dag.traces[0].failure_code == ASTFailureCode.DAG_CYCLE_DETECTED
 
     # 5. Custom validator
-    def reject_all(x):
+    def reject_all(x: Any) -> tuple[bool, str]:
         return False, "Custom rejected"
 
     g_val = ASTGate(validators=[reject_all])
@@ -167,7 +177,7 @@ def test_all_ast_failure_codes():
     assert v_val.traces[0].failure_code == ASTFailureCode.CUSTOM_VALIDATOR_FAILED
 
 
-def test_byo_positional_validators_and_normalization():
+def test_byo_positional_validators_and_normalization() -> None:
     import ast
 
     from pydantic import BaseModel, TypeAdapter
@@ -214,6 +224,7 @@ def test_byo_positional_validators_and_normalization():
     assert none_gate.evaluate("good input").passed is True
     v_exc = none_gate.evaluate("bad input")
     assert v_exc.passed is False
+    assert v_exc.reason is not None
     assert "ValueError: Contains bad token" in v_exc.reason
 
     # 5. Custom normalize callable
@@ -222,7 +233,7 @@ def test_byo_positional_validators_and_normalization():
     assert normalize_candidate("<think>t</think>```json\n{\"a\": 1}\n```") == '{"a": 1}'
 
 
-def test_ast_edge_cases_relative_imports_empty_dag_and_shorthand_schema():
+def test_ast_edge_cases_relative_imports_empty_dag_and_shorthand_schema() -> None:
     # 1. Relative import `from . import subprocess` caught
     imp_gate = ASTGate(forbidden_imports=["subprocess"])
     assert imp_gate.evaluate("from . import subprocess\n").passed is False
@@ -291,7 +302,13 @@ def test_ast_edge_cases_relative_imports_empty_dag_and_shorthand_schema():
     seen_prompts: list[str] = []
 
     class _RecordingBackend(StubBackend):
-        def query_top_logprobs(self, prompt: str, top_k: int = 10, allowed_tokens=None, **kwargs):
+        def query_top_logprobs(
+            self,
+            prompt: str,
+            top_k: int = 10,
+            allowed_tokens: list[str] | None = None,
+            **kwargs: Any,
+        ) -> list[dict[str, Any]]:
             seen_prompts.append(prompt)
             return super().query_top_logprobs(prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs)
 

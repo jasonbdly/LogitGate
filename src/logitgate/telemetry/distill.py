@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -31,7 +32,7 @@ from logitgate.telemetry.sinks import (
     _validate_target_file_path,
     open_append_nofollow,
     read_regular_text_nofollow,
-    rotate_jsonl_files,
+    rotate_jsonl_stream_if_needed,
 )
 
 DistillationMode = Literal["all_escalations", "discrepancies_only"]
@@ -223,27 +224,13 @@ class DistillationSink(TelemetrySink):
         return self._handle
 
     def _rotate_if_needed_locked(self, incoming_bytes: int) -> None:
-        if self.max_bytes is None:
-            return
-        current_size = 0
-        if self._handle is not None:
-            self._handle.flush()
-            try:
-                current_size = os.fstat(self._handle.fileno()).st_size
-            except OSError:
-                current_size = 0
-        elif self.path.exists() and not self.path.is_symlink():
-            try:
-                current_size = self.path.stat().st_size
-            except OSError:
-                current_size = 0
-        if current_size > 0 and current_size + incoming_bytes > self.max_bytes:
-            if self._handle is not None:
-                try:
-                    self._handle.close()
-                finally:
-                    self._handle = None
-            rotate_jsonl_files(self.path, self.backup_count)
+        self._handle = rotate_jsonl_stream_if_needed(
+            path=self.path,
+            handle=self._handle,
+            incoming_bytes=incoming_bytes,
+            max_bytes=self.max_bytes,
+            backup_count=self.backup_count,
+        )
 
     def emit(self, record: TelemetryRecord) -> None:
         try:
@@ -432,7 +419,7 @@ def export_distillation_dataset(
     source: str | Path | Sequence[DistillationRecord | TelemetryRecord],
     output_path: str | Path,
     *,
-    format: ExportFormat = "sft_jsonl",
+    format: ExportFormat = "sft_jsonl",  # noqa: A002
     include_symmetric_swaps: bool = True,
     dedupe: bool = True,
     discrepancies_only: bool = False,
@@ -589,14 +576,10 @@ def export_distillation_dataset(
         os.replace(tmp_path, target)
     except BaseException:
         if fd_owned:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise
 
     return len(rows)

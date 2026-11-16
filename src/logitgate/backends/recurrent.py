@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import threading
+from collections.abc import Mapping
 from typing import Any
 
 from logitgate.backends.base import (
@@ -176,10 +177,11 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             with no_grad_ctx, self.spillover_guard.guard_forward_pass():
                 outputs = model(**inputs, **call_kwargs)
         if hasattr(outputs, "logits"):
-            if hasattr(outputs.logits, "ndim"):
-                logits = outputs.logits[0, -1, :]
-            else:
-                logits = outputs.logits[0][-1]
+            logits = (
+                outputs.logits[0, -1, :]
+                if hasattr(outputs.logits, "ndim")
+                else outputs.logits[0][-1]
+            )
         elif hasattr(outputs, "ndim"):
             logits = outputs[0, -1, :]
         else:
@@ -227,7 +229,7 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
                 if isinstance(log_probs, torch.Tensor):
                     top_vals, top_indices = torch.topk(log_probs, min(top_k_count, log_probs.size(-1)))
                     seen_indices = set(top_indices.tolist())
-                    for lp, idx in zip(top_vals.tolist(), top_indices.tolist()):
+                    for lp, idx in zip(top_vals.tolist(), top_indices.tolist(), strict=True):
                         token_str = tokenizer.decode([idx])
                         results.append({"token": token_str, "logprob": float(lp)})
 
@@ -287,7 +289,10 @@ class RecurrentPyTorchBackend(LogitBackend, GenerativeBackend):
             target_dev = getattr(model, "device", None) or (self.device if self.device not in ("auto",) else None)
             if hasattr(inputs, "to") and target_dev is not None:
                 inputs = inputs.to(target_dev)
-            if hasattr(inputs, "__getitem__") and "input_ids" in inputs:
+            if (
+                isinstance(inputs, Mapping)
+                or (not isinstance(inputs, (str, bytes)) and hasattr(inputs, "keys") and hasattr(inputs, "__getitem__"))
+            ) and "input_ids" in inputs:
                 input_tensor = inputs["input_ids"]
             else:
                 input_tensor = inputs

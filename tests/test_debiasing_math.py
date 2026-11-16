@@ -21,7 +21,7 @@ from logitgate.debiasing.softmax import extract_token_logprob
 from logitgate.gates.logit_gate import LogitGate
 
 
-def test_symmetric_log_odds_cancels_extreme_bias():
+def test_symmetric_log_odds_cancels_extreme_bias() -> None:
     """
     Proves that combine_symmetric_log_odds cancels out an extreme +5.0 logit bias
     for token 'A' when true signal is +2.0, returning sigma(2.0) ~= 0.8808,
@@ -49,7 +49,7 @@ def test_symmetric_log_odds_cancels_extreme_bias():
     assert naive_avg < 0.60  # Severely degraded to coin flip
 
 
-def test_bounded_floor_missing_token():
+def test_bounded_floor_missing_token() -> None:
     """
     When target token is absent from top_logprobs,
     extract_token_logprob returns a bounded floor based on residual probability
@@ -74,27 +74,21 @@ def test_bounded_floor_missing_token():
     assert extract_token_logprob([], "A") == -10.0
 
 
-def test_fit_calibration_lowers_brier_score():
+def test_fit_calibration_lowers_brier_score() -> None:
     """
     fit_calibration optimizes temperature scaling, lowering
     Brier score on synthetic overconfident predictions.
     """
     # Create synthetic overconfident logits where logits are too large (+- 6.0)
     # causing overconfident probabilities (0.9975 vs true accuracy 0.70)
-    samples = []
-    # Class 1 samples
-    for _ in range(70):
-        samples.append((6.0, 6.0, 1))
-    # Class 0 samples (overconfident mistakes)
-    for _ in range(30):
-        samples.append((6.0, 6.0, 0))
+    samples = [(6.0, 6.0, 1) for _ in range(70)] + [(6.0, 6.0, 0) for _ in range(30)]
 
     calib = fit_calibration(samples)
     assert calib.optimal_temperature > 1.0  # Temperature should increase to soften logits
     assert calib.brier_score_after < calib.brier_score_before
 
 
-def test_compile_binary_prompt_identical_static_prefix():
+def test_compile_binary_prompt_identical_static_prefix() -> None:
     """
     compile_binary_prompt keeps the [EVALUATION RUBRIC] + [CANDIDATE ARTIFACT]
     prefix 100% byte-identical between Pass 1 and Pass 2 for KV-cache reuse.
@@ -120,7 +114,7 @@ def test_compile_binary_prompt_identical_static_prefix():
     assert candidate in prefix1
 
 
-def test_compile_batch_binary_prompt_identical_static_prefix():
+def test_compile_batch_binary_prompt_identical_static_prefix() -> None:
     """
     Verifies that compile_batch_binary_prompt preserves an isolated 100% byte-identical
     [CANDIDATE ARTIFACT] prefix across all 2K passes while maintaining strict rubric isolation.
@@ -163,7 +157,7 @@ def test_compile_batch_binary_prompt_identical_static_prefix():
         compile_batch_binary_prompt(rubrics, candidate, rubric_index=99)
 
 
-def test_batch_evaluate_prompts_byte_identical_prefix_math():
+def test_batch_evaluate_prompts_byte_identical_prefix_math() -> None:
     """
     Verifies that LogitGate.evaluate_batch records 6 prompts in StubBackend
     with exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
@@ -190,7 +184,7 @@ def test_batch_evaluate_prompts_byte_identical_prefix_math():
 
 
 @pytest.mark.asyncio
-async def test_batch_aevaluate_prompts_byte_identical_prefix_math():
+async def test_batch_aevaluate_prompts_byte_identical_prefix_math() -> None:
     """
     Verifies that LogitGate.aevaluate_batch records 6 prompts in StubBackend
     with exact same byte-identical prefix up through [CANDIDATE ARTIFACT].
@@ -216,7 +210,7 @@ async def test_batch_aevaluate_prompts_byte_identical_prefix_math():
     assert candidate in prefixes[0]
 
 
-def test_compile_score_prompt_identical_static_prefix():
+def test_compile_score_prompt_identical_static_prefix() -> None:
     """
     Verifies that compile_score_prompt retains identical prefix between
     normal and inverted scoring passes for KV-cache reuse.
@@ -244,7 +238,7 @@ class _DummyTokenizer:
         return self.vocab_map.get(text, [99999, 99998])
 
 
-def test_surface_token_map_from_tokenizer():
+def test_surface_token_map_from_tokenizer() -> None:
     vocab = {
         "A": [10],
         "a": [11],
@@ -264,13 +258,13 @@ def test_surface_token_map_from_tokenizer():
     assert bias_map == {str(tid): 85 for tid in (10, 11, 12, 13, 20, 21, 22, 23)}
 
 
-def test_surface_token_map_empty_raises():
+def test_surface_token_map_empty_raises() -> None:
     tok = _DummyTokenizer({})
     with pytest.raises(ValueError, match="does not map to any single-token ID"):
         SurfaceTokenMap.from_tokenizer(tok, pos_label="XYZ")
 
 
-def test_marginalize_pole_logprob_tensor_and_fallback():
+def test_marginalize_pole_logprob_tensor_and_fallback() -> None:
     torch = pytest.importorskip("torch")
 
     logits = torch.zeros(30)
@@ -296,7 +290,7 @@ def test_marginalize_pole_logprob_tensor_and_fallback():
     assert pytest.approx(lp_neg_seq, rel=1e-5) == lp_neg
 
 
-def test_compute_symmetric_debiased_verdict_cancels_bias():
+def test_compute_symmetric_debiased_verdict_cancels_bias() -> None:
     torch = pytest.importorskip("torch")
 
     token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
@@ -315,7 +309,7 @@ def test_compute_symmetric_debiased_verdict_cancels_bias():
     assert 0.0 <= res.shannon_entropy <= 1.0
 
 
-def test_missing_token_floor_deduplicates_observed_tokens():
+def test_missing_token_floor_deduplicates_observed_tokens() -> None:
     # Duplicate raw tokens must not inflate sum_observed_prob to >= 1.0
     dup_top_logprobs = [
         {"token": "X", "logprob": math.log(0.60)},
@@ -326,7 +320,7 @@ def test_missing_token_floor_deduplicates_observed_tokens():
     assert pytest.approx(floor_lp, rel=1e-4) == math.log(0.40)
 
 
-def test_fit_calibration_zero_signal_and_warnings():
+def test_fit_calibration_zero_signal_and_warnings() -> None:
     from logitgate.exceptions import CalibrationWarning
 
     # All-zero logits have identical Brier score across all temperatures -> keep T = 1.0
@@ -342,13 +336,13 @@ def test_fit_calibration_zero_signal_and_warnings():
     from logitgate.exceptions import CalibrationError
 
     with pytest.raises(CalibrationError, match="label must be 0 or 1"):
-        fit_calibration([(1.0, 1.0, 0.5)])
+        fit_calibration([(1.0, 1.0, 0.5)])  # type: ignore[list-item]
     with pytest.raises(CalibrationError, match="label must be 0 or 1"):
         fit_calibration([(1.0, 1.0, True)])
 
 
 
-def test_conformal_calibration_crossing_near_one_no_false_saturation():
+def test_conformal_calibration_crossing_near_one_no_false_saturation() -> None:
     import warnings
 
     from logitgate.calibration.conformal import calibrate_cascade_thresholds
@@ -356,7 +350,7 @@ def test_conformal_calibration_crossing_near_one_no_false_saturation():
 
     # High probabilities around 0.96 where midpoint + 0.05 clamps to 1.0 without true saturation
     probs = [0.96] * 40 + [0.96] * 40
-    labels = [1] * 40 + [0] * 40
+    labels = [True] * 40 + [False] * 40
     with warnings.catch_warnings():
         warnings.simplefilter("error", CalibrationWarning)
         res = calibrate_cascade_thresholds(probs, labels, target_risk_alpha=0.05)
@@ -364,7 +358,7 @@ def test_conformal_calibration_crossing_near_one_no_false_saturation():
     assert 0.0 <= res.tau_reject < res.tau_accept <= 1.0
 
 
-def test_saturated_infinite_pole_logprobs_do_not_produce_nan():
+def test_saturated_infinite_pole_logprobs_do_not_produce_nan() -> None:
     token_map = SurfaceTokenMap(positive_token_ids=(0,), negative_token_ids=(1,))
     # Both passes saturate with -inf on the failing pole
     res_agree = compute_symmetric_debiased_verdict(

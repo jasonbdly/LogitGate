@@ -5,7 +5,7 @@ import json
 import math
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -60,7 +60,7 @@ class _RecordingLogitBackend(LogitBackend):
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         self.prompts.append(prompt)
-        return self._responder(prompt, len(self.prompts) - 1, allowed_tokens)
+        return cast(list[dict[str, Any]], self._responder(prompt, len(self.prompts) - 1, allowed_tokens))
 
     async def aquery_top_logprobs(
         self,
@@ -74,7 +74,7 @@ class _RecordingLogitBackend(LogitBackend):
         try:
             await asyncio.sleep(0.01)
             self.prompts.append(prompt)
-            return self._responder(prompt, len(self.prompts) - 1, allowed_tokens)
+            return cast(list[dict[str, Any]], self._responder(prompt, len(self.prompts) - 1, allowed_tokens))
         finally:
             self.async_in_flight -= 1
 
@@ -270,7 +270,7 @@ def test_round_robin_hodge_worth_recovery_and_condorcet_cycle_detection() -> Non
     assert cycle_v.traces[-1].metadata["cycle_residual"] > 1.0
 
 
-@pytest.mark.parametrize("n_cands,exp_rounds", [(3, 2), (4, 2), (5, 3)])
+@pytest.mark.parametrize(("n_cands", "exp_rounds"), [(3, 2), (4, 2), (5, 3)])
 def test_tournament_bracket_seeding_and_odd_byes(n_cands: int, exp_rounds: int) -> None:
     # Candidate "cand_best" is placed at the last index to force advancing through a bye when N is odd
     candidates = [f"cand_{i}" for i in range(n_cands - 1)] + ["cand_best"]

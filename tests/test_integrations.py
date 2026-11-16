@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from logitgate.backends.base import StubBackend
@@ -14,11 +16,11 @@ from logitgate.integrations.langgraph import as_conditional_edge
 from logitgate.integrations.pytest_plugin import check
 
 
-def test_pytest_plugin_check_sync():
+def test_pytest_plugin_check_sync() -> None:
     backend = StubBackend(default_prob=0.95)
 
     @check(rubric="JSON must have status key", threshold=0.85, backend=backend, ast_check=False)
-    def generate_response():
+    def generate_response() -> str:
         return '{"status": "ok"}'
 
     res = generate_response()
@@ -26,18 +28,18 @@ def test_pytest_plugin_check_sync():
 
 
 @pytest.mark.asyncio
-async def test_pytest_plugin_check_async():
+async def test_pytest_plugin_check_async() -> None:
     backend = StubBackend(default_prob=0.95)
 
     @check(rubric="JSON must have status key", threshold=0.85, backend=backend, ast_check=False)
-    async def generate_response():
+    async def generate_response() -> str:
         return '{"status": "ok"}'
 
     res = await generate_response()
     assert res == '{"status": "ok"}'
 
 
-def test_langgraph_conditional_edge():
+def test_langgraph_conditional_edge() -> None:
     backend_pass = StubBackend(default_prob=0.95)
     gate_pass = LogitGate(rubric="Content is safe", backend=backend_pass)
     router_pass = as_conditional_edge(gate_pass, pass_node="publish", fail_node="escalate", state_key="doc")
@@ -53,19 +55,19 @@ def test_langgraph_conditional_edge():
     assert router_fail(state_bad) == "escalate"
 
 
-def test_deepeval_system_one_model():
+def test_deepeval_system_one_model() -> None:
     backend = StubBackend(default_prob=0.92)
     model = LogitGateSystemOneModel(backend=backend)
 
     questions = {
-        "q1": NoulQuestion(instructions="Is artifact compliant?", statement="Is artifact compliant?"),
+        "q1": NoulQuestion(instructions="Is artifact compliant?"),
     }
     answers, _latency = model.decide("Candidate artifact", questions)
     assert "q1" in answers.nouls
     assert answers.nouls["q1"].probability == 0.92
 
 
-def test_deepeval_metric():
+def test_deepeval_metric() -> None:
     backend = StubBackend(default_prob=0.95)
     metric = LogitGateMetric(
         rubric="Candidate meets criteria",
@@ -79,7 +81,7 @@ def test_deepeval_metric():
 
 
 @pytest.mark.asyncio
-async def test_langgraph_choice_gate_node_mapping_and_base_methods():
+async def test_langgraph_choice_gate_node_mapping_and_base_methods() -> None:
     from logitgate import ChoiceGate
     from logitgate.integrations.langgraph import as_async_conditional_edge
 
@@ -105,7 +107,7 @@ async def test_langgraph_choice_gate_node_mapping_and_base_methods():
     assert await async_edge({"query": "Refund my invoice"}) == "billing_node"
 
 
-def test_deepeval_metric_preset_and_empty_actual_output(monkeypatch: pytest.MonkeyPatch):
+def test_deepeval_metric_preset_and_empty_actual_output(monkeypatch: pytest.MonkeyPatch) -> None:
     from logitgate import configure, reset_config
 
     try:
@@ -122,7 +124,7 @@ def test_deepeval_metric_preset_and_empty_actual_output(monkeypatch: pytest.Monk
         reset_config()
 
 
-def test_pytest_check_with_byo_validator_and_normalize():
+def test_pytest_check_with_byo_validator_and_normalize() -> None:
     from pydantic import BaseModel
 
     class ReplySchema(BaseModel):
@@ -131,7 +133,13 @@ def test_pytest_check_with_byo_validator_and_normalize():
     seen_prompts: list[str] = []
 
     class _InspectBackend(StubBackend):
-        def query_top_logprobs(self, prompt: str, top_k: int = 10, allowed_tokens=None, **kwargs):
+        def query_top_logprobs(
+            self,
+            prompt: str,
+            top_k: int = 10,
+            allowed_tokens: list[str] | None = None,
+            **kwargs: Any,
+        ) -> list[dict[str, Any]]:
             seen_prompts.append(prompt)
             return super().query_top_logprobs(prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs)
 
@@ -143,7 +151,7 @@ def test_pytest_check_with_byo_validator_and_normalize():
         ast_check=ReplySchema,
         normalize=True,
     )
-    def generate_fenced_reply():
+    def generate_fenced_reply() -> str:
         return "<think>Format JSON</think>\n```json\n{\"status\": \"ok\"}\n```"
 
     assert "status" in generate_fenced_reply()
@@ -158,7 +166,7 @@ def test_pytest_check_with_byo_validator_and_normalize():
         backend=backend,
         normalize=True,
     )
-    def generate_normalized_only():
+    def generate_normalized_only() -> str:
         return "<think>Internal monologue</think>\nThank you for your patience!"
 
     generate_normalized_only()
@@ -168,7 +176,7 @@ def test_pytest_check_with_byo_validator_and_normalize():
 
 
 @pytest.mark.asyncio
-async def test_deepeval_presets_and_dict_questions():
+async def test_deepeval_presets_and_dict_questions() -> None:
     backend = StubBackend(default_prob=0.88)
     strict_metric = LogitGateMetric(rubric="Strict check", preset="strict", backend=backend)
     assert strict_metric.threshold == pytest.approx(0.90)

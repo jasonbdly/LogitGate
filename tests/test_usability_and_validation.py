@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from logitgate import (
@@ -22,7 +24,7 @@ from logitgate import (
 # 1. Usability & REPL __repr__ Tests
 # ==============================================================================
 
-def test_verdict_repr():
+def test_verdict_repr() -> None:
     """Verdict.__repr__ displays concise, informative attributes for debugging."""
     v_pass = Verdict(
         passed=True,
@@ -63,7 +65,7 @@ def test_verdict_repr():
     assert "layer='ScoreGate'" in r_s
 
 
-def test_layer_trace_repr():
+def test_layer_trace_repr() -> None:
     """LayerTrace.__repr__ displays layer name, status, and latency."""
     trace = LayerTrace(
         layer_name="ASTGate",
@@ -77,7 +79,7 @@ def test_layer_trace_repr():
     assert "latency=0.04ms" in r
 
 
-def test_ast_gate_repr():
+def test_ast_gate_repr() -> None:
     """ASTGate.__repr__ lists configured checks."""
     gate = ASTGate(syntax=True, forbidden_imports=["os", "sys"], acyclic_dag=True)
     r = repr(gate)
@@ -87,7 +89,7 @@ def test_ast_gate_repr():
     assert "acyclic_dag=True" in r
 
 
-def test_logit_gate_repr():
+def test_logit_gate_repr() -> None:
     """LogitGate.__repr__ displays truncated rubric, thresholds, and backend."""
     backend = StubBackend(default_prob=0.95)
     gate = LogitGate(
@@ -103,7 +105,7 @@ def test_logit_gate_repr():
     assert "StubBackend" in r
 
 
-def test_choice_gate_repr():
+def test_choice_gate_repr() -> None:
     """ChoiceGate.__repr__ displays question, option keys, and backend."""
     gate = ChoiceGate(
         question="Select the optimal cache strategy:",
@@ -114,7 +116,7 @@ def test_choice_gate_repr():
     assert "options=['A', 'B', 'C']" in r
 
 
-def test_score_gate_repr():
+def test_score_gate_repr() -> None:
     """ScoreGate.__repr__ displays scale range, threshold, and backend."""
     gate = ScoreGate(
         rubric="Score code clarity from 1 to 5.",
@@ -128,7 +130,7 @@ def test_score_gate_repr():
     assert "threshold=4.0" in r
 
 
-def test_judge_gate_repr():
+def test_judge_gate_repr() -> None:
     """JudgeGate.__repr__ displays trigger policy and backend."""
     gate = JudgeGate(rubric="Critique edge cases", trigger="on_ambiguous_only")
     r = repr(gate)
@@ -136,7 +138,7 @@ def test_judge_gate_repr():
     assert "trigger='on_ambiguous_only'" in r
 
 
-def test_cascade_repr():
+def test_cascade_repr() -> None:
     """Cascade.__repr__ shows operator-chained gate pipeline representation."""
     pipeline = (
         ASTGate(syntax=True)
@@ -150,7 +152,7 @@ def test_cascade_repr():
     assert ">> JudgeGate" in r
 
 
-def test_backends_repr():
+def test_backends_repr() -> None:
     """Backend classes display clean representations."""
     stub = StubBackend(default_prob=0.90)
     assert repr(stub) == "StubBackend(default_prob=0.9)"
@@ -169,7 +171,7 @@ def test_backends_repr():
 # 2. Input Validation Tests
 # ==============================================================================
 
-def test_logit_gate_validation():
+def test_logit_gate_validation() -> None:
     """LogitGate validates rubric, thresholds, and temperature."""
     # Empty rubric
     with pytest.raises(ValueError, match="rubric cannot be empty"):
@@ -200,7 +202,7 @@ def test_logit_gate_validation():
         LogitGate(rubric="Valid", logit_temperature=-1.5)
 
 
-def test_choice_gate_validation():
+def test_choice_gate_validation() -> None:
     """ChoiceGate validates question, options count, and temperature."""
     # Empty question
     with pytest.raises(ValueError, match="question cannot be empty"):
@@ -223,7 +225,7 @@ def test_choice_gate_validation():
         )
 
 
-def test_score_gate_validation():
+def test_score_gate_validation() -> None:
     """ScoreGate validates rubric, min/max score order, and threshold range."""
     # Empty rubric
     with pytest.raises(ValueError, match="rubric cannot be empty"):
@@ -246,11 +248,11 @@ def test_score_gate_validation():
         ScoreGate(rubric="Valid", logit_temperature=-0.5)
 
 
-def test_judge_gate_validation():
+def test_judge_gate_validation() -> None:
     """JudgeGate validates trigger modes and rubric."""
     # Invalid trigger mode
     with pytest.raises(ValueError, match="Invalid trigger 'unsupported_mode'"):
-        JudgeGate(trigger="unsupported_mode")
+        JudgeGate(trigger="unsupported_mode")  # type: ignore[arg-type]
 
     # Whitespace-only rubric
     with pytest.raises(ValueError, match="rubric cannot be empty or whitespace"):
@@ -261,7 +263,7 @@ def test_judge_gate_validation():
     assert gate.rubric is None
 
 
-def test_cascade_validation():
+def test_cascade_validation() -> None:
     """Cascade validates that at least one gate is provided."""
     with pytest.raises(ValueError, match="Cascade requires at least one gate"):
         Cascade(gates=[])
@@ -271,7 +273,7 @@ def test_cascade_validation():
 # 3. Configurability & Hardware Options Tests
 # ==============================================================================
 
-def test_global_configure_and_reset():
+def test_global_configure_and_reset() -> None:
     """logitgate.configure updates global defaults and reset_config restores them."""
     from logitgate import LogitGateDefaults, configure, reset_config
 
@@ -305,7 +307,7 @@ def test_global_configure_and_reset():
     assert LogitGateDefaults.pass_threshold == 0.85
 
 
-def test_env_var_resolution(monkeypatch):
+def test_env_var_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     """LOGITGATE_* environment variables resolve dynamically."""
     from logitgate import LogitGateDefaults, reset_config
 
@@ -324,6 +326,7 @@ def test_env_var_resolution(monkeypatch):
     assert gate.pass_threshold == 0.90
     assert gate.fail_threshold == 0.10
     assert gate.logit_temperature == 1.5
+    assert isinstance(gate.backend, StubBackend)
     assert gate.backend.default_prob == 0.88
 
     judge = JudgeGate(rubric="Judge env test")
@@ -333,7 +336,7 @@ def test_env_var_resolution(monkeypatch):
     reset_config()
 
 
-def test_ollama_backend_options():
+def test_ollama_backend_options() -> None:
     """OllamaBackend accepts and merges custom options and keep_alive."""
     backend = OllamaBackend(
         base_url="http://localhost:11434",
@@ -353,7 +356,7 @@ def test_ollama_backend_options():
 
 
 @pytest.mark.asyncio
-async def test_aevaluate_batch_stampede_prevention():
+async def test_aevaluate_batch_stampede_prevention() -> None:
     """aevaluate_batch warms KV-cache with first prompt before gathering rest."""
     backend = StubBackend(default_prob=0.95)
     gate = LogitGate(rubric="Base rubric", backend=backend)
@@ -367,7 +370,7 @@ async def test_aevaluate_batch_stampede_prevention():
 # 4. Calibration, Presets, ContractGate & max_tokens Tests
 # ==============================================================================
 
-def test_auto_calibrate_backend(tmp_path):
+def test_auto_calibrate_backend(tmp_path: Path) -> None:
     """auto_calibrate_backend fits temperature on micro-calibration dataset and caches it."""
     from logitgate import (
         KNOWN_MODEL_TEMPERATURES,
@@ -386,7 +389,7 @@ def test_auto_calibrate_backend(tmp_path):
     assert get_model_temperature("non-existent-model-xyz") == 1.0
 
 
-def test_logit_gate_presets():
+def test_logit_gate_presets() -> None:
     """LogitGate initializes with threshold & debiasing presets."""
     gate_triage = LogitGate(rubric="Test rubric", preset="fast_triage")
     assert gate_triage.pass_threshold == 0.80
@@ -404,10 +407,10 @@ def test_logit_gate_presets():
     assert gate_bal.symmetric_debiasing is True
 
     with pytest.raises(ValueError, match="Invalid preset"):
-        LogitGate(rubric="Test rubric", preset="invalid_preset")
+        LogitGate(rubric="Test rubric", preset="invalid_preset")  # type: ignore[arg-type]
 
 
-def test_contract_gate_json_schema_and_length():
+def test_contract_gate_json_schema_and_length() -> None:
     """ContractGate validates JSON schema, Pydantic models, and min/max length in 0ms."""
     from pydantic import BaseModel
 
@@ -432,7 +435,7 @@ def test_contract_gate_json_schema_and_length():
     assert gate_len.evaluate("valid length").passed
 
 
-def test_judge_gate_max_tokens():
+def test_judge_gate_max_tokens() -> None:
     """JudgeGate supports max_tokens for concise CPU diagnostics."""
     stub = StubBackend()
     judge = JudgeGate(rubric="Critique", max_tokens=60, backend=stub)
@@ -443,7 +446,7 @@ def test_judge_gate_max_tokens():
     assert v.passed is True
 
 
-def test_judge_gate_parse_verdict_robustness():
+def test_judge_gate_parse_verdict_robustness() -> None:
     """JudgeGate._parse_verdict handles markdown bolding and avoids false failures on negations."""
     judge = JudgeGate(rubric="Critique", backend=StubBackend())
 
@@ -495,7 +498,7 @@ def test_judge_gate_parse_verdict_robustness():
 
 
 
-def test_cli_calibrate(tmp_path, capsys):
+def test_cli_calibrate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """CLI calibrate subcommand runs auto-calibration and writes cache."""
     from logitgate.cli import main
 
@@ -516,7 +519,7 @@ def test_cli_calibrate(tmp_path, capsys):
 # 9. VerdictSnapshot & Failure Reproduction Tests
 # ==============================================================================
 
-def test_verdict_snapshot_save_load(tmp_path):
+def test_verdict_snapshot_save_load(tmp_path: Path) -> None:
     from logitgate.snapshot import VerdictSnapshot
 
     v = Verdict(
@@ -566,7 +569,7 @@ def test_verdict_snapshot_save_load(tmp_path):
     assert loaded_file.rubric == "Must not reveal passwords"
 
 
-def test_verdict_snapshot_replay_and_explain():
+def test_verdict_snapshot_replay_and_explain() -> None:
     from logitgate.snapshot import VerdictSnapshot
 
     v = Verdict(
@@ -615,7 +618,7 @@ def test_verdict_snapshot_replay_and_explain():
     assert explained.total_tokens_generated == 22
 
 
-def test_logit_gate_save_on_fail(tmp_path):
+def test_logit_gate_save_on_fail(tmp_path: Path) -> None:
     from pathlib import Path
 
     from logitgate.snapshot import VerdictSnapshot
@@ -637,7 +640,7 @@ def test_logit_gate_save_on_fail(tmp_path):
     assert snap.candidate == "unsafe payload"
 
 
-def test_logit_gate_configure_save_failures(tmp_path):
+def test_logit_gate_configure_save_failures(tmp_path: Path) -> None:
     from logitgate.config import configure, reset_config
 
     configure(save_failures=True, snapshot_dir=str(tmp_path / "global_fails"))
@@ -651,7 +654,7 @@ def test_logit_gate_configure_save_failures(tmp_path):
         reset_config()
 
 
-def test_cascade_save_on_fail(tmp_path):
+def test_cascade_save_on_fail(tmp_path: Path) -> None:
     from logitgate.snapshot import VerdictSnapshot
 
     cascade = ASTGate(syntax=True) >> LogitGate(
@@ -670,7 +673,7 @@ def test_cascade_save_on_fail(tmp_path):
     assert snap.test_name == "test_cascade_pipeline"
 
 
-def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
+def test_pytest_plugin_check_save_snapshot_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from logitgate.integrations.pytest_plugin import check, pytest_terminal_summary
     from logitgate.snapshot import VerdictSnapshot, reset_snapshot_notices
 
@@ -678,7 +681,7 @@ def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
     reset_snapshot_notices()
 
     @check("Must pass criteria", backend=StubBackend(default_prob=0.05), save_snapshot=True)
-    def my_flaky_test():
+    def my_flaky_test() -> str:
         return "failing candidate"
 
     with pytest.raises(AssertionError) as exc_info:
@@ -708,7 +711,7 @@ def test_pytest_plugin_check_save_snapshot_failure(tmp_path, monkeypatch):
     reset_snapshot_notices()
 
 
-def test_base_gate_callable_and_from_verdict(tmp_path, monkeypatch):
+def test_base_gate_callable_and_from_verdict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """BaseGate.__call__ delegates to evaluate() and VerdictSnapshot.from_verdict works cleanly."""
     from logitgate.cli import main
     from logitgate.snapshot import VerdictSnapshot
@@ -744,7 +747,7 @@ def test_base_gate_callable_and_from_verdict(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_backend_context_managers_and_exceptions():
+async def test_backend_context_managers_and_exceptions() -> None:
     """Verify backend context manager protocols and custom exception hierarchy."""
     from logitgate import (
         BackendError,
@@ -761,10 +764,9 @@ async def test_backend_context_managers_and_exceptions():
     assert issubclass(ContractViolationError, (LogitGateError, ValueError))
     assert issubclass(BackendError, (LogitGateError, RuntimeError))
 
-    try:
+    with pytest.raises(ValueError) as exc_info:
         raise ConfigurationError("Bad configuration")
-    except ValueError as exc:
-        assert str(exc) == "Bad configuration"
+    assert str(exc_info.value) == "Bad configuration"
 
     # 2. Synchronous context manager
     with StubBackend(default_prob=0.92) as backend:
@@ -777,7 +779,7 @@ async def test_backend_context_managers_and_exceptions():
         assert len(res_async) == 2
 
 
-def test_choice_gate_rejects_multi_character_keys():
+def test_choice_gate_rejects_multi_character_keys() -> None:
     """ChoiceGate raises ConfigurationError when option keys are not single characters."""
     from logitgate.exceptions import ConfigurationError
 
@@ -786,7 +788,7 @@ def test_choice_gate_rejects_multi_character_keys():
 
 
 @pytest.mark.asyncio
-async def test_judge_gate_sync_async_verdict_parsing_parity():
+async def test_judge_gate_sync_async_verdict_parsing_parity() -> None:
     """JudgeGate evaluate and aevaluate both parse reason-then-verdict tags identically."""
     text = (
         "1. Requirement A: verified.\n"
@@ -803,20 +805,22 @@ async def test_judge_gate_sync_async_verdict_parsing_parity():
     assert sync_verdict.status == async_verdict.status
 
 
-def test_ast_gate_unescaped_regex_and_dag_malformed_nodes():
+def test_ast_gate_unescaped_regex_and_dag_malformed_nodes() -> None:
     """ASTGate cleanly handles unescaped regex characters and malformed DAG nodes without unhandled crashes."""
     gate = ASTGate(required_sections=["## Section (v2.0)"])
     v = gate.evaluate("Plain text without the section")
     assert v.passed is False
+    assert v.reason is not None
     assert "Missing required section" in v.reason
 
     dag_gate = ASTGate(acyclic_dag=True)
     v_dag = dag_gate.evaluate([{"dependencies": ["a"]}])
     assert v_dag.passed is False
+    assert v_dag.reason is not None
     assert "missing required 'id'" in v_dag.reason
 
 
-def test_logit_gate_single_pass_temperature_scaling():
+def test_logit_gate_single_pass_temperature_scaling() -> None:
     """LogitGate with symmetric_debiasing=False applies logit_temperature."""
     backend = StubBackend(default_prob=0.70)
     gate_t1 = LogitGate("Rule", backend=backend, symmetric_debiasing=False, logit_temperature=1.0)
@@ -829,7 +833,7 @@ def test_logit_gate_single_pass_temperature_scaling():
     assert v_low.probability is not None and v_low.probability > 0.95
 
 
-def test_model_temperature_no_false_reverse_substring_matches():
+def test_model_temperature_no_false_reverse_substring_matches() -> None:
     """get_model_temperature avoids reverse substring matches (e.g. 'a' matching 'gemma4:e4b')."""
     from logitgate.debiasing.permutation import (
         KNOWN_MODEL_TEMPERATURES,
@@ -844,7 +848,7 @@ def test_model_temperature_no_false_reverse_substring_matches():
     assert get_model_temperature("gemma4:e4b") == KNOWN_MODEL_TEMPERATURES["gemma4:e4b"]
 
 
-def test_backend_strips_internal_eval_kwargs():
+def test_backend_strips_internal_eval_kwargs() -> None:
     """OpenAICompatBackend and OllamaBackend sanitize internal LogitGate kwargs before sending HTTP payloads."""
     import json
     from typing import Any
@@ -937,7 +941,7 @@ def test_backend_strips_internal_eval_kwargs():
         assert "rubric_override" not in payload
 
 
-def test_readme_no_raw_mermaid_for_pypi_rendering():
+def test_readme_no_raw_mermaid_for_pypi_rendering() -> None:
     """README.md avoids raw mermaid code blocks so PyPI (pypi.org) renders clean visual box diagrams."""
     from pathlib import Path
 
@@ -954,7 +958,7 @@ def test_readme_no_raw_mermaid_for_pypi_rendering():
     )
 
 
-def test_verdict_snapshot_telemetry_properties():
+def test_verdict_snapshot_telemetry_properties() -> None:
     from logitgate.snapshot import VerdictSnapshot
 
     trace = LayerTrace(
@@ -990,7 +994,7 @@ def test_verdict_snapshot_telemetry_properties():
 
 
 @pytest.mark.asyncio
-async def test_judge_gate_symmetric_cot_debiasing_and_note_sanitization(tmp_path):
+async def test_judge_gate_symmetric_cot_debiasing_and_note_sanitization(tmp_path: Path) -> None:
     """JudgeGate strips verdict tags/refusals into a separate [VERIFICATION NOTES] section and cancels affirmative bias."""
     from logitgate.debiasing.inversion import (
         compile_cot_binary_prompt,

@@ -42,6 +42,9 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         keep_alive: str | int | None = None,
         client: httpx.Client | None = None,
         async_client: httpx.AsyncClient | None = None,
+        max_retries: int = 2,
+        retry_backoff_base: float = 0.25,
+        retry_max_wait: float = 5.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -50,7 +53,13 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         self.options = dict(options) if options else {}
         self.keep_alive = keep_alive
         self._supports_think_param = True
-        self._init_http_clients(client=client, async_client=async_client)
+        self._init_http_clients(
+            client=client,
+            async_client=async_client,
+            max_retries=max_retries,
+            retry_backoff_base=retry_backoff_base,
+            retry_max_wait=retry_max_wait,
+        )
 
     def __repr__(self) -> str:
         return f"OllamaBackend(model='{self.model}', base_url='{self.base_url}')"
@@ -132,11 +141,11 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         payload = self.build_query_payload(
             prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
         )
-        resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
+        resp = self._post_with_retry(f"{self.base_url}/api/chat", json=payload)
         if resp.status_code == 400 and "think" in payload and "think" not in kwargs:
             self._supports_think_param = False
             payload.pop("think", None)
-            resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
+            resp = self._post_with_retry(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
@@ -152,11 +161,11 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         payload = self.build_query_payload(
             prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
         )
-        resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
+        resp = await self._apost_with_retry(f"{self.base_url}/api/chat", json=payload)
         if resp.status_code == 400 and "think" in payload and "think" not in kwargs:
             self._supports_think_param = False
             payload.pop("think", None)
-            resp = await self.async_client.post(f"{self.base_url}/api/chat", json=payload)
+            resp = await self._apost_with_retry(f"{self.base_url}/api/chat", json=payload)
         resp.raise_for_status()
         data = resp.json()
         return self._extract_top_logprobs_from_response(data)
@@ -234,16 +243,16 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/api/chat"
         payload = self.build_generate_payload(prompt, max_tokens, kwargs)
-        resp = self.client.post(url, json=payload)
+        resp = self._post_with_retry(url, json=payload)
         if resp.status_code == 400 and payload["think"]:
             # Non-thinking models (e.g. qwen2.5, llama3) reject think=True with HTTP 400.
             payload["think"] = False
-            resp = self.client.post(url, json=payload)
+            resp = self._post_with_retry(url, json=payload)
         resp.raise_for_status()
         content, tokens = self._parse_chat(resp.json())
         visible_text = strip_reasoning_blocks(content)
         if not visible_text and content and payload["think"]:
-            resp_cont = self.client.post(url, json=self._continuation_payload(payload, prompt, content, max_tokens))
+            resp_cont = self._post_with_retry(url, json=self._continuation_payload(payload, prompt, content, max_tokens))
             resp_cont.raise_for_status()
             content_cont, tokens_cont = self._parse_chat(resp_cont.json())
             return strip_reasoning_blocks(content_cont), tokens + tokens_cont
@@ -253,15 +262,15 @@ class OllamaBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
     async def agenerate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
         url = f"{self.base_url}/api/chat"
         payload = self.build_generate_payload(prompt, max_tokens, kwargs)
-        resp = await self.async_client.post(url, json=payload)
+        resp = await self._apost_with_retry(url, json=payload)
         if resp.status_code == 400 and payload["think"]:
             payload["think"] = False
-            resp = await self.async_client.post(url, json=payload)
+            resp = await self._apost_with_retry(url, json=payload)
         resp.raise_for_status()
         content, tokens = self._parse_chat(resp.json())
         visible_text = strip_reasoning_blocks(content)
         if not visible_text and content and payload["think"]:
-            resp_cont = await self.async_client.post(
+            resp_cont = await self._apost_with_retry(
                 url, json=self._continuation_payload(payload, prompt, content, max_tokens)
             )
             resp_cont.raise_for_status()
