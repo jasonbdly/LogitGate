@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.14.0] - 2026-11-16
+
+### Added
+
+### Changed
+
+### Fixed
+
+---
+
+## [0.14.0] - 2026-11-16
+
+### Added
+- **Configurable HTTP Retry, Exponential Backoff, Jitter, & `Retry-After` (`logitgate.backends`):** Added `max_retries` (default `2`), `retry_backoff_base`, and `retry_max_wait` across `_HTTPClientMixin`, `OllamaBackend`, and `OpenAICompatBackend` (both synchronous and asynchronous paths), retrying transient HTTP `{408, 429, 502, 503, 504}` responses and `httpx.TransportError` failures with `Retry-After` header support while failing immediately on permanent `4xx` responses.
+- **Universal Fault-Isolated Batch Evaluation & Resource Context Managers (`BaseGate` & `Cascade`):** Added `evaluate_batch(..., on_error="raise" | "abstain" | "fail")` and `aevaluate_batch(..., max_concurrency=..., on_error=...)` across `BaseGate` subclasses and `Cascade`, isolating per-item exceptions without swallowing `BaseException` cancellations. Added idempotent `close()` / `aclose()` and `with` / `async with` context managers across `BaseGate` and `Cascade` with strict ownership tracking so caller-injected backends are never closed prematurely.
+- **Cross-Surface Gate, Snapshot Replay, Pytest `@check`, & CLI Parity:** Added `Cascade(rubric=..., distillation_bundle=...)` shorthand support, `ASTGate.replay_config()`, and full multi-layer `Cascade`, `CalibrationProfile`, and `DistillationBundle` reconstruction in `VerdictSnapshot.replay()` and `areplay()`. Extended `@check` (`logitgate.integrations.pytest_plugin`) and `logitgate eval` (`--choice`, `--expected-choice`, `--score-min`, `--score-max`, `--score-threshold`, repeatable `--rubric`, and `--aggregation`) to support `ChoiceGate`, `ScoreGate`, and `MultiRubricGate`.
+- **Exhaustive Unit-Test & Calibrated AST Mutation Safety Net (`tests/`):** Expanded the automated test suite from `405` to `1,157` tests (`97%` global statement + branch coverage across all `70` modules and `99%+` calibrated AST mutation kill score).
+
+### Changed
+- **Modular Gate, CLI, & Lifecycle Architecture (`logitgate.gates`, `logitgate.cli`, `logitgate.calibration.lifecycle`):** Decomposed `logit_gate.py` into focused `logit_gate.py`, `choice_gate.py`, `score_gate.py`, `multi_rubric_gate.py`, and `calibration/lifecycle.py` modules; split `rank_gate.py` into `rank_gate.py` and `best_of_n.py`; decomposed `cli.py` into the `logitgate.cli` package (`parser.py`, `style.py`, and per-command handlers under `cli/commands/`); and deduplicated conformal quantile, sign-agreement, and JSONL file-rotation helpers while preserving 100% backward-compatible imports.
+- **Strict Static Analysis Ratchet (`pyproject.toml`):** Enabled 13 Ruff rule families (`E4`, `E7`, `E9`, `F`, `B`, `SIM`, `UP`, `PT`, `RUF`, `PERF`, `S`, `I`, `A`) and strict Python 3.10 Mypy checking (`check_untyped_defs`, `disallow_untyped_defs`, `warn_return_any`, `no_implicit_optional`, `warn_redundant_casts`) with zero warnings across all `108` source and test files, replacing all bare `assert` statements in `src/logitgate/` with explicit runtime checks.
+
+### Fixed
+- **`ASTGate(syntax=True)` Sequence Validation (`logitgate.gates.ast_gate`):** Fixed a defect where passing a `list` or `tuple` of Python code strings coerced the sequence into a valid Python list literal string, bypassing syntax and forbidden-import checks on individual items.
+- **Five Edge-Case Runtime & Calibration Fixes:** Fixed `RecurrentPyTorchBackend.generate()` raising `RuntimeError` on PyTorch 2.x `torch.Tensor` inputs via `Tensor.__contains__`, `_condense_rationale()` returning `""` instead of `default_msg` on bullet-only critiques, `_pass_distribution_stats()` over-reporting `non_target_mass` when unnormalized observed probabilities summed above `1.0`, `LogitGateSystemOneModel` treating the implicit default stub as an explicit global backend when `api_base` was provided, and `calibrate_cascade_thresholds()` raising `TypeError` on numeric string probabilities.
+
 ## [0.13.0] - 2026-11-15
 
 ### Added
