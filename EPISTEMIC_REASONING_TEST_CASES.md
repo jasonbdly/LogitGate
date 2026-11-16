@@ -1,4 +1,7 @@
-# Epistemic & Operational Calibration Cases (`N = 80`: `40` PASS / `40` FAIL)
+# Epistemic Reasoning Test Cases (`N = 80`: `40` PASS / `40` FAIL)
+
+> Note: This 80-item Markdown file is the human-readable Split-A calibration/distillation source corresponding to `benchmarks/data/cal_distill_80.json`.
+> It must never be used simultaneously as a held-out test set against `cal_distill_80.json` or related calibration splits.
 
 Length-balanced contrastive calibration dataset (`40` positive and `40` negative cases across software correctness, database/schema invariants, grounded summarization, and enterprise operations) satisfying exact finite-sample split-conformal risk guarantees down to `alpha = 0.05` (`min_samples_per_class(0.05) = 39 <= 40`):
 

@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
+import random
 import statistics
 import sys
 import time
@@ -235,9 +237,243 @@ class _MeteredGenerativeBackend(GenerativeBackend):
 
 def _percentile(values: Sequence[float], pct: float) -> float:
     """Nearest-rank percentile; well-defined for the small samples benchmarks produce."""
+    if not values:
+        return 0.0
     ordered = sorted(values)
     rank = max(1, round(pct / 100.0 * len(ordered)))
     return ordered[min(rank, len(ordered)) - 1]
+
+
+def wilson_confidence_interval(
+    successes: int,
+    total: int,
+    confidence: float = 0.95,
+) -> tuple[float, float]:
+    """Exact Wilson score confidence interval for a binomial proportion.
+
+    Uses `statistics.NormalDist().inv_cdf(1.0 - (1.0 - confidence) / 2.0)`.
+
+    Args:
+        successes: Number of successes (0 <= successes <= total).
+        total: Number of independent trials (>= 0).
+        confidence: Two-sided confidence level in (0.0, 1.0).
+
+    Returns:
+        A tuple `(lower, upper)` bounded cleanly within [0.0, 1.0].
+        Returns `(0.0, 1.0)` when `total == 0`.
+    """
+    if isinstance(successes, bool) or not isinstance(successes, int):
+        raise TypeError(f"successes must be an integer, got {successes!r}")
+    if isinstance(total, bool) or not isinstance(total, int):
+        raise TypeError(f"total must be an integer, got {total!r}")
+    if successes < 0 or successes > total:
+        raise ValueError(f"successes must be between 0 and total ({total}), got {successes}")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise TypeError(f"confidence must be a float, got {confidence!r}")
+    if not math.isfinite(confidence) or not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be a finite float in (0.0, 1.0), got {confidence!r}")
+
+    if total == 0:
+        return (0.0, 1.0)
+
+    p_hat = successes / total
+    z = statistics.NormalDist().inv_cdf(1.0 - (1.0 - confidence) / 2.0)
+    z2 = z * z
+    denom = 1.0 + z2 / total
+    center = (p_hat + z2 / (2.0 * total)) / denom
+    margin = (z / denom) * math.sqrt((p_hat * (1.0 - p_hat) / total) + (z2 / (4.0 * total * total)))
+    lower = max(0.0, center - margin)
+    upper = min(1.0, center + margin)
+    return (lower, upper)
+
+
+def bootstrap_metric_ci(
+    values: Sequence[float],
+    *,
+    n_resamples: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 42,
+) -> tuple[float, float]:
+    """Deterministic percentile bootstrap CI for the sample mean.
+
+    Args:
+        values: Sequence of finite floating-point metric values.
+        n_resamples: Number of bootstrap iterations (>= 10).
+        confidence: Two-sided confidence level in (0.0, 1.0).
+        seed: Random seed for deterministic reproducibility.
+
+    Returns:
+        A tuple `(lower, upper)` of the percentile confidence bounds.
+    """
+    if not values:
+        raise ValueError("values cannot be empty")
+    if isinstance(n_resamples, bool) or not isinstance(n_resamples, int):
+        raise TypeError(f"n_resamples must be an integer, got {n_resamples!r}")
+    if n_resamples < 10:
+        raise ValueError(f"n_resamples must be >= 10, got {n_resamples!r}")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise TypeError(f"confidence must be a float, got {confidence!r}")
+    if not math.isfinite(confidence) or not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be a finite float in (0.0, 1.0), got {confidence!r}")
+
+    clean: list[float] = []
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise TypeError(f"values must contain finite numeric floats, got {v!r}")
+        vf = float(v)
+        if not math.isfinite(vf):
+            raise ValueError(f"values must contain finite numeric floats, got {v!r}")
+        clean.append(vf)
+
+    rng = random.Random(seed)
+    n = len(clean)
+    means: list[float] = []
+    for _ in range(n_resamples):
+        sample = rng.choices(clean, k=n)
+        means.append(statistics.fmean(sample))
+
+    alpha = 1.0 - confidence
+    lower_pct = 100.0 * (alpha / 2.0)
+    upper_pct = 100.0 * (1.0 - alpha / 2.0)
+    return (_percentile(means, lower_pct), _percentile(means, upper_pct))
+
+
+def mcnemar_exact_test(
+    correct_a: Sequence[bool],
+    correct_b: Sequence[bool],
+) -> dict[str, int | float]:
+    """Exact two-sided binomial McNemar test over paired boolean correctness vectors.
+
+    Args:
+        correct_a: Boolean correctness vector for condition A.
+        correct_b: Boolean correctness vector for condition B.
+
+    Returns:
+        A dictionary with keys `n_pairs`, `a_only_correct`, `b_only_correct`,
+        `discordant`, and `p_value` (rounded to 6 decimals).
+    """
+    if not correct_a or not correct_b:
+        raise ValueError("correct_a and correct_b must be non-empty")
+    if len(correct_a) != len(correct_b):
+        raise ValueError(
+            f"correct_a and correct_b must have equal length: {len(correct_a)} != {len(correct_b)}"
+        )
+
+    a_only = sum(1 for a, b in zip(correct_a, correct_b) if bool(a) and not bool(b))
+    b_only = sum(1 for a, b in zip(correct_a, correct_b) if bool(b) and not bool(a))
+    n_disc = a_only + b_only
+
+    if n_disc == 0:
+        p_val = 1.0
+    else:
+        k_min = min(a_only, b_only)
+        cdf = sum(math.comb(n_disc, k) for k in range(k_min + 1))
+        p_val = min(1.0, 2.0 * cdf / (2 ** n_disc))
+
+    return {
+        "n_pairs": len(correct_a),
+        "a_only_correct": a_only,
+        "b_only_correct": b_only,
+        "discordant": n_disc,
+        "p_value": round(p_val, 6),
+    }
+
+
+def compute_calibration_metrics(
+    probabilities: Sequence[float],
+    labels: Sequence[bool],
+    *,
+    n_bins: int = 10,
+) -> dict[str, float | None]:
+    """Computes Brier score, equal-width ECE, exact tie-aware AUROC, and AURC.
+
+    Args:
+        probabilities: Sequence of model predicted probabilities in [0.0, 1.0].
+        labels: Sequence of ground-truth booleans (True = Pass, False = Fail).
+        n_bins: Number of equal-width bins for ECE (>= 2).
+
+    Returns:
+        Dictionary with keys `brier_score`, `ece`, `auroc`, and `aurc`.
+    """
+    if not probabilities or not labels:
+        raise ValueError("probabilities and labels must be non-empty")
+    if len(probabilities) != len(labels):
+        raise ValueError(
+            f"probabilities and labels must have equal length: {len(probabilities)} != {len(labels)}"
+        )
+    if isinstance(n_bins, bool) or not isinstance(n_bins, int):
+        raise TypeError(f"n_bins must be an integer, got {n_bins!r}")
+    if n_bins < 2:
+        raise ValueError(f"n_bins must be >= 2, got {n_bins!r}")
+
+    clean_probs: list[float] = []
+    for p in probabilities:
+        if isinstance(p, bool) or not isinstance(p, (int, float)):
+            raise TypeError(f"probabilities must contain finite floats in [0.0, 1.0], got {p!r}")
+        pf = float(p)
+        if not math.isfinite(pf) or not (0.0 <= pf <= 1.0):
+            raise ValueError(f"probabilities must be in [0.0, 1.0], got {p!r}")
+        clean_probs.append(pf)
+
+    clean_labels = [bool(y) for y in labels]
+    n = len(clean_probs)
+
+    # 1. Brier score
+    brier = statistics.fmean((p - (1.0 if y else 0.0)) ** 2 for p, y in zip(clean_probs, clean_labels))
+
+    # 2. Equal-width ECE
+    bin_p: list[list[float]] = [[] for _ in range(n_bins)]
+    bin_y: list[list[float]] = [[] for _ in range(n_bins)]
+    for p, y in zip(clean_probs, clean_labels):
+        bin_idx = min(int(p * n_bins), n_bins - 1)
+        bin_p[bin_idx].append(p)
+        bin_y[bin_idx].append(1.0 if y else 0.0)
+
+    ece = 0.0
+    for bp, by in zip(bin_p, bin_y):
+        if bp:
+            weight = len(bp) / n
+            ece += weight * abs(statistics.fmean(bp) - statistics.fmean(by))
+
+    # 3. Exact tie-aware AUROC
+    n_pos = sum(1 for y in clean_labels if y)
+    n_neg = n - n_pos
+    if n_pos == 0 or n_neg == 0:
+        auroc: float | None = None
+    else:
+        paired = sorted(zip(clean_probs, clean_labels), key=lambda xy: xy[0])
+        rank_sum_pos = 0.0
+        i = 0
+        while i < n:
+            j = i + 1
+            while j < n and paired[j][0] == paired[i][0]:
+                j += 1
+            avg_rank = 0.5 * ((i + 1) + j)
+            pos_in_tie = sum(1 for k in range(i, j) if paired[k][1])
+            rank_sum_pos += pos_in_tie * avg_rank
+            i = j
+        u_stat = rank_sum_pos - 0.5 * n_pos * (n_pos + 1)
+        auroc = u_stat / (n_pos * n_neg)
+
+    # 4. AURC (Area Under Selective Risk-Coverage Curve)
+    indexed = list(enumerate(zip(clean_probs, clean_labels)))
+    indexed.sort(key=lambda x: (-abs(x[1][0] - 0.5), x[0]))
+
+    cum_errors = 0
+    risks: list[float] = []
+    for k, (_, (p, y)) in enumerate(indexed, start=1):
+        y_hat = p >= 0.5
+        if y_hat != y:
+            cum_errors += 1
+        risks.append(cum_errors / k)
+    aurc = statistics.fmean(risks)
+
+    return {
+        "brier_score": round(brier, 6),
+        "ece": round(ece, 6),
+        "auroc": round(auroc, 6) if auroc is not None else None,
+        "aurc": round(aurc, 6),
+    }
 
 
 @dataclass(slots=True)
@@ -249,21 +485,47 @@ class ModeStats:
     correct: list[bool] = field(default_factory=list)
     ambiguous: list[bool] = field(default_factory=list)
     judge_skipped: list[bool] = field(default_factory=list)
+    probabilities: list[float | None] = field(default_factory=list)
+    labels: list[bool] = field(default_factory=list)
+    cold_latencies_ms: list[float] = field(default_factory=list)
+    warm_latencies_ms: list[float] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
         n = len(self.latencies_ms)
+        decisive = [c for c, amb in zip(self.correct, self.ambiguous) if not amb]
+        sel_risk = round(1.0 - sum(decisive) / len(decisive), 4) if decisive else 0.0
+        cov = round(1.0 - sum(self.ambiguous) / n, 4) if n > 0 else 0.0
+        acc_ci = wilson_confidence_interval(sum(self.correct), n) if n > 0 else (0.0, 1.0)
+
+        cal: dict[str, float | None] | None = None
+        valid_probs = [float(p) for p in self.probabilities if p is not None]
+        if (
+            n > 0
+            and len(self.labels) == n
+            and len(valid_probs) == n
+            and all(math.isfinite(p) for p in valid_probs)
+        ):
+            cal = compute_calibration_metrics(valid_probs, self.labels)
+
         return {
             "mode": self.mode,
             "runs": n,
-            "p50_ms": round(_percentile(self.latencies_ms, 50), 2),
-            "p95_ms": round(_percentile(self.latencies_ms, 95), 2),
-            "mean_ms": round(statistics.fmean(self.latencies_ms), 2),
-            "generated_tokens_per_case": round(statistics.fmean(self.generated_tokens), 1),
-            "llm_calls_per_case": round(statistics.fmean(self.llm_calls), 2),
-            "accuracy": round(sum(self.correct) / n, 4),
+            "p50_ms": round(_percentile(self.latencies_ms, 50), 2) if self.latencies_ms else 0.0,
+            "p95_ms": round(_percentile(self.latencies_ms, 95), 2) if self.latencies_ms else 0.0,
+            "p99_ms": round(_percentile(self.latencies_ms, 99), 2) if self.latencies_ms else 0.0,
+            "cold_prefix_p50_ms": round(_percentile(self.cold_latencies_ms, 50), 2) if self.cold_latencies_ms else None,
+            "warm_prefix_p50_ms": round(_percentile(self.warm_latencies_ms, 50), 2) if self.warm_latencies_ms else None,
+            "mean_ms": round(statistics.fmean(self.latencies_ms), 2) if self.latencies_ms else 0.0,
+            "generated_tokens_per_case": round(statistics.fmean(self.generated_tokens), 1) if self.generated_tokens else 0.0,
+            "llm_calls_per_case": round(statistics.fmean(self.llm_calls), 2) if self.llm_calls else 0.0,
+            "accuracy": round(sum(self.correct) / n, 4) if n > 0 else 0.0,
+            "accuracy_ci95": [round(acc_ci[0], 4), round(acc_ci[1], 4)],
             "correct": sum(self.correct),
-            "ambiguous_rate": round(sum(self.ambiguous) / n, 4),
-            "fast_path_rate": round(sum(self.judge_skipped) / n, 4) if self.mode == "cascade" else None,
+            "coverage": cov,
+            "selective_risk": sel_risk,
+            "ambiguous_rate": round(sum(self.ambiguous) / n, 4) if n > 0 else 0.0,
+            "fast_path_rate": round(sum(self.judge_skipped) / n, 4) if self.mode == "cascade" and n > 0 else None,
+            "calibration": cal,
         }
 
 
@@ -273,7 +535,30 @@ class BenchmarkReport:
     modes: dict[str, ModeStats]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"metadata": self.metadata, "modes": {m: s.summary() for m, s in self.modes.items()}}
+        modes_dict = {m: s.summary() for m, s in self.modes.items()}
+        comparisons: dict[str, Any] = {}
+        if "judge" in self.modes:
+            judge_stats = self.modes["judge"]
+            n_j = len(judge_stats.correct)
+            if n_j > 0:
+                acc_judge = sum(judge_stats.correct) / n_j
+                for m, s in self.modes.items():
+                    if m == "judge":
+                        continue
+                    if len(s.correct) == n_j:
+                        acc_m = sum(s.correct) / n_j
+                        diffs = [float(a) - float(b) for a, b in zip(s.correct, judge_stats.correct)]
+                        ci = bootstrap_metric_ci(diffs, n_resamples=1000, confidence=0.95, seed=42)
+                        mcnemar = mcnemar_exact_test(s.correct, judge_stats.correct)
+                        comparisons[f"{m}_vs_judge"] = {
+                            **mcnemar,
+                            "accuracy_delta": round(acc_m - acc_judge, 4),
+                            "accuracy_delta_ci95": [round(ci[0], 4), round(ci[1], 4)],
+                        }
+        out: dict[str, Any] = {"metadata": self.metadata, "modes": modes_dict}
+        if "judge" in self.modes or comparisons:
+            out["comparisons"] = comparisons
+        return out
 
 
 def _extract_backend_clone_kwargs(resolved: Any) -> dict[str, Any]:
@@ -507,9 +792,11 @@ def run_benchmark(
         stats = {mode: ModeStats(mode) for mode in modes}
         cache_summary: dict[str, Any] | None = None
         for mode in modes:
+            seen_rubrics: set[str] = set()
             if cases:
                 for w_idx in range(warmup):
                     w_case = cases[w_idx % len(cases)]
+                    seen_rubrics.add(w_case.rubric)
                     build(mode, w_case.rubric).evaluate(
                         w_case.candidate,
                         save_on_fail=False,
@@ -533,6 +820,13 @@ def run_benchmark(
                     s.correct.append(verdict.passed == case.expected)
                     s.ambiguous.append(verdict.status == DecisionStatus.AMBIGUOUS)
                     s.judge_skipped.append(generate_calls == 0)
+                    s.probabilities.append(verdict.probability)
+                    s.labels.append(bool(case.expected))
+                    if case.rubric not in seen_rubrics:
+                        s.cold_latencies_ms.append(elapsed_ms)
+                        seen_rubrics.add(case.rubric)
+                    else:
+                        s.warm_latencies_ms.append(elapsed_ms)
                     if progress is not None:
                         progress(f"{mode:<8} rep {rep + 1}/{repeat} case {idx + 1}/{len(cases)} {elapsed_ms:9.1f} ms")
         if isinstance(resolved_cache, VerdictCache):
@@ -622,26 +916,61 @@ def format_report(report: BenchmarkReport) -> str:
         )
     if meta["is_stub"]:
         lines.append("NOTE: stub backend. Timings measure harness overhead only, not model latency.")
-    header = f"{'mode':<9}{'p50 ms':>10}{'p95 ms':>10}{'mean ms':>10}{'gen tok':>9}{'calls':>7}{'accuracy':>11}{'ambig':>7}{'fast-path':>11}"
+    header = (
+        f"{'mode':<9}{'p50 ms':>10}{'p95 ms':>10}{'p99 ms':>10}{'mean ms':>10}"
+        f"{'gen tok':>9}{'calls':>7}{'accuracy':>11}{'95% CI':>19}{'ambig':>7}{'fast-path':>11}"
+    )
     lines += ["", header, "-" * len(header)]
     for r in rows:
         fast = f"{r['fast_path_rate']:.0%}" if r["fast_path_rate"] is not None else "-"
+        ci = r.get("accuracy_ci95")
+        ci_str = f"[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else "-"
         lines.append(
-            f"{r['mode']:<9}{r['p50_ms']:>10.1f}{r['p95_ms']:>10.1f}{r['mean_ms']:>10.1f}"
+            f"{r['mode']:<9}{r['p50_ms']:>10.1f}{r['p95_ms']:>10.1f}{r['p99_ms']:>10.1f}{r['mean_ms']:>10.1f}"
             f"{r['generated_tokens_per_case']:>9.1f}{r['llm_calls_per_case']:>7.2f}"
-            f"{r['correct']:>6}/{r['runs']:<4}{r['ambiguous_rate']:>7.0%}{fast:>11}"
+            f"{r['correct']:>6}/{r['runs']:<4}{ci_str:>19}{r['ambiguous_rate']:>7.0%}{fast:>11}"
         )
+
+    cal_lines: list[str] = []
+    for r in rows:
+        cal = r.get("calibration")
+        if isinstance(cal, dict):
+            auroc_str = f"{cal['auroc']:.4f}" if cal.get("auroc") is not None else "None"
+            brier_str = f"{cal['brier_score']:.4f}" if cal.get("brier_score") is not None else "None"
+            ece_str = f"{cal['ece']:.4f}" if cal.get("ece") is not None else "None"
+            aurc_str = f"{cal['aurc']:.4f}" if cal.get("aurc") is not None else "None"
+            sel_risk_str = f"{r.get('selective_risk', 0.0):.4f}"
+            cal_lines.append(
+                f"calibration ({r['mode']}): AUROC={auroc_str} Brier={brier_str} ECE={ece_str} AURC={aurc_str} sel-risk={sel_risk_str}"
+            )
+    if cal_lines:
+        lines.append("")
+        lines.extend(cal_lines)
+
     judge = report.modes.get("judge")
-    if judge is not None and not meta["is_stub"]:
+    if judge is not None:
         base = judge.summary()
         comp_lines: list[str] = []
         for r in rows:
-            if r["mode"] == "judge" or r["mean_ms"] <= 0:
+            if r["mode"] == "judge":
                 continue
-            speedup = base["mean_ms"] / r["mean_ms"]
-            tokens = base["generated_tokens_per_case"]
-            saved = 1.0 - r["generated_tokens_per_case"] / tokens if tokens else 0.0
-            comp_lines.append(f"{r['mode']} vs judge: {speedup:.1f}x faster (mean), {saved:.0%} fewer generated tokens")
+            m_stats = report.modes.get(r["mode"])
+            mcn_suffix = ""
+            if m_stats and len(m_stats.correct) == len(judge.correct) > 0:
+                mcn = mcnemar_exact_test(m_stats.correct, judge.correct)
+                mcn_suffix = f", McNemar p={mcn['p_value']:.4f}"
+            if not meta["is_stub"] and r["mean_ms"] > 0:
+                speedup = base["mean_ms"] / r["mean_ms"]
+                tokens = base["generated_tokens_per_case"]
+                saved = 1.0 - r["generated_tokens_per_case"] / tokens if tokens else 0.0
+                comp_lines.append(
+                    f"{r['mode']} vs judge: {speedup:.1f}x faster (mean), {saved:.0%} fewer generated tokens{mcn_suffix}"
+                )
+            elif mcn_suffix:
+                acc_diff = r["accuracy"] - base["accuracy"]
+                comp_lines.append(
+                    f"{r['mode']} vs judge: accuracy delta={acc_diff:+.4f}{mcn_suffix}"
+                )
         if comp_lines:
             lines.append("")
             lines.extend(comp_lines)
@@ -664,3 +993,20 @@ def load_cases(path: str | None) -> tuple[list[BenchmarkCase], str]:
 
 def write_json(report: BenchmarkReport) -> None:
     sys.stdout.write(json.dumps(report.to_dict(), indent=2) + "\n")
+
+
+__all__ = [
+    "BUILTIN_CASES",
+    "MODES",
+    "BenchmarkCase",
+    "BenchmarkReport",
+    "ModeStats",
+    "bootstrap_metric_ci",
+    "compute_calibration_metrics",
+    "format_report",
+    "load_cases",
+    "mcnemar_exact_test",
+    "run_benchmark",
+    "wilson_confidence_interval",
+    "write_json",
+]

@@ -19,6 +19,12 @@ from logitgate.backends.pytorch_native import PrefixBroadcastLogitEvaluator
 from logitgate.backends.recurrent import (
     RecurrentPyTorchBackend,
 )
+from logitgate.benchmark import (
+    bootstrap_metric_ci,
+    compute_calibration_metrics,
+    mcnemar_exact_test,
+    wilson_confidence_interval,
+)
 from logitgate.cache import (
     CacheStats,
     VerdictCache,
@@ -338,6 +344,7 @@ __all__ = [
     "as_conditional_edge",
     "audit_benchmark_dataset",
     "auto_calibrate_backend",
+    "bootstrap_metric_ci",
     "calibrate_cascade_thresholds",
     "calibrate_choice_thresholds",
     "calibrate_score_thresholds",
@@ -353,6 +360,7 @@ __all__ = [
     "compile_pairwise_prompt",
     "compile_score_prompt",
     "compute_binary_log_odds",
+    "compute_calibration_metrics",
     "compute_ks_two_sample",
     "compute_normalized_probabilities",
     "compute_psi",
@@ -386,6 +394,7 @@ __all__ = [
     "load_distillation_records",
     "load_telemetry_records",
     "marginalize_pole_logprob",
+    "mcnemar_exact_test",
     "min_samples_per_class",
     "normalize_candidate",
     "prepare_symmetric_lora_examples",
@@ -402,4 +411,5 @@ __all__ = [
     "resolve_verdict_cache",
     "summarize_telemetry",
     "train_distillation_lora",
+    "wilson_confidence_interval",
 ]

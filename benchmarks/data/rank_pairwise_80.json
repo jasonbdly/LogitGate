@@ -1,0 +1,746 @@
+{
+  "pairwise_items": [
+    {
+      "id": "pair_code_1_memoization",
+      "domain": "rank_code_refactor",
+      "rubric": "Which implementation correctly memoizes recursive Fibonacci with proper type annotations and thread safety?",
+      "candidate_a": "from functools import lru_cache\n\n@lru_cache(maxsize=128)\ndef fibonacci(n: int) -> int:\n    \"\"\"Computes the nth Fibonacci number safely using thread-safe C-level LRU caching.\"\"\"\n    if n < 0:\n        raise ValueError('n must be non-negative')\n    return n if n < 2 else fibonacci(n - 1) + fibonacci(n - 2)",
+      "candidate_b": "def fibonacci(n: int, memo: dict[int, int] = {}) -> int:\n    \"\"\"Computes the nth Fibonacci number using a dictionary cache for memoization.\"\"\"\n    if n < 0:\n        raise ValueError('n must be non-negative')\n    if n in memo:\n        return memo[n]\n    memo[n] = n if n < 2 else fibonacci(n - 1, memo) + fibonacci(n - 2, memo)\n    return memo[n]",
+      "winner": 0
+    },
+    {
+      "id": "pair_code_2_context_manager",
+      "domain": "rank_code_refactor",
+      "rubric": "Which database connection context manager properly handles rollback upon exceptions and guarantees connection release?",
+      "candidate_a": "from contextlib import contextmanager\nfrom typing import Any, Iterator\n\n@contextmanager\ndef transaction_scope(session: Any) -> Iterator[Any]:\n    \"\"\"Provides a transactional scope around a series of database operations with commit.\"\"\"\n    try:\n        yield session\n        session.commit()\n    except Exception as exc:\n        print(f'Transaction failed during execution: {exc}')\n    finally:\n        session.close()",
+      "candidate_b": "from contextlib import contextmanager\nfrom typing import Any, Iterator\n\n@contextmanager\ndef transaction_scope(session: Any) -> Iterator[Any]:\n    \"\"\"Provides a transactional scope around a series of database operations with rollback.\"\"\"\n    try:\n        yield session\n        session.commit()\n    except Exception:\n        session.rollback()\n        raise\n    finally:\n        session.close()",
+      "winner": 1
+    },
+    {
+      "id": "pair_code_3_path_traversal",
+      "domain": "rank_code_refactor",
+      "rubric": "Which file path resolution function strictly prevents path traversal outside the designated base directory?",
+      "candidate_a": "from pathlib import Path\n\ndef resolve_safe_path(base_dir: Path, untrusted_rel: str) -> Path:\n    \"\"\"Resolves an untrusted relative path ensuring it remains strictly within base_dir.\"\"\"\n    target = (base_dir / untrusted_rel).resolve()\n    if not target.is_relative_to(base_dir.resolve()):\n        raise PermissionError('Path traversal detected outside base directory')\n    return target",
+      "candidate_b": "from pathlib import Path\n\ndef resolve_safe_path(base_dir: Path, untrusted_rel: str) -> Path:\n    \"\"\"Resolves an untrusted relative path against base_dir after sanitizing path separators.\"\"\"\n    clean = untrusted_rel.replace('../', '').replace('..\\\\', '')\n    target = (base_dir / clean).resolve()\n    if not target.is_relative_to(base_dir.resolve()):\n        raise PermissionError('Path traversal detected')\n    return target",
+      "winner": 0
+    },
+    {
+      "id": "pair_code_4_concurrency_lock",
+      "domain": "rank_code_refactor",
+      "rubric": "Which thread-safe counter implementation correctly protects concurrent increments without race conditions?",
+      "candidate_a": "class AtomicCounter:\n    \"\"\"Provides a lightweight integer counter for tracking event occurrences in worker threads.\"\"\"\n    def __init__(self) -> None:\n        self._value = 0\n\n    def increment(self, step: int = 1) -> int:\n        current = self._value\n        self._value = current + step\n        return self._value",
+      "candidate_b": "import threading\n\nclass AtomicCounter:\n    \"\"\"Thread-safe counter protected by a mutual exclusion lock.\"\"\"\n    def __init__(self) -> None:\n        self._value = 0\n        self._lock = threading.Lock()\n\n    def increment(self, step: int = 1) -> int:\n        with self._lock:\n            self._value += step\n            return self._value",
+      "winner": 1
+    },
+    {
+      "id": "pair_code_5_binary_search",
+      "domain": "rank_code_refactor",
+      "rubric": "Which binary search function terminates without integer overflow or off-by-one infinite loops on missing elements?",
+      "candidate_a": "def binary_search(arr: list[int], target: int) -> int:\n    \"\"\"Executes standard binary search returning the index of target or -1 if not found.\"\"\"\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = lo + (hi - lo) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1",
+      "candidate_b": "def binary_search(arr: list[int], target: int) -> int:\n    \"\"\"Executes binary search on a sorted integer array to locate the target index.\"\"\"\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid\n    return -1",
+      "winner": 0
+    },
+    {
+      "id": "pair_code_6_retry_decorator",
+      "domain": "rank_code_refactor",
+      "rubric": "Which retry decorator implements exponential backoff with jitter and selective exception filtering?",
+      "candidate_a": "import time\nfrom typing import Callable, Any\n\ndef retry_with_jitter(retries: int = 3, base_delay: float = 0.5) -> Callable[..., Any]:\n    \"\"\"Retries a transient network call with a fixed sleep duration on every failed execution.\"\"\"\n    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:\n        def wrapper(*args: Any, **kwargs: Any) -> Any:\n            for attempt in range(retries):\n                try:\n                    return fn(*args, **kwargs)\n                except Exception as exc:\n                    if attempt == retries - 1:\n                        print(f'All {retries} retry attempts failed: {exc}')\n                        return None\n                    time.sleep(base_delay)\n        return wrapper\n    return decorator",
+      "candidate_b": "import time, random\nfrom typing import Callable, Any\n\ndef retry_with_jitter(retries: int = 3, base_delay: float = 0.5) -> Callable[..., Any]:\n    \"\"\"Retries a transient network call with exponential backoff and randomized jitter.\"\"\"\n    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:\n        def wrapper(*args: Any, **kwargs: Any) -> Any:\n            delay = base_delay\n            for attempt in range(retries):\n                try:\n                    return fn(*args, **kwargs)\n                except (ConnectionError, TimeoutError):\n                    if attempt == retries - 1:\n                        raise\n                    time.sleep(delay + random.uniform(0, 0.1))\n                    delay *= 2.0\n        return wrapper\n    return decorator",
+      "winner": 1
+    },
+    {
+      "id": "pair_code_7_json_validation",
+      "domain": "rank_code_refactor",
+      "rubric": "Which JSON schema validator handles type errors cleanly and rejects malformed types without unhandled crashes?",
+      "candidate_a": "from typing import Any\n\ndef validate_user_payload(payload: dict[str, Any]) -> bool:\n    \"\"\"Validates incoming JSON payload structure with explicit schema type checking.\"\"\"\n    if not isinstance(payload, dict):\n        return False\n    if not isinstance(payload.get('user_id'), int) or payload['user_id'] <= 0:\n        return False\n    if not isinstance(payload.get('email'), str) or '@' not in payload['email']:\n        return False\n    return True",
+      "candidate_b": "from typing import Any\n\ndef validate_user_payload(payload: dict[str, Any]) -> bool:\n    \"\"\"Validates incoming JSON payload structure and confirms user_id and email presence.\"\"\"\n    try:\n        user_id = payload['user_id']\n        email = payload['email']\n        return bool(user_id > 0 and '@' in email)\n    except (KeyError, TypeError, AttributeError):\n        return False",
+      "winner": 0
+    },
+    {
+      "id": "pair_code_8_cache_eviction",
+      "domain": "rank_code_refactor",
+      "rubric": "Which LRU cache implementation evicts the least recently accessed item in O(1) time without memory leaks?",
+      "candidate_a": "from typing import Any\n\nclass LRUCache:\n    \"\"\"In-memory key-value cache implementation supporting standard get and put operations.\"\"\"\n    def __init__(self, capacity: int) -> None:\n        self._capacity = capacity\n        self._store: dict[str, Any] = {}\n        self._access_history: list[str] = []\n\n    def get(self, key: str) -> Any:\n        if key in self._store:\n            self._access_history.append(key)\n            return self._store[key]\n        return None\n\n    def put(self, key: str, val: Any) -> None:\n        self._store[key] = val\n        self._access_history.append(key)\n        if len(self._store) > self._capacity:\n            oldest = self._access_history.pop(0)\n            self._store.pop(oldest, None)",
+      "candidate_b": "from collections import OrderedDict\nfrom typing import Any\n\nclass LRUCache:\n    \"\"\"O(1) Least Recently Used cache utilizing OrderedDict move_to_end.\"\"\"\n    def __init__(self, capacity: int) -> None:\n        self._cap = capacity\n        self._cache: OrderedDict[str, Any] = OrderedDict()\n\n    def get(self, key: str) -> Any:\n        if key not in self._cache:\n            return None\n        self._cache.move_to_end(key)\n        return self._cache[key]\n\n    def put(self, key: str, val: Any) -> None:\n        if key in self._cache:\n            self._cache.move_to_end(key)\n        self._cache[key] = val\n        if len(self._cache) > self._cap:\n            self._cache.popitem(last=False)",
+      "winner": 1
+    },
+    {
+      "id": "pair_code_9_generator_pipeline",
+      "domain": "rank_code_refactor",
+      "rubric": "Which log processing pipeline streams lines lazily using generators without reading the entire file into memory?",
+      "candidate_a": "from typing import Iterator\nfrom pathlib import Path\n\ndef stream_error_events(log_path: Path) -> Iterator[str]:\n    \"\"\"Streams lines lazily from a large log file yielding only matched error records.\"\"\"\n    with log_path.open('r', encoding='utf-8') as handle:\n        for line in handle:\n            if 'CRITICAL' in line or 'ERROR' in line:\n                yield line.rstrip('\\n')",
+      "candidate_b": "from pathlib import Path\n\ndef stream_error_events(log_path: Path) -> list[str]:\n    \"\"\"Reads the complete contents of a log file into memory and extracts lines containing errors.\"\"\"\n    content = log_path.read_text(encoding='utf-8')\n    return [line for line in content.splitlines() if 'CRITICAL' in line or 'ERROR' in line]",
+      "winner": 0
+    },
+    {
+      "id": "pair_code_10_immutable_config",
+      "domain": "rank_code_refactor",
+      "rubric": "Which configuration model enforces immutability and validates required environment fields at startup?",
+      "candidate_a": "import os\n\nclass AppConfig:\n    \"\"\"Application configuration container storing runtime environment parameters in a mutable class dictionary.\"\"\"\n    settings = {}\n\n    @classmethod\n    def from_env(cls):\n        cls.settings['env'] = os.environ.get('APP_ENV', 'production')\n        cls.settings['port'] = int(os.environ.get('APP_PORT', '8080'))\n        cls.settings['api_key'] = os.environ.get('API_KEY', '')\n        return cls",
+      "candidate_b": "from dataclasses import dataclass\nimport os\n\n@dataclass(frozen=True)\nclass AppConfig:\n    \"\"\"Immutable application configuration loaded from environment variables.\"\"\"\n    env: str\n    port: int\n    api_key: str\n\n    @classmethod\n    def from_env(cls) -> 'AppConfig':\n        env = os.environ.get('APP_ENV', 'production')\n        port = int(os.environ.get('APP_PORT', '8080'))\n        key = os.environ['API_KEY']\n        return cls(env=env, port=port, api_key=key)",
+      "winner": 1
+    },
+    {
+      "id": "pair_code_11_sql_injection_defense",
+      "domain": "rank_code_refactor",
+      "rubric": "Which query builder safely sanitizes dynamic WHERE clauses using parameterized tuples?",
+      "candidate_a": "from typing import Any\n\ndef build_product_query(category: str, min_rating: float) -> tuple[str, tuple[Any, ...]]:\n    \"\"\"Constructs a parameterized SQL query and tuple parameter bindings safely.\"\"\"\n    query = 'SELECT id, title, price FROM products WHERE category = %s AND rating >= %s'\n    return query, (category, min_rating)",
+      "candidate_b": "def build_product_query(category: str, min_rating: float) -> str:\n    \"\"\"Constructs a dynamic SQL product query filtered by category and minimum rating threshold.\"\"\"\n    escaped_cat = category.replace(\"'\", \"''\")\n    sql = f\"SELECT id, title, price FROM products WHERE category = '{escaped_cat}' AND rating >= {min_rating}\"\n    return sql",
+      "winner": 0
+    },
+    {
+      "id": "pair_code_12_subprocess_safety",
+      "domain": "rank_code_refactor",
+      "rubric": "Which subprocess execution wrapper avoids shell=True and passes arguments as a discrete argument list?",
+      "candidate_a": "import subprocess\n\ndef execute_linter(file_path: str) -> str:\n    \"\"\"Executes the ruff linter against the target file path using a system shell command string.\"\"\"\n    cmd = f'ruff check {file_path}'\n    process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, text=True)\n    output, _ = process.communicate(timeout=10.0)\n    return output",
+      "candidate_b": "import subprocess\n\ndef execute_linter(file_path: str) -> str:\n    \"\"\"Executes ruff linter safely without shell execution or command injection.\"\"\"\n    result = subprocess.run(\n        ['ruff', 'check', file_path],\n        capture_output=True,\n        text=True,\n        check=False,\n        timeout=10.0\n    )\n    return result.stdout",
+      "winner": 1
+    },
+    {
+      "id": "pair_rag_1_kafka_cooperative",
+      "domain": "rank_rag_citation",
+      "rubric": "Which synthesis accurately cites Kafka EIP-438 cooperative sticky rebalance protocols?",
+      "candidate_a": "KIP-438 specifies the CooperativeStickyAssignor protocol, which migrates partitions incrementally across rounds without triggering a stop-the-world rebalance. Consumers continue fetching data from unaffected partitions while migrating reassigned partitions, dramatically reducing latency spikes.",
+      "candidate_b": "KIP-438 requires all Kafka consumer group members to revoke all active partition assignments synchronously and flush local offset state before any reassignment round begins, blocking read throughput across unaffected partitions until global rebalance consensus is achieved.",
+      "winner": 0
+    },
+    {
+      "id": "pair_rag_2_cassandra_tombstones",
+      "domain": "rank_rag_citation",
+      "rubric": "Which technical guidance faithfully cites Cassandra gc_grace_seconds tombstone eviction rules?",
+      "candidate_a": "Cassandra documentation specifies that deleted records should immediately have their tombstone markers removed from SSTables during minor compaction passes, recommending setting gc_grace_seconds to 0 across all multi-datacenter clusters to minimize disk consumption on storage volumes.",
+      "candidate_b": "Cassandra documentation specifies that deleted records persist as tombstones for gc_grace_seconds (default 10 days) to ensure deletion markers propagate to replicas before compaction purges them from SSTables. Setting gc_grace_seconds to 0 in multi-node clusters risks zombie data resurrecting after compaction.",
+      "winner": 1
+    },
+    {
+      "id": "pair_rag_3_arrow_parquet_dict",
+      "domain": "rank_rag_citation",
+      "rubric": "Which data engineering explanation accurately cites Apache Parquet dictionary encoding advantages?",
+      "candidate_a": "The Apache Parquet specification details that dictionary encoding stores distinct string values in a dictionary page and encodes column entries as small integer indices, achieving substantial disk compression and enabling vectorized query engines to evaluate equality predicates directly on dictionary indices.",
+      "candidate_b": "The Apache Parquet specification states that dictionary encoding is strictly restricted to 64-bit floating point numbers, requiring string column entries to be stored as raw uncompressed byte sequences across all data pages to prevent dictionary lookup overhead in analytics query engines.",
+      "winner": 0
+    },
+    {
+      "id": "pair_rag_4_otel_w3c_traceparent",
+      "domain": "rank_rag_citation",
+      "rubric": "Which specification citation correctly details the W3C traceparent header format in OpenTelemetry?",
+      "candidate_a": "The W3C Trace Context recommendation specifies that traceparent headers consist of an unformatted 64-bit epoch timestamp followed by a base64-encoded server hostname, omitting explicit span identifiers or parent identifiers to reduce header transmission overhead across internal microservice requests.",
+      "candidate_b": "The W3C Trace Context recommendation defines the traceparent HTTP header as four hyphen-separated fields: version (00), 16-byte trace-id (32 hex characters), 8-byte parent-id (16 hex characters), and trace-flags (e.g. 01 for sampled). All downstream services propagate these fields to maintain distributed trace continuity.",
+      "winner": 1
+    },
+    {
+      "id": "pair_rag_5_oauth_pkce_s256",
+      "domain": "rank_rag_citation",
+      "rubric": "Which security summary accurately cites RFC 7636 PKCE code_challenge verification steps?",
+      "candidate_a": "RFC 7636 Section 4 specifies that the client creates a high-entropy code_verifier and computes code_challenge = BASE64URL(SHA256(code_verifier)) with code_challenge_method = S256. The authorization server stores the challenge and verifies it by hashing the verifier provided during token exchange.",
+      "candidate_b": "RFC 7636 Section 4 specifies that the client transmits a static client_secret token inside the code_challenge parameter using the plain method, instructing authorization servers to verify identity by comparing the unhashed verifier against hardcoded client credentials in application source code.",
+      "winner": 0
+    },
+    {
+      "id": "pair_rag_6_pg_stat_statements",
+      "domain": "rank_rag_citation",
+      "rubric": "Which PostgreSQL citation accurately describes query fingerprinting in pg_stat_statements?",
+      "candidate_a": "PostgreSQL documentation notes that pg_stat_statements creates an independent tracking entry for every distinct query execution without normalizing constants, recording raw unparameterized query strings and resetting all cumulative latency statistics back to zero on every connection pool disconnect.",
+      "candidate_b": "PostgreSQL documentation notes that pg_stat_statements normalizes SQL queries by replacing literal constants with parameter placeholders ($1, $2) to generate a stable queryId hash, aggregating execution counts, total_exec_time, mean_exec_time, and shared_blks_hit across executions.",
+      "winner": 1
+    },
+    {
+      "id": "pair_rag_7_k8s_csi_volume_detachment",
+      "domain": "rank_rag_citation",
+      "rubric": "Which Kubernetes storage guide accurately cites CSI volume attachment timeout handling?",
+      "candidate_a": "The Kubernetes CSI storage documentation states that VolumeAttachment resources manage node-level disk attachment. When a node becomes non-responsive, the volume remains attached until the node is confirmed dead or force-deleted, preventing multi-attach errors on ReadWriteOnce (RWO) cloud block volumes.",
+      "candidate_b": "The Kubernetes CSI storage documentation states that ReadWriteOnce cloud volumes are immediately attached to standby worker nodes whenever a node misses a single heartbeat probe, allowing simultaneous read-write filesystem mounts across multiple nodes without waiting for volume detachment confirmation.",
+      "winner": 0
+    },
+    {
+      "id": "pair_rag_8_http2_hpack_compression",
+      "domain": "rank_rag_citation",
+      "rubric": "Which networking summary accurately cites RFC 7541 HPACK header table management?",
+      "candidate_a": "RFC 7541 Section 2 explains that HTTP/2 HPACK maintains an unbounded dynamic table across all concurrent client TCP connections, storing complete raw uncompressed header text strings indefinitely in memory without eviction limits or Huffman coding to simplify gateway proxy implementations.",
+      "candidate_b": "RFC 7541 Section 2 explains that HPACK utilizes a static table of 61 common header definitions alongside an eviction-bounded dynamic table shared across the connection. Sequential headers are encoded as integer indices or Huffman-coded strings, drastically reducing HTTP/2 header transmission overhead.",
+      "winner": 1
+    },
+    {
+      "id": "pair_rag_9_clickhouse_mergetree_keys",
+      "domain": "rank_rag_citation",
+      "rubric": "Which database guide accurately cites ClickHouse MergeTree PRIMARY KEY versus ORDER BY semantics?",
+      "candidate_a": "ClickHouse documentation clarifies that ORDER BY defines the physical sort order of data parts on disk, while PRIMARY KEY specifies the index expression stored in memory for sparse indexing. When PRIMARY KEY is omitted, it defaults to the ORDER BY expression; when specified, PRIMARY KEY must be a prefix of ORDER BY.",
+      "candidate_b": "ClickHouse documentation clarifies that PRIMARY KEY must be completely distinct from the ORDER BY expression, requiring ClickHouse to enforce strict single-row uniqueness across data parts by rejecting any incoming insert batches that contain duplicate primary key values during background merges.",
+      "winner": 0
+    },
+    {
+      "id": "pair_rag_10_tls13_ticket_rotation",
+      "domain": "rank_rag_citation",
+      "rubric": "Which cryptography reference accurately cites TLS 1.3 session ticket encryption key rotation?",
+      "candidate_a": "RFC 8446 recommends keeping Session Ticket Encryption Keys permanently fixed and unrotated across cluster lifetimes to maximize session resumption rates, noting that static ticket keys have no impact on forward secrecy or session compromise risks in modern cryptographic protocols.",
+      "candidate_b": "RFC 8446 recommends rotating Session Ticket Encryption Keys (STEKs) regularly (e.g. hourly) to preserve forward secrecy. If STEK keys are never rotated, an attacker who compromises the static ticket key can retroactively decrypt all recorded TLS session resumptions established under those tickets.",
+      "winner": 1
+    },
+    {
+      "id": "pair_rag_11_linux_epoll_triggering",
+      "domain": "rank_rag_citation",
+      "rubric": "Which Linux systems guide accurately cites differences between epoll edge-triggered and level-triggered modes?",
+      "candidate_a": "The Linux man page epoll(7) explains that level-triggered mode (default) notifies epoll_wait() repeatedly as long as a file descriptor has readable data available, whereas edge-triggered mode (EPOLLET) delivers an event only when new data arrives, requiring non-blocking sockets and looping read() until EAGAIN.",
+      "candidate_b": "The Linux man page epoll(7) explains that edge-triggered mode notifies epoll_wait() continuously whenever data remains in the receive buffer, whereas level-triggered mode notifies once per connection and requires blocking sockets to drain incoming network packets until the connection closes.",
+      "winner": 0
+    },
+    {
+      "id": "pair_rag_12_raft_snapshot_rpc",
+      "domain": "rank_rag_citation",
+      "rubric": "Which distributed consensus paper citation accurately describes InstallSnapshot RPC conditions in Raft?",
+      "candidate_a": "Ongaro and Ousterhout (2014) specify that a Raft leader sends an InstallSnapshot RPC to all cluster followers on every client write operation, instructing all followers to overwrite their persistent state machine and reset their log commitIndex before appending newly committed log entries.",
+      "candidate_b": "Ongaro and Ousterhout (2014) specify that a Raft leader sends an InstallSnapshot RPC to a follower when the leader has already discarded the next log entries needed by that follower through log compaction. The follower replaces its state machine with the snapshot data and resets its commitIndex.",
+      "winner": 1
+    },
+    {
+      "id": "pair_api_1_idempotency_keys",
+      "domain": "rank_api_design",
+      "rubric": "Which REST API endpoint design correctly implements Idempotency-Key headers for payment creation?",
+      "candidate_a": "POST /v1/payments endpoint requires an `Idempotency-Key` HTTP header. The server stores payment request fingerprints in Redis with a 24-hour TTL; repeated requests with the identical idempotency key return the cached response (including original ID and status) without re-charging the payment card.",
+      "candidate_b": "POST /v1/payments creates a new credit card transaction on every incoming request without checking for previous duplicate submissions, returning 201 Created and processing separate charges whenever clients resend requests following transient network timeouts. Client applications are instructed to never retry network failures under any circumstances to prevent duplicate billing.",
+      "winner": 0
+    },
+    {
+      "id": "pair_api_2_pagination_keyset",
+      "domain": "rank_api_design",
+      "rubric": "Which API pagination design provides consistent performance over millions of records using keyset cursors?",
+      "candidate_a": "GET /v1/events uses integer offset pagination ?offset=5000000&limit=50, requiring database engines to scan and discard millions of preceding table rows on deep page traversals before returning the requested fifty records to the client application.",
+      "candidate_b": "GET /v1/events uses keyset pagination with opaque base64 cursors encoding `(created_at, event_id)`: `GET /v1/events?limit=50&cursor=ZXhwMT...`. Queries execute `WHERE (created_at, id) < (:cursor_time, :cursor_id) ORDER BY created_at DESC, id DESC LIMIT 50`, eliminating O(N) offset scan overhead.",
+      "winner": 1
+    },
+    {
+      "id": "pair_api_3_error_envelope",
+      "domain": "rank_api_design",
+      "rubric": "Which RFC 7807 Problem Details error payload design provides clear, machine-readable validation errors?",
+      "candidate_a": "Returns HTTP 422 with `Content-Type: application/problem+json` containing standard fields: `type`: URI documentation, `title`: 'Unprocessable Entity', `status`: 422, `detail`: 'Invalid customer payload', and `invalid_params`: list of objects with specific field names and validation error messages.",
+      "candidate_b": "Returns HTTP 200 OK with body {\"success\": false, \"message\": \"An unhandled validation error occurred during request processing\"}, concealing HTTP failures from external API gateways, monitoring dashboards, and standard client SDK error handlers.",
+      "winner": 0
+    },
+    {
+      "id": "pair_api_4_rate_limiting_headers",
+      "domain": "rank_api_design",
+      "rubric": "Which API rate limiting implementation returns standard IETF RateLimit headers and 429 status codes?",
+      "candidate_a": "Enforces rate limiting by abruptly closing client TCP connections with connection reset packets or returning HTTP 500 Internal Server Error without RateLimit headers or Retry-After backoff duration hints when client request thresholds are exceeded.",
+      "candidate_b": "Enforces token bucket rate limiting returning standard headers: `RateLimit-Limit: 100`, `RateLimit-Remaining: 0`, and `RateLimit-Reset: 14`. When quota is exhausted, returns HTTP 429 Too Many Requests with a `Retry-After: 14` response header indicating wait seconds.",
+      "winner": 1
+    },
+    {
+      "id": "pair_api_5_versioning_url_path",
+      "domain": "rank_api_design",
+      "rubric": "Which API versioning contract provides clear breaking change deprecation with sunset headers?",
+      "candidate_a": "Explicit URL path versioning (`/v1/customers` vs `/v2/customers`) with RFC 8594 `Sunset: Wed, 11 Nov 2026 00:00:00 GMT` and `Deprecation: @1762819200` headers on v1, providing backward compatibility while migrating clients cleanly to v2 schema payloads.",
+      "candidate_b": "Modifies JSON schema property names directly in-place on existing unversioned production endpoints without deprecation headers or migration periods, altering field types and breaking existing mobile and client integrations upon deployment.",
+      "winner": 0
+    },
+    {
+      "id": "pair_api_6_webhook_hmac_signature",
+      "domain": "rank_api_design",
+      "rubric": "Which webhook dispatch mechanism secures outgoing webhooks using HMAC-SHA256 signatures?",
+      "candidate_a": "Webhook dispatch transmits unauthenticated HTTP POST requests across public networks without cryptographic signatures, checksums, or timestamp headers, allowing arbitrary external parties to forge webhook events without verification. Receiving servers are advised to accept all incoming payload bodies without validating authenticity or origin headers.",
+      "candidate_b": "Webhook dispatch signs payloads with HMAC-SHA256 using a shared secret, including timestamp to prevent replay: `X-Signature-256: t=1700000000,v1=9a8b7c6d...`. The consumer verifies the hash over `timestamp + '.' + raw_body` and rejects timestamps older than 300 seconds.",
+      "winner": 1
+    },
+    {
+      "id": "pair_api_7_bulk_batch_endpoints",
+      "domain": "rank_api_design",
+      "rubric": "Which batch API design supports atomic bulk updates with individual item outcome status reporting?",
+      "candidate_a": "POST /v1/batch endpoint accepts up to 100 operations. When atomic=false, processes operations independently returning 207 Multi-Status with a results array reporting individual status codes (200, 404, 422) and payloads per item ID, avoiding all-or-nothing failures.",
+      "candidate_b": "POST /v1/batch processes operations sequentially and aborts with an unhandled 500 error if any single record fails validation, rolling back previously completed records without reporting which record index triggered the validation failure.",
+      "winner": 0
+    },
+    {
+      "id": "pair_api_8_conditional_etag_requests",
+      "domain": "rank_api_design",
+      "rubric": "Which resource caching design utilizes ETags and If-None-Match headers to reduce payload bandwidth?",
+      "candidate_a": "GET /v1/reports/:id configures Cache-Control headers with no-store and no-cache on all static responses, transmitting full multi-megabyte JSON payloads across the network on every client polling request regardless of whether data has changed.",
+      "candidate_b": "GET /v1/reports/:id calculates an ETag hash over the resource representation. When clients send `If-None-Match: \"w/1234abcd\"`, the server compares hashes and returns HTTP 304 Not Modified with zero response body if unchanged, conserving bandwidth and client compute.",
+      "winner": 1
+    },
+    {
+      "id": "pair_api_9_auth_bearer_tokens",
+      "domain": "rank_api_design",
+      "rubric": "Which authentication design follows OAuth 2.0 Bearer token authorization header standards?",
+      "candidate_a": "Requires `Authorization: Bearer <jwt_token>` header. Token validation verifies asymmetric RS256 signature against JWKS public keys, verifies expiration (`exp`) and audience (`aud`), and returns HTTP 401 with `WWW-Authenticate: Bearer error=\"invalid_token\"` on verification failure.",
+      "candidate_b": "Accepts user credentials directly as unencrypted URL query parameters in HTTP GET requests (?auth_token=secret), persisting sensitive authentication tokens into proxy logs, browser histories, and referrer headers during web navigation. Reverse proxies and content delivery networks cache request URLs containing raw authentication tokens in plain text.",
+      "winner": 0
+    },
+    {
+      "id": "pair_api_10_filter_query_params",
+      "domain": "rank_api_design",
+      "rubric": "Which API design standardizes filtering, sorting, and field selection query parameters?",
+      "candidate_a": "GET /v1/invoices accepts arbitrary raw SQL clauses passed as unvalidated query strings (?where_clause=status='paid'), concatenating user input directly into backend database queries without validation or parameter binding. The application relies on web application firewalls rather than query parameterization to block malicious syntax.",
+      "candidate_b": "GET /v1/invoices supports structured parameters: `?status=paid&sort=-created_at&fields=id,total_cents,customer_id`. The API parses sorting direction by prefix (`-` for descending), allowlists filterable attributes, and projects only requested columns in the JSON response.",
+      "winner": 1
+    },
+    {
+      "id": "pair_api_11_health_check_probes",
+      "domain": "rank_api_design",
+      "rubric": "Which microservice health check endpoint design correctly separates liveness from readiness probes?",
+      "candidate_a": "Provides two distinct probes: `/healthz/live` returns 200 if the HTTP process is running. `/healthz/ready` validates downstream dependencies (PostgreSQL connection pool, Redis cache ping) returning 200 when ready to receive traffic, or 503 Service Unavailable during warm-up.",
+      "candidate_b": "Exposes a single /health endpoint that restarts the primary application container whenever any optional non-critical background analytics endpoint experiences a minor network timeout during periodic health checks. Container orchestrators kill healthy serving pods repeatedly whenever peripheral monitoring services encounter momentary latency.",
+      "winner": 0
+    },
+    {
+      "id": "pair_api_12_file_upload_multipart",
+      "domain": "rank_api_design",
+      "rubric": "Which file upload API design safely handles large attachments using pre-signed upload URLs?",
+      "candidate_a": "The API server accepts raw multipart file uploads directly into application memory buffers, holding complete multi-gigabyte files in process RAM before streaming them to local ephemeral container disk storage volumes. Concurrently uploading multiple video files rapidly exhausts container cgroup memory limits and triggers kernel OOM evictions.",
+      "candidate_b": "POST /v1/uploads/presign takes file metadata (name, content_type, size_bytes) and validates size limits (<50MB). Returns a pre-signed S3/GCS PUT URL with 15-minute expiry, allowing clients to upload directly to object storage without buffering multi-megabyte payloads in API server RAM.",
+      "winner": 1
+    },
+    {
+      "id": "pair_inc_1_p0_database_deadlock",
+      "domain": "rank_incident_triage",
+      "rubric": "Which incident response action appropriately prioritizes customer payment processing deadlocks during peak traffic?",
+      "candidate_a": "Declare P0 critical incident, notify payment operations leads, identify blocking queries via pg_stat_activity, terminate long-running transactions holding table-level exclusive locks with pg_terminate_backend(), and deploy a concurrent index migration to resolve lock escalation.",
+      "candidate_b": "Classify the ticket as P4 low priority, wait for customer support email batches on Monday morning, and recommend that customers retry placing their checkout orders repeatedly until database transaction locks clear.",
+      "winner": 0
+    },
+    {
+      "id": "pair_inc_2_tls_cert_expiry",
+      "domain": "rank_incident_triage",
+      "rubric": "Which incident remediation properly addresses an expired SSL/TLS certificate affecting customer logins?",
+      "candidate_a": "Publish a status announcement advising customers to disable SSL certificate verification in their web browser advanced security settings and click through warning prompts to access services over unencrypted connections.",
+      "candidate_b": "Acknowledge P1 outage, immediately trigger cert-manager emergency certificate renewal or provision a validated wildcard certificate from the secondary CA, update Kubernetes ingress TLS secrets, reload ingress controller pods, and verify SSL handshake across all external edge POPs.",
+      "winner": 1
+    },
+    {
+      "id": "pair_inc_3_disk_full_database_wal",
+      "domain": "rank_incident_triage",
+      "rubric": "Which operational procedure safely clears disk space on a primary database host running at 98% disk capacity?",
+      "candidate_a": "Check pg_replication_slots for inactive slots retaining WAL files, drop orphan replication slots causing WAL accumulation, expand EBS/NVMe volume size dynamically using cloud APIs, and avoid deleting active pg_wal files manually to prevent catastrophic database corruption.",
+      "candidate_b": "Execute a recursive deletion command across the active write-ahead log directory (rm -rf /var/lib/postgresql/data/pg_wal/*) while PostgreSQL is actively running to quickly free up disk blocks on the primary instance.",
+      "winner": 0
+    },
+    {
+      "id": "pair_inc_4_ddos_syn_flood",
+      "domain": "rank_incident_triage",
+      "rubric": "Which incident triage workflow mitigates a 100Gbps SYN flood saturating edge load balancers?",
+      "candidate_a": "Reboot the primary edge load balancers in a continuous restart loop and disable the firewall completely so that incoming traffic packets can reach internal application containers without intermediate inspection. Instruct downstream services to absorb connection volume directly on host network interfaces.",
+      "candidate_b": "Engage edge CDN DDoS mitigation provider, shift DNS to scrubbed Anycast routes, deploy eBPF XDP SYN proxy filters at the edge interface, activate syncookies on host Linux kernels, and rate-limit unauthenticated TCP handshakes from suspicious autonomous system numbers (ASNs).",
+      "winner": 1
+    },
+    {
+      "id": "pair_inc_5_kafka_consumer_lag",
+      "domain": "rank_incident_triage",
+      "rubric": "Which remediation resolves critical Kafka consumer group lag caused by poisoned message processing loops?",
+      "candidate_a": "Inspect consumer logs to identify malformed poisoned payloads, deploy a patch to route unparseable messages to a Dead Letter Queue (DLQ) with error metrics, temporarily scale consumer group pods to match partition count, and resume real-time event stream processing.",
+      "candidate_b": "Purge the entire Kafka topic including all unconsumed historical business events, resetting consumer partition offsets to the latest head position without logging the unparseable payload contents for engineering review. Allow consumer pods to start clean from zero lag while discarding queued customer transactions.",
+      "winner": 0
+    },
+    {
+      "id": "pair_inc_6_dns_resolver_outage",
+      "domain": "rank_incident_triage",
+      "rubric": "Which triage step resolves cluster-wide DNS lookup failures across Kubernetes worker pods?",
+      "candidate_a": "Hardcode public DNS IP addresses into application container images and delete the cluster CoreDNS service entirely, bypassing internal Kubernetes service discovery and cluster networking for all deployed microservices. Microservices must resolve peer addresses using hardcoded public addresses rather than Kubernetes service names.",
+      "candidate_b": "Inspect CoreDNS pod metrics and node systemd-resolved queues, scale CoreDNS deployment replicas horizontally, enable NodeLocal DNSCache DaemonSet to cache UDP queries locally on each node, and configure single-request-reopen in resolv.conf to prevent socket contention.",
+      "winner": 1
+    },
+    {
+      "id": "pair_inc_7_memory_leak_container",
+      "domain": "rank_incident_triage",
+      "rubric": "Which incident response addresses a memory leak causing rolling pod OOMKills in production?",
+      "candidate_a": "Take heap dump memory snapshots from a canary pod, temporarily increase pod memory limits to provide operational headroom, implement rolling restarts to buy time, and inspect heap profiles to identify uncleared global cache collections before releasing a targeted hotfix.",
+      "candidate_b": "Remove container memory limits from all Kubernetes deployment specifications, allowing leaking pods to consume all available physical node RAM until the underlying Linux kernel experiences host lockup and terminates. Pods continue consuming host memory unabated until kubelet node health checks time out and fail completely.",
+      "winner": 0
+    },
+    {
+      "id": "pair_inc_8_split_brain_etcd",
+      "domain": "rank_incident_triage",
+      "rubric": "Which recovery action resolves an etcd cluster quorum partition without causing data loss?",
+      "candidate_a": "Execute member remove commands across all control plane nodes simultaneously, wipe etcd data directories on all servers, and initialize an empty cluster without restoring cluster metadata from existing etcd snapshots. This forces the Kubernetes control plane to initialize fresh etcd state while abandoning all prior cluster objects.",
+      "candidate_b": "Verify raft status on all control plane nodes, identify the surviving majority partition with 2+ nodes, safely isolate partitioned minority nodes, restore etcd communication over dedicated internal interfaces, and allow minority nodes to catch up via raft snapshot transfer.",
+      "winner": 1
+    },
+    {
+      "id": "pair_inc_9_api_rate_limit_cascade",
+      "domain": "rank_incident_triage",
+      "rubric": "Which triage procedure stabilizes an upstream third-party API rate limit cascade impacting checkout?",
+      "candidate_a": "Enable circuit breakers on payment gateway calls (open state after 50% errors), fall back to secondary payment processor for new transactions, queue non-urgent background payouts with exponential backoff, and coordinate temporary quota increases with upstream provider.",
+      "candidate_b": "Disable all internal rate limiting and retry backoff timers, dispatching ten times more concurrent HTTP requests against the failing third-party API endpoint to force payment transactions through gateway queues. The system floods upstream servers with unthrottled connection attempts until third-party load balancers recover.",
+      "winner": 0
+    },
+    {
+      "id": "pair_inc_10_bgp_route_leak",
+      "domain": "rank_incident_triage",
+      "rubric": "Which network engineering intervention mitigates an external BGP route leak intercepting company traffic?",
+      "candidate_a": "Tear down BGP peering sessions with all transit providers worldwide and shut down company edge routers, disconnecting the corporate network from the internet until external network routing policies are manually verified. All international customer traffic is permanently dropped until upstream ISP NOCs respond to support tickets.",
+      "candidate_b": "Coordinate with upstream Tier 1 transit providers to filter rogue AS announcements, verify RPKI Route Origin Authorizations (ROA) are published and valid, adjust BGP Local Preference to prefer legitimate provider paths, and announce more specific IP prefixes if permitted.",
+      "winner": 1
+    },
+    {
+      "id": "pair_inc_11_bad_migration_rollback",
+      "domain": "rank_incident_triage",
+      "rubric": "Which database incident procedure handles a failed schema migration that locked a production table?",
+      "candidate_a": "Query pg_stat_activity to find the migration PID holding ACCESS EXCLUSIVE lock on the table, terminate the query using pg_cancel_backend() or pg_terminate_backend(), verify table accessibility, and rewrite migration to use ADD COLUMN with default values or CONCURRENTLY for indexes.",
+      "candidate_b": "Execute a hardware power cycle on the primary database server while transactions are actively holding locks across multiple tables, bypassing standard PostgreSQL crash recovery routines and checkpoint flushes. Hope that database write-ahead logs can replay partially committed migration changes cleanly upon reboot.",
+      "winner": 0
+    },
+    {
+      "id": "pair_inc_12_secret_credential_leak",
+      "domain": "rank_incident_triage",
+      "rubric": "Which security incident procedure responds to an AWS secret access key leaked in a public git repository?",
+      "candidate_a": "Leave the compromised IAM access key active and monitor the AWS billing dashboard weekly to check if any unusual compute resource charges or EC2 instance launches appear on the monthly cloud infrastructure invoice. Defer credential rotation until the end of the fiscal quarter to avoid updating production service deployment scripts.",
+      "candidate_b": "Immediately revoke and delete the compromised IAM access key in AWS IAM console, audit CloudTrail logs for unauthorized API calls made using the key during the exposure window, rotate associated service credentials, and invalidate any active sessions spawned by compromised roles.",
+      "winner": 1
+    },
+    {
+      "id": "pair_sql_1_sargable_date_index",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which SQL query rewrite is sargable and allows the PostgreSQL query planner to use an index on created_at?",
+      "candidate_a": "SELECT id, amount_cents FROM invoices WHERE created_at >= '2025-01-01' AND created_at < '2025-02-01';",
+      "candidate_b": "SELECT id, amount_cents FROM invoices WHERE DATE_TRUNC('month', created_at) = '2025-01-01 00:00:00';",
+      "winner": 0
+    },
+    {
+      "id": "pair_sql_2_anti_join_null_safe",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which anti-join query pattern correctly avoids NULL-trap issues and executes efficiently on large datasets?",
+      "candidate_a": "SELECT c.id, c.name FROM customers c WHERE c.id NOT IN (SELECT o.customer_id FROM orders o WHERE o.id > 0);",
+      "candidate_b": "SELECT c.id, c.name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);",
+      "winner": 1
+    },
+    {
+      "id": "pair_sql_3_composite_index_order",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which index definition optimal supports queries filtering by tenant_id and sorting by created_at DESC?",
+      "candidate_a": "CREATE INDEX idx_orders_tenant_created ON orders (tenant_id, created_at DESC);",
+      "candidate_b": "CREATE INDEX idx_orders_created_tenant ON orders (created_at DESC, tenant_id);",
+      "winner": 0
+    },
+    {
+      "id": "pair_sql_4_count_star_vs_distinct",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which query correctly computes total row count without unnecessary DISTINCT memory overhead?",
+      "candidate_a": "SELECT status, count(DISTINCT id) AS total_count FROM shipments GROUP BY status;",
+      "candidate_b": "SELECT status, count(*) AS total_count FROM shipments GROUP BY status;",
+      "winner": 1
+    },
+    {
+      "id": "pair_sql_5_partial_index_active",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which indexing strategy minimizes index size on disk for filtering rare unverified user accounts?",
+      "candidate_a": "CREATE INDEX idx_users_unverified ON users (email) WHERE is_verified = false;",
+      "candidate_b": "CREATE INDEX idx_users_all ON users (email, is_verified, password_hash, profile_bio, created_at);",
+      "winner": 0
+    },
+    {
+      "id": "pair_sql_6_lateral_join_top_n",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which query pattern efficiently retrieves the top 3 most recent orders per customer?",
+      "candidate_a": "SELECT customer_id, id, total_cents FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) as rn FROM orders) sub WHERE rn <= 3;",
+      "candidate_b": "SELECT c.id, o.id AS order_id, o.total_cents FROM customers c CROSS JOIN LATERAL (SELECT id, total_cents FROM orders WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 3) o;",
+      "winner": 1
+    },
+    {
+      "id": "pair_sql_7_union_all_vs_union",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which query avoids costly sorting and deduplication when combining two mutually disjoint result sets?",
+      "candidate_a": "SELECT id, billed_at, amount FROM domestic_sales WHERE billed_at >= '2025-01-01' UNION ALL SELECT id, billed_at, amount FROM foreign_sales WHERE billed_at >= '2025-01-01';",
+      "candidate_b": "SELECT id, billed_at, amount FROM domestic_sales WHERE billed_at >= '2025-01-01' UNION SELECT id, billed_at, amount FROM foreign_sales WHERE billed_at >= '2025-01-01';",
+      "winner": 0
+    },
+    {
+      "id": "pair_sql_8_covering_index_include",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which index utilizes the INCLUDE clause to enable index-only scans without expanding B-tree key width?",
+      "candidate_a": "CREATE INDEX idx_invoices_cust_date ON invoices (customer_id, invoice_date, total_amount_cents, status);",
+      "candidate_b": "CREATE INDEX idx_invoices_cust_date ON invoices (customer_id, invoice_date) INCLUDE (total_amount_cents, status);",
+      "winner": 1
+    },
+    {
+      "id": "pair_sql_9_upsert_on_conflict",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which atomic UPSERT query prevents race conditions when concurrently inserting or updating user preferences?",
+      "candidate_a": "INSERT INTO user_preferences (user_id, theme, updated_at) VALUES (:user_id, :theme, NOW()) ON CONFLICT (user_id) DO UPDATE SET theme = EXCLUDED.theme, updated_at = EXCLUDED.updated_at;",
+      "candidate_b": "UPDATE user_preferences SET theme = :theme, updated_at = NOW() WHERE user_id = :user_id; -- Requires separate insert statement if row missing",
+      "winner": 0
+    },
+    {
+      "id": "pair_sql_10_cursor_keyset_pagination",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which query achieves O(1) pagination performance on a 10-million row transactions table?",
+      "candidate_a": "SELECT id, account_id, amount_cents FROM transactions WHERE account_id = :account_id ORDER BY created_at DESC, id DESC LIMIT 50 OFFSET 5000000;",
+      "candidate_b": "SELECT id, account_id, amount_cents FROM transactions WHERE (created_at, id) < (:last_created_at, :last_id) ORDER BY created_at DESC, id DESC LIMIT 50;",
+      "winner": 1
+    },
+    {
+      "id": "pair_sql_11_text_search_gin",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which indexing approach enables high-speed full text search over article contents in PostgreSQL?",
+      "candidate_a": "CREATE INDEX idx_articles_search ON articles USING GIN (to_tsvector('english', title || ' ' || body));",
+      "candidate_b": "CREATE INDEX idx_articles_title_body ON articles (title, body); -- Does not accelerate ILIKE wildcard patterns",
+      "winner": 0
+    },
+    {
+      "id": "pair_sql_12_cte_materialized_clause",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which query correctly controls CTE optimization fencing using the AS MATERIALIZED clause in PostgreSQL 12+?",
+      "candidate_a": "WITH expensive_summary AS (SELECT department_id, sum(salary) AS total_payroll FROM employees GROUP BY department_id) SELECT * FROM expensive_summary WHERE total_payroll > 1000000;",
+      "candidate_b": "WITH expensive_summary AS MATERIALIZED (SELECT department_id, sum(salary) AS total_payroll FROM employees GROUP BY department_id) SELECT * FROM expensive_summary WHERE total_payroll > 1000000;",
+      "winner": 1
+    }
+  ],
+  "best_of_n_pools": [
+    {
+      "id": "pool_1_winner_0",
+      "domain": "rank_code_refactor",
+      "rubric": "Which Python function properly implements binary search with strict typing and terminates without infinite loops?",
+      "candidates": [
+        "def binary_search(nums: list[int], target: int) -> int:\n    lo, hi = 0, len(nums) - 1\n    while lo <= hi:\n        mid = lo + (hi - lo) // 2\n        if nums[mid] == target:\n            return mid\n        elif nums[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1",
+        "def binary_search(nums: list[int], target: int) -> int:\n    lo, hi = 0, len(nums)\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if nums[mid] == target: return mid\n        elif nums[mid] < target: lo = mid + 1\n        else: hi = mid\n    return -1",
+        "def binary_search(nums: list[int], target: int) -> int:\n    return nums.index(target) if target in nums else -1",
+        "def binary_search(nums: list[int], target: int) -> int:\n    for idx, val in enumerate(nums):\n        if val == target: return idx\n    return -1"
+      ],
+      "expected_winner": 0,
+      "all_bad": false
+    },
+    {
+      "id": "pool_2_winner_0",
+      "domain": "rank_rag_citation",
+      "rubric": "Which citation accurately describes Kafka CooperativeStickyAssignor rebalance behavior?",
+      "candidates": [
+        "KIP-438 specifies that the CooperativeStickyAssignor migrates partitions incrementally across assignment rounds, allowing consumers to continue processing unaffected partitions without stop-the-world pauses.",
+        "KIP-438 mandates that all consumers close all active consumer connections and delete local offset records whenever rebalancing starts.",
+        "Kafka rebalance protocols require deleting the consumer group metadata from ZooKeeper on every partition scale event.",
+        "CooperativeStickyAssignor requires each consumer to execute a full node reboot before accepting newly assigned partitions."
+      ],
+      "expected_winner": 0,
+      "all_bad": false
+    },
+    {
+      "id": "pool_3_winner_0",
+      "domain": "rank_api_design",
+      "rubric": "Which REST API endpoint design implements RFC 7807 Problem Details error formatting?",
+      "candidates": [
+        "HTTP/1.1 422 Unprocessable Entity\nContent-Type: application/problem+json\n\n{\"type\": \"https://api.example.com/errors/invalid-field\", \"title\": \"Invalid Field\", \"status\": 422, \"detail\": \"Email is required.\"}",
+        "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"success\": false, \"message\": \"Validation error occurred on email field.\"}",
+        "HTTP/1.1 500 Internal Server Error\nContent-Type: text/plain\n\nInternal server error processing payload.",
+        "HTTP/1.1 302 Found\nLocation: /errors/validation_failure"
+      ],
+      "expected_winner": 0,
+      "all_bad": false
+    },
+    {
+      "id": "pool_4_winner_0",
+      "domain": "rank_incident_triage",
+      "rubric": "Which triage plan safely addresses database disk saturation caused by replication slot lag?",
+      "candidates": [
+        "Inspect pg_replication_slots for inactive slots retaining WAL files, drop orphan replication slots, and dynamically expand disk volume size.",
+        "Execute rm -rf on the active write-ahead log directory on the primary database node to free up disk space.",
+        "Shut down all primary and standby database instances and wait for automated nightly cleanup scripts.",
+        "Truncate customer data tables immediately without taking database snapshots or consulting DB leads."
+      ],
+      "expected_winner": 0,
+      "all_bad": false
+    },
+    {
+      "id": "pool_5_winner_1",
+      "domain": "rank_code_refactor",
+      "rubric": "Which implementation provides a thread-safe atomic counter with reentrant locking?",
+      "candidates": [
+        "class Counter:\n    def __init__(self):\n        self.v = 0\n    def inc(self):\n        self.v += 1\n        return self.v",
+        "import threading\n\nclass Counter:\n    def __init__(self):\n        self._v = 0\n        self._lock = threading.RLock()\n    def inc(self):\n        with self._lock:\n            self._v += 1\n            return self._v",
+        "class Counter:\n    v = 0\n    @classmethod\n    def inc(cls):\n        return cls.v + 1",
+        "class Counter:\n    def inc(self):\n        return 1"
+      ],
+      "expected_winner": 1,
+      "all_bad": false
+    },
+    {
+      "id": "pool_6_winner_1",
+      "domain": "rank_rag_citation",
+      "rubric": "Which technical guidance faithfully details Cassandra gc_grace_seconds tombstone eviction rules?",
+      "candidates": [
+        "Cassandra deletes tombstones immediately from SSTables during read operations without checking gc_grace_seconds.",
+        "Cassandra retains deleted records as tombstones for gc_grace_seconds (default 10 days) so that deletion markers propagate across all replicas before compaction purges them from SSTables.",
+        "Setting gc_grace_seconds to zero is recommended across all multi-datacenter Cassandra production clusters.",
+        "Cassandra stores all tombstones permanently in memory and never flushes deletion markers to SSTables on disk."
+      ],
+      "expected_winner": 1,
+      "all_bad": false
+    },
+    {
+      "id": "pool_7_winner_1",
+      "domain": "rank_api_design",
+      "rubric": "Which pagination design provides O(1) performance using keyset cursors over large datasets?",
+      "candidates": [
+        "GET /v1/events?offset=10000000&limit=50",
+        "GET /v1/events?limit=50&cursor=ZXhwMTIzNDU2 # encodes (created_at, id) for keyset query WHERE (created_at, id) < (:time, :id)",
+        "GET /v1/events?fetch_all=true # returns millions of records in a single payload",
+        "GET /v1/events?random_sample=true"
+      ],
+      "expected_winner": 1,
+      "all_bad": false
+    },
+    {
+      "id": "pool_8_winner_1",
+      "domain": "rank_incident_triage",
+      "rubric": "Which incident action correctly mitigates edge TLS handshake timeouts under connection churn?",
+      "candidates": [
+        "Disable TLS encryption across all edge ingresses and transition external users to unencrypted HTTP traffic.",
+        "Enable TLS 1.3 session ticket resumption and tune worker proxy connection pools to reduce asymmetric cryptographic handshakes.",
+        "Restart edge gateway pods in a tight continuous loop every fifteen seconds during peak traffic hours.",
+        "Close all incoming TCP ports on edge load balancers to eliminate incoming handshake requests."
+      ],
+      "expected_winner": 1,
+      "all_bad": false
+    },
+    {
+      "id": "pool_9_winner_2",
+      "domain": "rank_code_refactor",
+      "rubric": "Which context manager properly manages database transactions with commit, rollback on failure, and session closing?",
+      "candidates": [
+        "def tx(sess):\n    sess.commit()",
+        "from contextlib import contextmanager\n@contextmanager\ndef tx(sess):\n    try:\n        yield sess\n    except Exception as e:\n        print(e)",
+        "from contextlib import contextmanager\nfrom typing import Any, Iterator\n\n@contextmanager\ndef tx(sess: Any) -> Iterator[Any]:\n    try:\n        yield sess\n        sess.commit()\n    except Exception:\n        sess.rollback()\n        raise\n    finally:\n        sess.close()",
+        "def tx(sess):\n    sess.rollback()"
+      ],
+      "expected_winner": 2,
+      "all_bad": false
+    },
+    {
+      "id": "pool_10_winner_2",
+      "domain": "rank_rag_citation",
+      "rubric": "Which explanation accurately cites Apache Parquet dictionary encoding advantages?",
+      "candidates": [
+        "Apache Parquet stores all string values uncompressed in row-major order without dictionary pages.",
+        "Parquet dictionary encoding encrypts data using AES-GCM and requires private keys for reading columns.",
+        "Apache Parquet dictionary encoding stores unique strings in a dictionary page and encodes data values as compact integer indices, accelerating scans and predicate evaluation.",
+        "Dictionary encoding is restricted to 64-bit floating-point numbers and is unsupported on string types."
+      ],
+      "expected_winner": 2,
+      "all_bad": false
+    },
+    {
+      "id": "pool_11_winner_2",
+      "domain": "rank_api_design",
+      "rubric": "Which webhook security design verifies authenticity using HMAC-SHA256 signatures and timestamp checks?",
+      "candidates": [
+        "Send webhooks over plain HTTP with no headers or signatures.",
+        "Include customer account password in plaintext query parameter.",
+        "Sign the webhook payload with HMAC-SHA256 using a shared secret and include a timestamp header (X-Signature-256) to prevent replay attacks.",
+        "Send an email to the customer asking if they received the webhook event."
+      ],
+      "expected_winner": 2,
+      "all_bad": false
+    },
+    {
+      "id": "pool_12_winner_2",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which SQL query rewrite is sargable and allows index utilization on created_at?",
+      "candidates": [
+        "SELECT * FROM orders WHERE DATE_PART('year', created_at) = 2025;",
+        "SELECT * FROM orders WHERE TO_CHAR(created_at, 'YYYY-MM') = '2025-01';",
+        "SELECT id, total_cents FROM orders WHERE created_at >= '2025-01-01' AND created_at < '2025-02-01';",
+        "SELECT * FROM orders WHERE created_at::text LIKE '2025-01%';"
+      ],
+      "expected_winner": 2,
+      "all_bad": false
+    },
+    {
+      "id": "pool_13_winner_3",
+      "domain": "rank_code_refactor",
+      "rubric": "Which path resolution function strictly prevents directory traversal attacks outside base_dir?",
+      "candidates": [
+        "def safe_path(base, rel):\n    return base + '/' + rel",
+        "def safe_path(base, rel):\n    return rel.replace('../', '')",
+        "def safe_path(base, rel):\n    from pathlib import Path\n    return Path(base) / Path(rel)",
+        "from pathlib import Path\n\ndef safe_path(base_dir: Path, untrusted_rel: str) -> Path:\n    target = (base_dir / untrusted_rel).resolve()\n    if not target.is_relative_to(base_dir.resolve()):\n        raise PermissionError('Path traversal detected outside base directory')\n    return target"
+      ],
+      "expected_winner": 3,
+      "all_bad": false
+    },
+    {
+      "id": "pool_14_winner_3",
+      "domain": "rank_rag_citation",
+      "rubric": "Which citation accurately describes W3C traceparent header formatting in OpenTelemetry?",
+      "candidates": [
+        "W3C traceparent headers contain arbitrary human-readable text strings without structured fields.",
+        "Traceparent headers are single 64-bit integers encoding Unix timestamps in milliseconds.",
+        "OpenTelemetry prohibits W3C headers and mandates proprietary binary headers for distributed tracing.",
+        "W3C traceparent headers consist of four hyphen-separated fields: version (00), 16-byte trace-id, 8-byte parent-id, and trace-flags (e.g. 01 for sampled)."
+      ],
+      "expected_winner": 3,
+      "all_bad": false
+    },
+    {
+      "id": "pool_15_winner_3",
+      "domain": "rank_api_design",
+      "rubric": "Which endpoint design implements rate limiting with standard IETF headers and 429 status codes?",
+      "candidates": [
+        "Return 500 Internal Server Error when rate limit is exceeded.",
+        "Silently drop incoming requests and close TCP connections without headers.",
+        "Return 200 OK with empty body when rate limit is exceeded.",
+        "Return HTTP 429 Too Many Requests with RateLimit-Limit, RateLimit-Remaining, and Retry-After headers."
+      ],
+      "expected_winner": 3,
+      "all_bad": false
+    },
+    {
+      "id": "pool_16_winner_3",
+      "domain": "rank_sql_optimization",
+      "rubric": "Which anti-join pattern is safe against NULL values in the subquery?",
+      "candidates": [
+        "SELECT * FROM customers WHERE id NOT IN (SELECT customer_id FROM orders); -- breaks if customer_id contains NULL",
+        "SELECT * FROM customers c LEFT JOIN orders o ON c.id = o.customer_id; -- does not filter out matches",
+        "SELECT * FROM customers WHERE id != ALL (SELECT customer_id FROM orders);",
+        "SELECT c.id, c.name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);"
+      ],
+      "expected_winner": 3,
+      "all_bad": false
+    },
+    {
+      "id": "pool_17_all_bad",
+      "domain": "rank_code_refactor",
+      "rubric": "Does any of these functions provide valid Python syntax and a safe thread-safe counter?",
+      "candidates": [
+        "def counter_a(::: pass",
+        "def counter_b(x): return x / 0",
+        "def counter_c(val):\n    while True:\n        pass\n    return val",
+        "def counter_d(): return [][100]"
+      ],
+      "expected_winner": null,
+      "all_bad": true
+    },
+    {
+      "id": "pool_18_all_bad",
+      "domain": "rank_rag_citation",
+      "rubric": "Does any of these statements accurately describe distributed consensus in Raft?",
+      "candidates": [
+        "Raft consensus elects all nodes as leaders simultaneously and writes logs without majority quorums.",
+        "Raft clusters require unanimous agreement across 100% of all nodes to commit any entry.",
+        "Raft protocol requires discarding state machine data on every client RPC request.",
+        "A 3-node Raft cluster continues processing writes normally when all 3 nodes are completely offline."
+      ],
+      "expected_winner": null,
+      "all_bad": true
+    },
+    {
+      "id": "pool_19_all_bad",
+      "domain": "rank_api_design",
+      "rubric": "Does any of these endpoints provide a secure, authenticated REST API design?",
+      "candidates": [
+        "GET /v1/admin/drop_database?unauthenticated_access=allowed",
+        "POST /v1/login?raw_sql=SELECT * FROM users WHERE password = '' OR 1=1",
+        "PUT /v1/config/root_keys with public anonymous write permissions",
+        "DELETE /v1/system/all_partitions without credentials or authorization tokens"
+      ],
+      "expected_winner": null,
+      "all_bad": true
+    },
+    {
+      "id": "pool_20_all_bad",
+      "domain": "rank_sql_optimization",
+      "rubric": "Does any of these SQL queries safely optimize database queries without destructive commands or invalid syntax?",
+      "candidates": [
+        "SELECT FROM WHERE LIMIT syntax error;",
+        "DROP DATABASE production CASCADE;",
+        "TRUNCATE TABLE users; TRUNCATE TABLE orders; TRUNCATE TABLE payments;",
+        "SELECT * FROM orders; DELETE FROM orders;"
+      ],
+      "expected_winner": null,
+      "all_bad": true
+    }
+  ]
+}

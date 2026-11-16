@@ -45,12 +45,15 @@ from dataset import (
 
 from logitgate import ASTGate, ChoiceGate, JudgeGate, LogitGate, ScoreGate
 from logitgate.backends.recurrent import RecurrentPyTorchBackend
+from logitgate.cascade import fuse_escalated_verdict
 from logitgate.models import DecisionStatus
 
 
 def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
     """Evaluates the 24-item multi-domain suite comparing Baseline Judge vs Cascade."""
-    print(f"\n=== [Suite 1: 24-Item Multi-Domain Cascade] {model_label} ===", flush=True)
+    print(
+        f"\n=== [Suite 1: 24-Item Multi-Domain Cascade] {model_label} ===", flush=True
+    )
 
     max_tok = 40
     # Warmup
@@ -62,16 +65,21 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
     base_tokens = 0
     base_correct = 0
     for idx, item in enumerate(MULTI_DOMAIN_24_ITEMS, 1):
-        jg = JudgeGate(rubric=item["rubric"], backend=backend, max_tokens=max_tok, think=False)
+        jg = JudgeGate(
+            rubric=item["rubric"], backend=backend, max_tokens=max_tok, think=False
+        )
         t_item = time.perf_counter()
         v = jg.evaluate(item["candidate"])
         dt_ms = (time.perf_counter() - t_item) * 1000.0
         base_tokens += v.total_tokens_generated
-        is_corr = (v.passed == item["expected"])
+        is_corr = v.passed == item["expected"]
         if is_corr:
             base_correct += 1
-        print(f"  [{idx:02d}/24] {item['id']:<38} Exp={item['expected']!s:<5} Judge={v.passed!s:<5} "
-              f"[{'OK' if is_corr else 'ERR'}] ({dt_ms:6.1f}ms, {v.total_tokens_generated} tok)", flush=True)
+        print(
+            f"  [{idx:02d}/24] {item['id']:<38} Exp={item['expected']!s:<5} Judge={v.passed!s:<5} "
+            f"[{'OK' if is_corr else 'ERR'}] ({dt_ms:6.1f}ms, {v.total_tokens_generated} tok)",
+            flush=True,
+        )
     base_time_ms = (time.perf_counter() - t0) * 1000.0
 
     # 2. Cascade Evaluation
@@ -90,7 +98,9 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
 
     for idx, item in enumerate(MULTI_DOMAIN_24_ITEMS, 1):
         ast_gate = ASTGate(**item.get("ast_config", {}))
-        logit_gate = LogitGate(rubric=item["rubric"], backend=backend, preset="balanced")
+        logit_gate = LogitGate(
+            rubric=item["rubric"], backend=backend, preset="balanced"
+        )
 
         t_start = time.perf_counter()
         v_l0 = ast_gate.evaluate(item["candidate"])
@@ -102,7 +112,10 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
             if not item["expected"]:
                 correct_ambig_or_fail += 1
                 correct_ambig_only += 1
-            print(f"  [{idx:02d}/24] {item['id']:<38} -> Resolved by L0 ASTGate in {dt_l0:.1f}ms (0 tokens)", flush=True)
+            print(
+                f"  [{idx:02d}/24] {item['id']:<38} -> Resolved by L0 ASTGate in {dt_l0:.1f}ms (0 tokens)",
+                flush=True,
+            )
             continue
 
         v_l1 = logit_gate.evaluate(item["candidate"])
@@ -115,7 +128,10 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
             if item["expected"]:
                 correct_ambig_or_fail += 1
                 correct_ambig_only += 1
-            print(f"  [{idx:02d}/24] {item['id']:<38} -> Resolved by L1 LogitGate PASS (P={v_l1.probability:.2f}) in {dt_l0_l1:.1f}ms (0 tokens)", flush=True)
+            print(
+                f"  [{idx:02d}/24] {item['id']:<38} -> Resolved by L1 LogitGate PASS (P={v_l1.probability:.2f}) in {dt_l0_l1:.1f}ms (0 tokens)",
+                flush=True,
+            )
         elif v_l1.status == DecisionStatus.FAILED:
             l1_decisive_count += 1
             time_ambig_only_ms += dt_l0_l1
@@ -124,29 +140,40 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
 
             # on_ambiguous_or_fail generates diagnostic
             t_j = time.perf_counter()
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, max_tokens=max_tok, think=False)
+            jg = JudgeGate(
+                rubric=item["rubric"], backend=backend, max_tokens=max_tok, think=False
+            )
             v_j = jg.evaluate(item["candidate"])
             dt_j = (time.perf_counter() - t_j) * 1000.0
             time_ambig_or_fail_ms += dt_l0_l1 + dt_j
             tokens_ambig_or_fail += v_j.total_tokens_generated
             if not item["expected"]:
                 correct_ambig_or_fail += 1
-            print(f"  [{idx:02d}/24] {item['id']:<38} -> Resolved by L1 LogitGate FAIL (P={v_l1.probability:.2f}) in {dt_l0_l1:.1f}ms (esc diagnostics: {dt_j:.1f}ms)", flush=True)
+            print(
+                f"  [{idx:02d}/24] {item['id']:<38} -> Resolved by L1 LogitGate FAIL (P={v_l1.probability:.2f}) in {dt_l0_l1:.1f}ms (esc diagnostics: {dt_j:.1f}ms)",
+                flush=True,
+            )
         else:
             # Ambiguous -> escalate to JudgeGate
             l2_escalated_count += 1
             t_j = time.perf_counter()
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, max_tokens=max_tok, think=False)
+            jg = JudgeGate(
+                rubric=item["rubric"], backend=backend, max_tokens=max_tok, think=False
+            )
             v_j = jg.evaluate(item["candidate"])
             dt_j = (time.perf_counter() - t_j) * 1000.0
             time_ambig_or_fail_ms += dt_l0_l1 + dt_j
             time_ambig_only_ms += dt_l0_l1 + dt_j
             tokens_ambig_or_fail += v_j.total_tokens_generated
             tokens_ambig_only += v_j.total_tokens_generated
-            if v_j.passed == item["expected"]:
+            fused_passed, _, _, _ = fuse_escalated_verdict(v_l1, v_j)
+            if fused_passed == item["expected"]:
                 correct_ambig_or_fail += 1
                 correct_ambig_only += 1
-            print(f"  [{idx:02d}/24] {item['id']:<38} -> AMBIGUOUS (P={v_l1.probability:.2f}) -> L2 JudgeGate ({dt_j:.1f}ms, {v_j.total_tokens_generated} tok)", flush=True)
+            print(
+                f"  [{idx:02d}/24] {item['id']:<38} -> AMBIGUOUS (P={v_l1.probability:.2f}) -> L2 JudgeGate ({dt_j:.1f}ms, {v_j.total_tokens_generated} tok)",
+                flush=True,
+            )
 
     n = len(MULTI_DOMAIN_24_ITEMS)
     speedup_only = round(base_time_ms / max(time_ambig_only_ms, 0.1), 1)
@@ -172,17 +199,27 @@ def eval_multi_domain_24(backend: Any, model_label: str) -> dict[str, Any]:
             "l0_plus_l1_rate": f"{l0_count + l1_decisive_count}/{n} ({round((l0_count + l1_decisive_count) / n * 100, 1)}%)",
         },
     }
-    print(f"  --> Baseline: {res['baseline_accuracy']} in {res['baseline_time_ms']}ms", flush=True)
-    print(f"  --> Cascade (on_ambiguous_only): {res['cascade_ambig_only_accuracy']} in {res['cascade_ambig_only_time_ms']}ms ({speedup_only}x speedup, saved {tokens_saved_only} tokens)", flush=True)
+    print(
+        f"  --> Baseline: {res['baseline_accuracy']} in {res['baseline_time_ms']}ms",
+        flush=True,
+    )
+    print(
+        f"  --> Cascade (on_ambiguous_only): {res['cascade_ambig_only_accuracy']} in {res['cascade_ambig_only_time_ms']}ms ({speedup_only}x speedup, saved {tokens_saved_only} tokens)",
+        flush=True,
+    )
     return res
 
 
 def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
     """Evaluates the 32-item reasoning depth suite (Tiers A, B-Compound, B-Atomic, C, D)."""
-    print(f"\n=== [Suite 2: 32-Item Reasoning Depth Tiers] {model_label} ===", flush=True)
+    print(
+        f"\n=== [Suite 2: 32-Item Reasoning Depth Tiers] {model_label} ===", flush=True
+    )
     out: dict[str, Any] = {}
 
-    def _run_binary_tier(tier_name: str, items: list[dict[str, Any]], rubric_override: str | None = None) -> dict[str, Any]:
+    def _run_binary_tier(
+        tier_name: str, items: list[dict[str, Any]], rubric_override: str | None = None
+    ) -> dict[str, Any]:
         l1_correct = 0
         l1_fp = 0
         l1_esc = 0
@@ -197,7 +234,9 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
             v_casc = v_l1
             if v_l1.status == DecisionStatus.AMBIGUOUS:
                 l1_esc += 1
-                jg = JudgeGate(rubric=rubric, backend=backend, max_tokens=40, think=False)
+                jg = JudgeGate(
+                    rubric=rubric, backend=backend, max_tokens=40, think=False
+                )
                 v_casc = jg.evaluate(item["candidate"])
 
             p = v_l1.probability if v_l1.probability is not None else 0.5
@@ -208,7 +247,7 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
             elif v_l1.status == DecisionStatus.FAILED:
                 casc_pass = False
             else:
-                casc_pass = v_casc.passed
+                casc_pass, _, _, _ = fuse_escalated_verdict(v_l1, v_casc)
 
             if not item["expected"] and v_l1.status == DecisionStatus.PASSED:
                 l1_fp += 1
@@ -217,16 +256,21 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
             if casc_pass == item["expected"]:
                 casc_correct += 1
 
-            rows.append({
-                "id": item["id"],
-                "expected": item["expected"],
-                "l1_status": v_l1.status.value,
-                "l1_prob": round(p, 4),
-                "l1_correct": l1_pass == item["expected"],
-                "casc_correct": casc_pass == item["expected"],
-            })
-            print(f"  [{tier_name}] {item['id']:<35} Exp={item['expected']!s:<5} P={round(p, 2):<4} "
-                  f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}", flush=True)
+            rows.append(
+                {
+                    "id": item["id"],
+                    "expected": item["expected"],
+                    "l1_status": v_l1.status.value,
+                    "l1_prob": round(p, 4),
+                    "l1_correct": l1_pass == item["expected"],
+                    "casc_correct": casc_pass == item["expected"],
+                }
+            )
+            print(
+                f"  [{tier_name}] {item['id']:<35} Exp={item['expected']!s:<5} P={round(p, 2):<4} "
+                f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}",
+                flush=True,
+            )
 
         return {
             "l1_correct": l1_correct,
@@ -242,7 +286,9 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
         }
 
     out["tier_a"] = _run_binary_tier("tier_a", TIER_A_8_ITEMS)
-    out["tier_b_compound"] = _run_binary_tier("tier_b_compound", TIER_B_8_ITEMS, rubric_override=TIER_B_COMPOUND_RUBRIC)
+    out["tier_b_compound"] = _run_binary_tier(
+        "tier_b_compound", TIER_B_8_ITEMS, rubric_override=TIER_B_COMPOUND_RUBRIC
+    )
 
     # Tier B Atomic
     print("--- Running Tier B Atomic Isolated Batch ---", flush=True)
@@ -267,7 +313,9 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
         else:
             l1_pass = True
 
-        if not item["expected"] and all(v.status == DecisionStatus.PASSED for v in verdicts):
+        if not item["expected"] and all(
+            v.status == DecisionStatus.PASSED for v in verdicts
+        ):
             l1_b_atom_fp += 1
         if l1_pass == item["expected"]:
             l1_b_atom_correct += 1
@@ -280,19 +328,26 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
                 rule_passes.append(False)
             else:
                 jg = JudgeGate(rubric=r, backend=backend, max_tokens=40, think=False)
-                rule_passes.append(jg.evaluate(item["candidate"]).passed)
+                v_j = jg.evaluate(item["candidate"])
+                casc_r_pass, _, _, _ = fuse_escalated_verdict(v, v_j)
+                rule_passes.append(casc_r_pass)
         casc_pass = all(rule_passes)
         if casc_pass == item["expected"]:
             casc_b_atom_correct += 1
-        atom_rows.append({
-            "id": item["id"],
-            "expected": item["expected"],
-            "probs": [round(p, 4) for p in probs],
-            "l1_correct": l1_pass == item["expected"],
-            "casc_correct": casc_pass == item["expected"],
-        })
-        print(f"  [tier_b_atomic] {item['id']:<35} Exp={item['expected']!s:<5} Probs={[round(p, 2) for p in probs]} "
-              f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}", flush=True)
+        atom_rows.append(
+            {
+                "id": item["id"],
+                "expected": item["expected"],
+                "probs": [round(p, 4) for p in probs],
+                "l1_correct": l1_pass == item["expected"],
+                "casc_correct": casc_pass == item["expected"],
+            }
+        )
+        print(
+            f"  [tier_b_atomic] {item['id']:<35} Exp={item['expected']!s:<5} Probs={[round(p, 2) for p in probs]} "
+            f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}",
+            flush=True,
+        )
 
     n_b = len(TIER_B_8_ITEMS)
     out["tier_b_atomic"] = {
@@ -309,14 +364,27 @@ def eval_reasoning_tiers(backend: Any, model_label: str) -> dict[str, Any]:
     out["tier_c"] = _run_binary_tier("tier_c", TIER_C_8_ITEMS)
     out["tier_d"] = _run_binary_tier("tier_d", TIER_D_8_ITEMS)
 
-    tot_comp = out["tier_a"]["casc_correct"] + out["tier_b_compound"]["casc_correct"] + out["tier_c"]["casc_correct"] + out["tier_d"]["casc_correct"]
-    tot_atom = out["tier_a"]["casc_correct"] + out["tier_b_atomic"]["casc_correct"] + out["tier_c"]["casc_correct"] + out["tier_d"]["casc_correct"]
+    tot_comp = (
+        out["tier_a"]["casc_correct"]
+        + out["tier_b_compound"]["casc_correct"]
+        + out["tier_c"]["casc_correct"]
+        + out["tier_d"]["casc_correct"]
+    )
+    tot_atom = (
+        out["tier_a"]["casc_correct"]
+        + out["tier_b_atomic"]["casc_correct"]
+        + out["tier_c"]["casc_correct"]
+        + out["tier_d"]["casc_correct"]
+    )
 
     out["summary_32"] = {
         "cascade_compound_b": f"{tot_comp}/32 ({round(tot_comp / 32 * 100, 1)}%)",
         "cascade_atomic_b": f"{tot_atom}/32 ({round(tot_atom / 32 * 100, 1)}%)",
     }
-    print(f"  --> Reasoning Summary for {model_label}: Compound={out['summary_32']['cascade_compound_b']}, Atomic={out['summary_32']['cascade_atomic_b']}", flush=True)
+    print(
+        f"  --> Reasoning Summary for {model_label}: Compound={out['summary_32']['cascade_compound_b']}, Atomic={out['summary_32']['cascade_atomic_b']}",
+        flush=True,
+    )
     return out
 
 
@@ -329,7 +397,12 @@ def eval_choice_and_score(backend: Any, model_label: str) -> dict[str, Any]:
     choice_correct = 0
     choice_lats = []
     for it in CHOICE_GATE_6_ITEMS:
-        gate = ChoiceGate(question=it["question"], options=it["options"], backend=backend, symmetric_debiasing=True)
+        gate = ChoiceGate(
+            question=it["question"],
+            options=it["options"],
+            backend=backend,
+            symmetric_debiasing=True,
+        )
         t0 = time.perf_counter()
         v = gate.evaluate(it["candidate"])
         lat = (time.perf_counter() - t0) * 1000.0
@@ -337,14 +410,19 @@ def eval_choice_and_score(backend: Any, model_label: str) -> dict[str, Any]:
         exp = it.get("expected_choice") or it.get("expected")
         if v.choice == exp:
             choice_correct += 1
-        print(f"  [ChoiceGate] {it['id']:<32} Exp={exp} Got={v.choice} [{'OK' if v.choice == exp else 'ERR'}] ({lat:5.1f}ms)", flush=True)
+        print(
+            f"  [ChoiceGate] {it['id']:<32} Exp={exp} Got={v.choice} [{'OK' if v.choice == exp else 'ERR'}] ({lat:5.1f}ms)",
+            flush=True,
+        )
 
     out["choice_gate"] = {
         "correct": choice_correct,
         "total": len(CHOICE_GATE_6_ITEMS),
-        "accuracy": f"{choice_correct}/{len(CHOICE_GATE_6_ITEMS)} ({round(choice_correct/len(CHOICE_GATE_6_ITEMS)*100, 1)}%)",
+        "accuracy": f"{choice_correct}/{len(CHOICE_GATE_6_ITEMS)} ({round(choice_correct / len(CHOICE_GATE_6_ITEMS) * 100, 1)}%)",
         "mean_latency_ms": round(statistics.mean(choice_lats), 1),
-        "std_latency_ms": round(statistics.stdev(choice_lats), 1) if len(choice_lats) > 1 else 0.0,
+        "std_latency_ms": round(statistics.stdev(choice_lats), 1)
+        if len(choice_lats) > 1
+        else 0.0,
     }
 
     # ScoreGate
@@ -353,7 +431,13 @@ def eval_choice_and_score(backend: Any, model_label: str) -> dict[str, Any]:
     in_band_count = 0
 
     for it in SCORE_GATE_6_ITEMS:
-        score_gate = ScoreGate(rubric=it["rubric"], min_score=1, max_score=5, backend=backend, symmetric_debiasing=True)
+        score_gate = ScoreGate(
+            rubric=it["rubric"],
+            min_score=1,
+            max_score=5,
+            backend=backend,
+            symmetric_debiasing=True,
+        )
         t0 = time.perf_counter()
         v = score_gate.evaluate(it["candidate"])
         lat = (time.perf_counter() - t0) * 1000.0
@@ -363,7 +447,10 @@ def eval_choice_and_score(backend: Any, model_label: str) -> dict[str, Any]:
         lo, hi = it["expected_band"]
         if lo <= s <= hi:
             in_band_count += 1
-        print(f"  [ScoreGate] {it['id']:<32} Tier={it['tier']:<6} Score={s:4.2f} (Band: [{lo}, {hi}]) ({lat:5.1f}ms)", flush=True)
+        print(
+            f"  [ScoreGate] {it['id']:<32} Tier={it['tier']:<6} Score={s:4.2f} (Band: [{lo}, {hi}]) ({lat:5.1f}ms)",
+            flush=True,
+        )
 
     h_mean = statistics.mean(scores_by_tier["high"])
     m_mean = statistics.mean(scores_by_tier["medium"])
@@ -388,19 +475,30 @@ def eval_choice_and_score(backend: Any, model_label: str) -> dict[str, Any]:
         "score_low_mean": round(l_mean, 2),
         "monotonic_pairs": monotonic,
         "total_pairs": total_pairs,
-        "monotonicity_rate": f"{monotonic}/{total_pairs} ({round(monotonic/total_pairs*100, 1)}%)",
-        "in_band_rate": f"{in_band_count}/6 ({round(in_band_count/6*100, 1)}%)",
+        "monotonicity_rate": f"{monotonic}/{total_pairs} ({round(monotonic / total_pairs * 100, 1)}%)",
+        "in_band_rate": f"{in_band_count}/6 ({round(in_band_count / 6 * 100, 1)}%)",
         "mean_latency_ms": round(statistics.mean(score_lats), 1),
-        "std_latency_ms": round(statistics.stdev(score_lats), 1) if len(score_lats) > 1 else 0.0,
+        "std_latency_ms": round(statistics.stdev(score_lats), 1)
+        if len(score_lats) > 1
+        else 0.0,
     }
-    print(f"  --> ChoiceGate: {out['choice_gate']['accuracy']} in {out['choice_gate']['mean_latency_ms']}ms", flush=True)
-    print(f"  --> ScoreGate Monotonicity: {out['score_gate']['monotonicity_rate']} (High={h_mean:.2f}, Med={m_mean:.2f}, Low={l_mean:.2f})", flush=True)
+    print(
+        f"  --> ChoiceGate: {out['choice_gate']['accuracy']} in {out['choice_gate']['mean_latency_ms']}ms",
+        flush=True,
+    )
+    print(
+        f"  --> ScoreGate Monotonicity: {out['score_gate']['monotonicity_rate']} (High={h_mean:.2f}, Med={m_mean:.2f}, Low={l_mean:.2f})",
+        flush=True,
+    )
     return out
 
 
 def eval_diverse_haystack(backend: Any, model_label: str) -> list[dict[str, Any]]:
     """Evaluates the haystack document across context lengths (200 to 16,000 tokens)."""
-    print(f"\n=== [Suite 4: Diverse Haystack Context Scaling] {model_label} ===", flush=True)
+    print(
+        f"\n=== [Suite 4: Diverse Haystack Context Scaling] {model_label} ===",
+        flush=True,
+    )
     tiers = [
         ("Short (~200 tok)", 150),
         ("Medium (~1,500 tok)", 1100),
@@ -423,7 +521,7 @@ def eval_diverse_haystack(backend: Any, model_label: str) -> list[dict[str, Any]
         p_c = v_pass.probability or 0.0
         p_v = v_fail.probability or 0.0
         delta = p_c - p_v
-        correct = (p_c >= 0.5 and p_v < 0.5)
+        correct = p_c >= 0.5 and p_v < 0.5
 
         row = {
             "tier": label,
@@ -434,17 +532,35 @@ def eval_diverse_haystack(backend: Any, model_label: str) -> list[dict[str, Any]
             "correct_both": correct,
         }
         results.append(row)
-        print(f"  [{label}] P_pass={p_c:.4f} P_fail={p_v:.4f} Delta={delta:.4f} [{'OK' if correct else 'ERR'}] ({t_pass:6.1f}ms)", flush=True)
+        print(
+            f"  [{label}] P_pass={p_c:.4f} P_fail={p_v:.4f} Delta={delta:.4f} [{'OK' if correct else 'ERR'}] ({t_pass:6.1f}ms)",
+            flush=True,
+        )
 
     return results
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Dory benchmarks on GPUs")
-    parser.add_argument("--devices", nargs="+", default=["cuda:0", "cuda:1"], help="CUDA devices to benchmark (e.g. cuda:0 cuda:1)")
-    parser.add_argument("--loops", nargs="+", type=int, default=[1, 2, 4], help="Recurrent loop counts to benchmark (e.g. 1 2 4)")
-    parser.add_argument("--output", type=Path, default=REPO_ROOT / "benchmarks" / "dory_results.json")
-    parser.add_argument("--model-name", default="nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16")
+    parser.add_argument(
+        "--devices",
+        nargs="+",
+        default=["cuda:0", "cuda:1"],
+        help="CUDA devices to benchmark (e.g. cuda:0 cuda:1)",
+    )
+    parser.add_argument(
+        "--loops",
+        nargs="+",
+        type=int,
+        default=[1, 2, 4],
+        help="Recurrent loop counts to benchmark (e.g. 1 2 4)",
+    )
+    parser.add_argument(
+        "--output", type=Path, default=REPO_ROOT / "benchmarks" / "dory_results.json"
+    )
+    parser.add_argument(
+        "--model-name", default="nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16"
+    )
     args = parser.parse_args()
 
     results: dict[str, Any] = {}
@@ -459,12 +575,16 @@ def main() -> None:
 
         from logitgate.backends.dory_pytorch import load_dory_model
 
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.model_name, trust_remote_code=True
+        )
         model = load_dory_model(args.model_name, device=dev, num_loops=2)
 
         for k in args.loops:
             label = f"dory-4b_{dev}_k{k}"
-            print("\n-------------------------------------------------------", flush=True)
+            print(
+                "\n-------------------------------------------------------", flush=True
+            )
             print(f"  BENCHMARKING: {label} (Device={dev}, num_loops={k})", flush=True)
             print("-------------------------------------------------------", flush=True)
 
@@ -497,6 +617,7 @@ def main() -> None:
         del tokenizer
         del backend
         import torch
+
         gc.collect()
         torch.cuda.empty_cache()
 

@@ -1,0 +1,722 @@
+[
+  {
+    "id": "cjk_k8s_tokyo_pod_eviction_clean_pass",
+    "quad_id": "cjk_k8s_tokyo_pod_eviction",
+    "domain": "bpe_cjk_technical",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the analysis correctly attribute the pod eviction in the Tokyo cluster (東京リージョン) to container memory limits rather than disk pressure?",
+    "candidate": "[TECHNICAL CONTEXT]\n障害報告 [東京リージョン ap-northeast-1]: Kubernetesクラスタ内の billing-service ポッドが頻繁に強制終了 (OOMKilled) されています。ノードのDiskPressureはFalseですが、コンテナの limits.memory は 2GiB に設定されており、Prometheusの container_memory_working_set_bytes が 2045MiB に達した瞬間に exitCode: 137 で終了しています。\n\n[ANALYSIS & RECOMMENDATION]\nログとメトリクスに基づくと、ポッド終了の原因はコンテナの limits.memory (2GiB) 超過による OOMKilled (exitCode 137) です。ノードのDiskPressureは発生していません。"
+  },
+  {
+    "id": "cjk_k8s_tokyo_pod_eviction_hard_positive",
+    "quad_id": "cjk_k8s_tokyo_pod_eviction",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the analysis correctly attribute the pod eviction in the Tokyo cluster (東京リージョン) to container memory limits rather than disk pressure?",
+    "candidate": "[TECHNICAL CONTEXT]\n障害報告 [東京リージョン ap-northeast-1]: Kubernetesクラスタ内の billing-service ポッドが頻繁に強制終了 (OOMKilled) されています。ノードのDiskPressureはFalseですが、コンテナの limits.memory は 2GiB に設定されており、Prometheusの container_memory_working_set_bytes が 2045MiB に達した瞬間に exitCode: 137 で終了しています。\n\n[ANALYSIS & RECOMMENDATION]\n東京クラスタの障害原因は limits.memory (2GiB) 到達に伴う cgroup OOMKilled (exitCode 137) であり、DiskPressureによるPodEvictionではありません。"
+  },
+  {
+    "id": "cjk_k8s_tokyo_pod_eviction_obvious_fail",
+    "quad_id": "cjk_k8s_tokyo_pod_eviction",
+    "domain": "bpe_cjk_technical",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the analysis correctly attribute the pod eviction in the Tokyo cluster (東京リージョン) to container memory limits rather than disk pressure?",
+    "candidate": "[TECHNICAL CONTEXT]\n障害報告 [東京リージョン ap-northeast-1]: Kubernetesクラスタ内の billing-service ポッドが頻繁に強制終了 (OOMKilled) されています。ノードのDiskPressureはFalseですが、コンテナの limits.memory は 2GiB に設定されており、Prometheusの container_memory_working_set_bytes が 2045MiB に達した瞬間に exitCode: 137 で終了しています。\n\n[ANALYSIS & RECOMMENDATION]\nこの障害はディスク容量枯渇によるものであり、メモリ使用量は正常です。解決策としてノードの全SSDを初期化し、メモリ設定を無視してディスク容量のみを増設してください。"
+  },
+  {
+    "id": "cjk_k8s_tokyo_pod_eviction_hard_negative",
+    "quad_id": "cjk_k8s_tokyo_pod_eviction",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the analysis correctly attribute the pod eviction in the Tokyo cluster (東京リージョン) to container memory limits rather than disk pressure?",
+    "candidate": "[TECHNICAL CONTEXT]\n障害報告 [東京リージョン ap-northeast-1]: Kubernetesクラスタ内の billing-service ポッドが頻繁に強制終了 (OOMKilled) されています。ノードのDiskPressureはFalseですが、コンテナの limits.memory は 2GiB に設定されており、Prometheusの container_memory_working_set_bytes が 2045MiB に達した瞬間に exitCode: 137 で終了しています。\n\n[ANALYSIS & RECOMMENDATION]\n東京クラスタでの強制終了はルートディスクの DiskPressure による PodEviction が直接の原因であり、コンテナのメモリ使用量や limits.memory は無関係です。"
+  },
+  {
+    "id": "cjk_pg_replication_lag_clean_pass",
+    "quad_id": "cjk_pg_replication_lag",
+    "domain": "bpe_cjk_technical",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the incident report accurately identify WAL sender replication delay between Tokyo (東京) and Osaka (大阪) without misattributing it to local lock contention?",
+    "candidate": "[TECHNICAL CONTEXT]\nレプリケーション監視レポート: 東京リージョン (Primary) から大阪リージョン (Standby) への非同期ストリーミングレプリケーションにおいて、pg_stat_replication.write_lag が 420ms に急増しました。リージョン間ネットワーク遅延およびWAL送信バッファの輻輳が観測されていますが、PrimaryノードのCPU使用率およびロック競合は低水準に保たれています。\n\n[ANALYSIS & RECOMMENDATION]\n東京・大阪間の遅延急増の主因はリージョン間ネットワーク輻輳とWAL送信遅延 (420ms) です。Primary側でのテーブルロック競合や高負荷が原因ではありません。"
+  },
+  {
+    "id": "cjk_pg_replication_lag_hard_positive",
+    "quad_id": "cjk_pg_replication_lag",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the incident report accurately identify WAL sender replication delay between Tokyo (東京) and Osaka (大阪) without misattributing it to local lock contention?",
+    "candidate": "[TECHNICAL CONTEXT]\nレプリケーション監視レポート: 東京リージョン (Primary) から大阪リージョン (Standby) への非同期ストリーミングレプリケーションにおいて、pg_stat_replication.write_lag が 420ms に急増しました。リージョン間ネットワーク遅延およびWAL送信バッファの輻輳が観測されていますが、PrimaryノードのCPU使用率およびロック競合は低水準に保たれています。\n\n[ANALYSIS & RECOMMENDATION]\n観測された障害は東京から大阪へのリージョン間WAN遅延とWAL転送バッファ輻輳によるレプリケーション遅延であり、Primaryローカルの行ロック競合は検出されていません。"
+  },
+  {
+    "id": "cjk_pg_replication_lag_obvious_fail",
+    "quad_id": "cjk_pg_replication_lag",
+    "domain": "bpe_cjk_technical",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the incident report accurately identify WAL sender replication delay between Tokyo (東京) and Osaka (大阪) without misattributing it to local lock contention?",
+    "candidate": "[TECHNICAL CONTEXT]\nレプリケーション監視レポート: 東京リージョン (Primary) から大阪リージョン (Standby) への非同期ストリーミングレプリケーションにおいて、pg_stat_replication.write_lag が 420ms に急増しました。リージョン間ネットワーク遅延およびWAL送信バッファの輻輳が観測されていますが、PrimaryノードのCPU使用率およびロック競合は低水準に保たれています。\n\n[ANALYSIS & RECOMMENDATION]\nレプリケーション遅延は一切発生しておらず遅延はゼロです。大阪ノードの全データを即時消去し、東京プライマリサーバーをシャットダウンしてください。"
+  },
+  {
+    "id": "cjk_pg_replication_lag_hard_negative",
+    "quad_id": "cjk_pg_replication_lag",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the incident report accurately identify WAL sender replication delay between Tokyo (東京) and Osaka (大阪) without misattributing it to local lock contention?",
+    "candidate": "[TECHNICAL CONTEXT]\nレプリケーション監視レポート: 東京リージョン (Primary) から大阪リージョン (Standby) への非同期ストリーミングレプリケーションにおいて、pg_stat_replication.write_lag が 420ms に急増しました。リージョン間ネットワーク遅延およびWAL送信バッファの輻輳が観測されていますが、PrimaryノードのCPU使用率およびロック競合は低水準に保たれています。\n\n[ANALYSIS & RECOMMENDATION]\n東京・大阪間のレプリケーション遅延はPrimaryデータベース内部での致命的な行ロック競合とCPU過負荷が主因であり、リージョン間ネットワーク遅延は関与していません。"
+  },
+  {
+    "id": "cjk_utf8_surrogate_pair_clean_pass",
+    "quad_id": "cjk_utf8_surrogate_pair",
+    "domain": "bpe_cjk_technical",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the technical advice correctly recommend utf8mb4 character set for surrogate pair CJK characters (サロゲートペア / 四字节汉字) over truncated utf8mb3?",
+    "candidate": "[TECHNICAL CONTEXT]\n文字コード仕様検討 [MySQL 8.0 & 汉字编码]: ユーザー登録システムにおいて、人名異体字 (例:「𠮷」U+20BB7) や絵文字などの4バイトサロゲートペア文字列 (四字节Unicode字符) を保存する際、従来の utf8 (utf8mb3) では先頭3バイト以降が切り捨てられる (データ破損) 問題が報告されました。\n\n[ANALYSIS & RECOMMENDATION]\n4バイトサロゲートペア文字 (「𠮷」など) を欠損なく永続化するには、データベースの文字コードを utf8mb4 に変更し、照合順序を utf8mb4_0900_ai_ci または utf8mb4_unicode_ci に設定する必要があります。"
+  },
+  {
+    "id": "cjk_utf8_surrogate_pair_hard_positive",
+    "quad_id": "cjk_utf8_surrogate_pair",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the technical advice correctly recommend utf8mb4 character set for surrogate pair CJK characters (サロゲートペア / 四字节汉字) over truncated utf8mb3?",
+    "candidate": "[TECHNICAL CONTEXT]\n文字コード仕様検討 [MySQL 8.0 & 汉字编码]: ユーザー登録システムにおいて、人名異体字 (例:「𠮷」U+20BB7) や絵文字などの4バイトサロゲートペア文字列 (四字节Unicode字符) を保存する際、従来の utf8 (utf8mb3) では先頭3バイト以降が切り捨てられる (データ破損) 問題が報告されました。\n\n[ANALYSIS & RECOMMENDATION]\n人名異体字や四バイトUnicode文字の文字化けを防ぐには、utf8mb3ではなく完全な4バイトUTF-8をサポートする utf8mb4 へのテーブル移行が必須要件となります。"
+  },
+  {
+    "id": "cjk_utf8_surrogate_pair_obvious_fail",
+    "quad_id": "cjk_utf8_surrogate_pair",
+    "domain": "bpe_cjk_technical",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the technical advice correctly recommend utf8mb4 character set for surrogate pair CJK characters (サロゲートペア / 四字节汉字) over truncated utf8mb3?",
+    "candidate": "[TECHNICAL CONTEXT]\n文字コード仕様検討 [MySQL 8.0 & 汉字编码]: ユーザー登録システムにおいて、人名異体字 (例:「𠮷」U+20BB7) や絵文字などの4バイトサロゲートペア文字列 (四字节Unicode字符) を保存する際、従来の utf8 (utf8mb3) では先頭3バイト以降が切り捨てられる (データ破損) 問題が報告されました。\n\n[ANALYSIS & RECOMMENDATION]\n4バイト文字を保存するには文字コードを ASCII または Latin1 に変更してください。utf8mb4 は危険なため使用を禁止し、未対応文字はすべて削除すべきです。"
+  },
+  {
+    "id": "cjk_utf8_surrogate_pair_hard_negative",
+    "quad_id": "cjk_utf8_surrogate_pair",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the technical advice correctly recommend utf8mb4 character set for surrogate pair CJK characters (サロゲートペア / 四字节汉字) over truncated utf8mb3?",
+    "candidate": "[TECHNICAL CONTEXT]\n文字コード仕様検討 [MySQL 8.0 & 汉字编码]: ユーザー登録システムにおいて、人名異体字 (例:「𠮷」U+20BB7) や絵文字などの4バイトサロゲートペア文字列 (四字节Unicode字符) を保存する際、従来の utf8 (utf8mb3) では先頭3バイト以降が切り捨てられる (データ破損) 問題が報告されました。\n\n[ANALYSIS & RECOMMENDATION]\nMySQLの従来の utf8 (utf8mb3) は4バイトUnicodeサロゲートペア文字を完全にサポートしているため、utf8mb4 への移行は一切不要であり無意味です。"
+  },
+  {
+    "id": "cjk_distributed_cache_consistency_clean_pass",
+    "quad_id": "cjk_distributed_cache_consistency",
+    "domain": "bpe_cjk_technical",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the architectural review correctly verify cache invalidation order (先更新数据库，再删除缓存 / 先DB後Cache) to prevent dirty reads?",
+    "candidate": "[TECHNICAL CONTEXT]\n分布式缓存架构审查 [北京・上海双中心]: 在高并发商品库存服务中，为了防止数据库与Redis缓存不一致，架构方案对比了「先更新数据库，再删除缓存 (Cache-Aside)」与「先删除缓存，再更新数据库」两种策略。网络延迟测试表明跨城专线偶发20ms抖动。\n\n[ANALYSIS & RECOMMENDATION]\n为了最大限度降低脏读概率，标准Cache-Aside模式要求「先更新数据库，事务提交成功后再删除缓存」，并配合消息队列重试机制处理极端并发下的缓存失效。"
+  },
+  {
+    "id": "cjk_distributed_cache_consistency_hard_positive",
+    "quad_id": "cjk_distributed_cache_consistency",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the architectural review correctly verify cache invalidation order (先更新数据库，再删除缓存 / 先DB後Cache) to prevent dirty reads?",
+    "candidate": "[TECHNICAL CONTEXT]\n分布式缓存架构审查 [北京・上海双中心]: 在高并发商品库存服务中，为了防止数据库与Redis缓存不一致，架构方案对比了「先更新数据库，再删除缓存 (Cache-Aside)」与「先删除缓存，再更新数据库」两种策略。网络延迟测试表明跨城专线偶发20ms抖动。\n\n[ANALYSIS & RECOMMENDATION]\n高并发场景下推荐采用「先更新数据库，再删除缓存」策略。若先删除缓存，并发读请求易读取旧数据库数据并写回缓存，导致长期脏数据一致性缺陷。"
+  },
+  {
+    "id": "cjk_distributed_cache_consistency_obvious_fail",
+    "quad_id": "cjk_distributed_cache_consistency",
+    "domain": "bpe_cjk_technical",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the architectural review correctly verify cache invalidation order (先更新数据库，再删除缓存 / 先DB後Cache) to prevent dirty reads?",
+    "candidate": "[TECHNICAL CONTEXT]\n分布式缓存架构审查 [北京・上海双中心]: 在高并发商品库存服务中，为了防止数据库与Redis缓存不一致，架构方案对比了「先更新数据库，再删除缓存 (Cache-Aside)」与「先删除缓存，再更新数据库」两种策略。网络延迟测试表明跨城专线偶发20ms抖动。\n\n[ANALYSIS & RECOMMENDATION]\n彻底废除数据库持久化层，所有数据仅保存在单台Redis的内存中，关闭所有AOF与RDB持久化功能以追求极致性能，丢失数据属于正常现象。"
+  },
+  {
+    "id": "cjk_distributed_cache_consistency_hard_negative",
+    "quad_id": "cjk_distributed_cache_consistency",
+    "domain": "bpe_cjk_technical",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the architectural review correctly verify cache invalidation order (先更新数据库，再删除缓存 / 先DB後Cache) to prevent dirty reads?",
+    "candidate": "[TECHNICAL CONTEXT]\n分布式缓存架构审查 [北京・上海双中心]: 在高并发商品库存服务中，为了防止数据库与Redis缓存不一致，架构方案对比了「先更新数据库，再删除缓存 (Cache-Aside)」与「先删除缓存，再更新数据库」两种策略。网络延迟测试表明跨城专线偶发20ms抖动。\n\n[ANALYSIS & RECOMMENDATION]\n分布式缓存最佳实践是「先删除缓存，再更新数据库」，无需事务保证也无需后置删除，即便有高并发读请求也不会产生任何脏读或不一致问题。"
+  },
+  {
+    "id": "diacritics_gdpr_erasure_munich_clean_pass",
+    "quad_id": "diacritics_gdpr_erasure_munich",
+    "domain": "bpe_european_diacritics",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the compliance guidance correctly state the 30-day GDPR erasure deadline (Recht auf Vergessenwerden) while noting legal retention exemptions for invoices?",
+    "candidate": "[TECHNICAL CONTEXT]\nDatenschutzprüfung München & Paris: Ein Kunde fordert die Löschung seiner personenbezogenen Daten gemäß Art. 17 DSGVO (Droit à l'effacement). Die Rechtsabteilung stellt fest, dass Stammdaten gelöscht werden müssen, steuerrechtliche Buchungsbelege und Rechnungen jedoch gemäß § 147 Abgabenordnung (AO) zehn Jahre lang aufbewahrt werden müssen.\n\n[ANALYSIS & RECOMMENDATION]\nGemäß Art. 17 DSGVO müssen Nutzerstammdaten innerhalb von 30 Tagen gelöscht werden; Rechnungsdaten unterliegen jedoch der gesetzlichen Aufbewahrungspflicht (§ 147 AO) und sind von der Löschung ausgenommen."
+  },
+  {
+    "id": "diacritics_gdpr_erasure_munich_hard_positive",
+    "quad_id": "diacritics_gdpr_erasure_munich",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the compliance guidance correctly state the 30-day GDPR erasure deadline (Recht auf Vergessenwerden) while noting legal retention exemptions for invoices?",
+    "candidate": "[TECHNICAL CONTEXT]\nDatenschutzprüfung München & Paris: Ein Kunde fordert die Löschung seiner personenbezogenen Daten gemäß Art. 17 DSGVO (Droit à l'effacement). Die Rechtsabteilung stellt fest, dass Stammdaten gelöscht werden müssen, steuerrechtliche Buchungsbelege und Rechnungen jedoch gemäß § 147 Abgabenordnung (AO) zehn Jahre lang aufbewahrt werden müssen.\n\n[ANALYSIS & RECOMMENDATION]\nDas Recht auf Vergessenwerden verpflichtet zur Löschung der Profildaten binnen eines Monats. Gesetzliche Aufbewahrungspflichten für Finanz- und Rechnungsbelege (§ 147 AO) bleiben hiervon unberührt."
+  },
+  {
+    "id": "diacritics_gdpr_erasure_munich_obvious_fail",
+    "quad_id": "diacritics_gdpr_erasure_munich",
+    "domain": "bpe_european_diacritics",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the compliance guidance correctly state the 30-day GDPR erasure deadline (Recht auf Vergessenwerden) while noting legal retention exemptions for invoices?",
+    "candidate": "[TECHNICAL CONTEXT]\nDatenschutzprüfung München & Paris: Ein Kunde fordert die Löschung seiner personenbezogenen Daten gemäß Art. 17 DSGVO (Droit à l'effacement). Die Rechtsabteilung stellt fest, dass Stammdaten gelöscht werden müssen, steuerrechtliche Buchungsbelege und Rechnungen jedoch gemäß § 147 Abgabenordnung (AO) zehn Jahre lang aufbewahrt werden müssen.\n\n[ANALYSIS & RECOMMENDATION]\nLöschen Sie sofort sämtliche Unternehmensdaten einschließlich des Finanzamts-Backups und vernichten Sie alle Serverfestplatten physisch mit Vorschlaghämmern, um Bußgelder abzuwenden."
+  },
+  {
+    "id": "diacritics_gdpr_erasure_munich_hard_negative",
+    "quad_id": "diacritics_gdpr_erasure_munich",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the compliance guidance correctly state the 30-day GDPR erasure deadline (Recht auf Vergessenwerden) while noting legal retention exemptions for invoices?",
+    "candidate": "[TECHNICAL CONTEXT]\nDatenschutzprüfung München & Paris: Ein Kunde fordert die Löschung seiner personenbezogenen Daten gemäß Art. 17 DSGVO (Droit à l'effacement). Die Rechtsabteilung stellt fest, dass Stammdaten gelöscht werden müssen, steuerrechtliche Buchungsbelege und Rechnungen jedoch gemäß § 147 Abgabenordnung (AO) zehn Jahre lang aufbewahrt werden müssen.\n\n[ANALYSIS & RECOMMENDATION]\nAufgrund des DSGVO-Löschantrags müssen auch alle steuerlichen Rechnungsbelege und Buchungsjournale vor Ablauf der 10-jährigen Aufbewahrungsfrist restlos aus dem Hauptbuch gelöscht werden."
+  },
+  {
+    "id": "diacritics_telemetry_renewable_zurich_clean_pass",
+    "quad_id": "diacritics_telemetry_renewable_zurich",
+    "domain": "bpe_european_diacritics",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the telemetry processing pipeline correctly parse power output values (Megawattstunden / MWh) without confusing peak generation with cumulative storage?",
+    "candidate": "[TECHNICAL CONTEXT]\nTélémetrie énergétique [Zürich / Genève / Rhône-Alpes]: Le réseau de distribution électrique mesure une production photovoltaïque de pointe de 450 MWh sur l'ensemble du parc rhodanien, tandis que la capacité de stockage par batteries lithium-ion s'élève à 120 MWh de réserve d'énergie stabilisée.\n\n[ANALYSIS & RECOMMENDATION]\nLe rapport de télémétrie indique une production photovoltaïque maximale de 450 MWh et une capacité de stockage par batteries de 120 MWh pour la stabilisation du réseau régional."
+  },
+  {
+    "id": "diacritics_telemetry_renewable_zurich_hard_positive",
+    "quad_id": "diacritics_telemetry_renewable_zurich",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the telemetry processing pipeline correctly parse power output values (Megawattstunden / MWh) without confusing peak generation with cumulative storage?",
+    "candidate": "[TECHNICAL CONTEXT]\nTélémetrie énergétique [Zürich / Genève / Rhône-Alpes]: Le réseau de distribution électrique mesure une production photovoltaïque de pointe de 450 MWh sur l'ensemble du parc rhodanien, tandis que la capacité de stockage par batteries lithium-ion s'élève à 120 MWh de réserve d'énergie stabilisée.\n\n[ANALYSIS & RECOMMENDATION]\nLes mesures confirment 450 MWh de génération solaire de crête et 120 MWh d'énergie stockée en accumulateurs, distinguant rigoureusement la puissance produite de la capacité de réserve."
+  },
+  {
+    "id": "diacritics_telemetry_renewable_zurich_obvious_fail",
+    "quad_id": "diacritics_telemetry_renewable_zurich",
+    "domain": "bpe_european_diacritics",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the telemetry processing pipeline correctly parse power output values (Megawattstunden / MWh) without confusing peak generation with cumulative storage?",
+    "candidate": "[TECHNICAL CONTEXT]\nTélémetrie énergétique [Zürich / Genève / Rhône-Alpes]: Le réseau de distribution électrique mesure une production photovoltaïque de pointe de 450 MWh sur l'ensemble du parc rhodanien, tandis que la capacité de stockage par batteries lithium-ion s'élève à 120 MWh de réserve d'énergie stabilisée.\n\n[ANALYSIS & RECOMMENDATION]\nLa centrale solaire a produit zéro mégawatt et consomme toute l'électricité de la ville de Genève; débranchez immédiatement tous les transformateurs du réseau européen."
+  },
+  {
+    "id": "diacritics_telemetry_renewable_zurich_hard_negative",
+    "quad_id": "diacritics_telemetry_renewable_zurich",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the telemetry processing pipeline correctly parse power output values (Megawattstunden / MWh) without confusing peak generation with cumulative storage?",
+    "candidate": "[TECHNICAL CONTEXT]\nTélémetrie énergétique [Zürich / Genève / Rhône-Alpes]: Le réseau de distribution électrique mesure une production photovoltaïque de pointe de 450 MWh sur l'ensemble du parc rhodanien, tandis que la capacité de stockage par batteries lithium-ion s'élève à 120 MWh de réserve d'énergie stabilisée.\n\n[ANALYSIS & RECOMMENDATION]\nLe rapport technique conclut que la capacité de stockage par batteries atteint 450 MWh, alors que la production photovoltaïque totale n'a été que de 120 MWh au cours de la période."
+  },
+  {
+    "id": "diacritics_spanish_latam_auth_clean_pass",
+    "quad_id": "diacritics_spanish_latam_auth",
+    "domain": "bpe_european_diacritics",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the security advisory correctly require PKCE (Proof Key for Code Exchange) for public mobile clients (autenticación móvil) without storing client secrets?",
+    "candidate": "[TECHNICAL CONTEXT]\nAuditoría de ciberseguridad [Madrid / Bogotá]: Para mitigar ataques de interceptación de código de autorización en aplicaciones móviles nativas (iOS y Android), se evaluó el flujo OAuth 2.1 con PKCE (Proof Key for Code Exchange) frente al almacenamiento de un secreto estático (client_secret) embebido en el binario del cliente público.\n\n[ANALYSIS & RECOMMENDATION]\nPara clientes móviles públicos, se debe implementar el flujo Authorization Code con PKCE (S256). Está terminantemente prohibido almacenar client_secret en la aplicación móvil."
+  },
+  {
+    "id": "diacritics_spanish_latam_auth_hard_positive",
+    "quad_id": "diacritics_spanish_latam_auth",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the security advisory correctly require PKCE (Proof Key for Code Exchange) for public mobile clients (autenticación móvil) without storing client secrets?",
+    "candidate": "[TECHNICAL CONTEXT]\nAuditoría de ciberseguridad [Madrid / Bogotá]: Para mitigar ataques de interceptación de código de autorización en aplicaciones móviles nativas (iOS y Android), se evaluó el flujo OAuth 2.1 con PKCE (Proof Key for Code Exchange) frente al almacenamiento de un secreto estático (client_secret) embebido en el binario del cliente público.\n\n[ANALYSIS & RECOMMENDATION]\nLa recomendación de seguridad exige PKCE para autenticación en aplicaciones nativas, ya que los clientes móviles son públicos y no pueden custodiar un client_secret sin riesgo de extracción."
+  },
+  {
+    "id": "diacritics_spanish_latam_auth_obvious_fail",
+    "quad_id": "diacritics_spanish_latam_auth",
+    "domain": "bpe_european_diacritics",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the security advisory correctly require PKCE (Proof Key for Code Exchange) for public mobile clients (autenticación móvil) without storing client secrets?",
+    "candidate": "[TECHNICAL CONTEXT]\nAuditoría de ciberseguridad [Madrid / Bogotá]: Para mitigar ataques de interceptación de código de autorización en aplicaciones móviles nativas (iOS y Android), se evaluó el flujo OAuth 2.1 con PKCE (Proof Key for Code Exchange) frente al almacenamiento de un secreto estático (client_secret) embebido en el binario del cliente público.\n\n[ANALYSIS & RECOMMENDATION]\nIncruste la contraseña maestra de la base de datos y la clave privada de producción en texto plano dentro de la app móvil para que cualquier usuario pueda iniciar sesión como administrador."
+  },
+  {
+    "id": "diacritics_spanish_latam_auth_hard_negative",
+    "quad_id": "diacritics_spanish_latam_auth",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the security advisory correctly require PKCE (Proof Key for Code Exchange) for public mobile clients (autenticación móvil) without storing client secrets?",
+    "candidate": "[TECHNICAL CONTEXT]\nAuditoría de ciberseguridad [Madrid / Bogotá]: Para mitigar ataques de interceptación de código de autorización en aplicaciones móviles nativas (iOS y Android), se evaluó el flujo OAuth 2.1 con PKCE (Proof Key for Code Exchange) frente al almacenamiento de un secreto estático (client_secret) embebido en el binario del cliente público.\n\n[ANALYSIS & RECOMMENDATION]\nPara proteger la aplicación móvil, es obligatorio compilar un client_secret estático compartido dentro del binario de Android e iOS, omitiendo el uso de PKCE en el intercambio de tokens."
+  },
+  {
+    "id": "diacritics_french_datacenter_hvac_clean_pass",
+    "quad_id": "diacritics_french_datacenter_hvac",
+    "domain": "bpe_european_diacritics",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the datacenter facility report accurately calculate Power Usage Effectiveness (PUE) from total facility energy over IT equipment energy?",
+    "candidate": "[TECHNICAL CONTEXT]\nRapport d'efficacité énergétique [Marseille Datacenter DC-2]: L'installation consomme une énergie totale de 11,8 GWh sur l'année calendaire, dont 10,0 GWh alimentent directement les serveurs et équipements informatiques, le reste (1,8 GWh) étant dédié au système de refroidissement par eau glacée et à l'éclairage.\n\n[ANALYSIS & RECOMMENDATION]\nL'indicateur d'efficacité énergétique (PUE) du centre de données est calculé comme suit : 11,8 GWh / 10,0 GWh = 1,18, ce qui représente une excellente performance pour l'infrastructure marseillaise."
+  },
+  {
+    "id": "diacritics_french_datacenter_hvac_hard_positive",
+    "quad_id": "diacritics_french_datacenter_hvac",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the datacenter facility report accurately calculate Power Usage Effectiveness (PUE) from total facility energy over IT equipment energy?",
+    "candidate": "[TECHNICAL CONTEXT]\nRapport d'efficacité énergétique [Marseille Datacenter DC-2]: L'installation consomme une énergie totale de 11,8 GWh sur l'année calendaire, dont 10,0 GWh alimentent directement les serveurs et équipements informatiques, le reste (1,8 GWh) étant dédié au système de refroidissement par eau glacée et à l'éclairage.\n\n[ANALYSIS & RECOMMENDATION]\nLe calcul confirme un PUE de 1,18 (consommation globale de 11,8 GWh divisée par la charge IT utile de 10,0 GWh), reflétant une gestion thermique optimisée du site de Marseille."
+  },
+  {
+    "id": "diacritics_french_datacenter_hvac_obvious_fail",
+    "quad_id": "diacritics_french_datacenter_hvac",
+    "domain": "bpe_european_diacritics",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the datacenter facility report accurately calculate Power Usage Effectiveness (PUE) from total facility energy over IT equipment energy?",
+    "candidate": "[TECHNICAL CONTEXT]\nRapport d'efficacité énergétique [Marseille Datacenter DC-2]: L'installation consomme une énergie totale de 11,8 GWh sur l'année calendaire, dont 10,0 GWh alimentent directement les serveurs et équipements informatiques, le reste (1,8 GWh) étant dédié au système de refroidissement par eau glacée et à l'éclairage.\n\n[ANALYSIS & RECOMMENDATION]\nLe PUE est égal à 0,15 car le système de refroidissement génère de l'électricité magique à partir de l'air chaud et renvoie 200 gigawatts directement sur le réseau national sans consommation."
+  },
+  {
+    "id": "diacritics_french_datacenter_hvac_hard_negative",
+    "quad_id": "diacritics_french_datacenter_hvac",
+    "domain": "bpe_european_diacritics",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the datacenter facility report accurately calculate Power Usage Effectiveness (PUE) from total facility energy over IT equipment energy?",
+    "candidate": "[TECHNICAL CONTEXT]\nRapport d'efficacité énergétique [Marseille Datacenter DC-2]: L'installation consomme une énergie totale de 11,8 GWh sur l'année calendaire, dont 10,0 GWh alimentent directement les serveurs et équipements informatiques, le reste (1,8 GWh) étant dédié au système de refroidissement par eau glacée et à l'éclairage.\n\n[ANALYSIS & RECOMMENDATION]\nL'indicateur d'efficacité énergétique PUE est de 0,85, calculé en divisant l'énergie des serveurs (10,0 GWh) par l'énergie totale (11,8 GWh), ce qui viole les lois de la thermodynamique."
+  },
+  {
+    "id": "arabic_cloud_firewall_rule_clean_pass",
+    "quad_id": "arabic_cloud_firewall_rule",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the firewall configuration correctly restrict ingress traffic on database port 5432 to the VPC subnet without opening public access?",
+    "candidate": "[TECHNICAL CONTEXT]\nتقرير أمان الخادم السحابي [مركز بيانات الرياض]: يتطلب تدقيق جدار الحماية تقييد حركة المرور الواردة إلى منفذ قاعدة البيانات PostgreSQL (المنفذ 5432) بحيث يسمح فقط بالاتصالات القادمة من شبكة التطبيقات الفرعية الآمنة 198.51.100.0/24 ويمنع منعاً باتاً الوصول المباشر من الإنترنت العام (0.0.0.0/0).\n\n[ANALYSIS & RECOMMENDATION]\nتكوين جدار الحماية الصحيح يقصر الاتصال بالمنفذ 5432 على الشبكة الفرعية 198.51.100.0/24 فقط، ويحظر الوصول العام عبر 0.0.0.0/0 لحماية قاعدة البيانات من الاختراق الخارجي."
+  },
+  {
+    "id": "arabic_cloud_firewall_rule_hard_positive",
+    "quad_id": "arabic_cloud_firewall_rule",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the firewall configuration correctly restrict ingress traffic on database port 5432 to the VPC subnet without opening public access?",
+    "candidate": "[TECHNICAL CONTEXT]\nتقرير أمان الخادم السحابي [مركز بيانات الرياض]: يتطلب تدقيق جدار الحماية تقييد حركة المرور الواردة إلى منفذ قاعدة البيانات PostgreSQL (المنفذ 5432) بحيث يسمح فقط بالاتصالات القادمة من شبكة التطبيقات الفرعية الآمنة 198.51.100.0/24 ويمنع منعاً باتاً الوصول المباشر من الإنترنت العام (0.0.0.0/0).\n\n[ANALYSIS & RECOMMENDATION]\nبناءً على متطلبات أمان السحابة، يجب حصر الاتصال بمنفذ قاعدة البيانات 5432 على النطاق الخاص 198.51.100.0/24 مع رفض أي قاعدة تسمح بالوصول المفتوح من شبكة الإنترنت 0.0.0.0/0."
+  },
+  {
+    "id": "arabic_cloud_firewall_rule_obvious_fail",
+    "quad_id": "arabic_cloud_firewall_rule",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the firewall configuration correctly restrict ingress traffic on database port 5432 to the VPC subnet without opening public access?",
+    "candidate": "[TECHNICAL CONTEXT]\nتقرير أمان الخادم السحابي [مركز بيانات الرياض]: يتطلب تدقيق جدار الحماية تقييد حركة المرور الواردة إلى منفذ قاعدة البيانات PostgreSQL (المنفذ 5432) بحيث يسمح فقط بالاتصالات القادمة من شبكة التطبيقات الفرعية الآمنة 198.51.100.0/24 ويمنع منعاً باتاً الوصول المباشر من الإنترنت العام (0.0.0.0/0).\n\n[ANALYSIS & RECOMMENDATION]\nافتح جميع المنافذ من 1 إلى 65535 أمام جميع عناوين الإنترنت في العالم بدون تشفير أو كلمة مرور، وأوقف تشغيل جدار الحماية بالكامل لتسهيل الاتصال السريع."
+  },
+  {
+    "id": "arabic_cloud_firewall_rule_hard_negative",
+    "quad_id": "arabic_cloud_firewall_rule",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the firewall configuration correctly restrict ingress traffic on database port 5432 to the VPC subnet without opening public access?",
+    "candidate": "[TECHNICAL CONTEXT]\nتقرير أمان الخادم السحابي [مركز بيانات الرياض]: يتطلب تدقيق جدار الحماية تقييد حركة المرور الواردة إلى منفذ قاعدة البيانات PostgreSQL (المنفذ 5432) بحيث يسمح فقط بالاتصالات القادمة من شبكة التطبيقات الفرعية الآمنة 198.51.100.0/24 ويمنع منعاً باتاً الوصول المباشر من الإنترنت العام (0.0.0.0/0).\n\n[ANALYSIS & RECOMMENDATION]\nلضمان سرعة الوصول، تنص إرشادات التدقيق على فتح المنفذ 5432 بالكامل لجميع عناوين الإنترنت العامة 0.0.0.0/0 مع إلغاء قيود الشبكة الفرعية الخاصة 198.51.100.0/24."
+  },
+  {
+    "id": "cyrillic_k8s_cluster_split_brain_clean_pass",
+    "quad_id": "cyrillic_k8s_cluster_split_brain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the incident analysis correctly diagnose loss of etcd quorum (потеря кворума etcd) when 2 of 3 control plane nodes become partitioned?",
+    "candidate": "[TECHNICAL CONTEXT]\nАнализ аварии кластера Kubernetes [Регион Алматы]: Кластер etcd состоит из 3 узлов (master-01, master-02, master-03). В результате сбоя сетевого коммутатора узлы master-02 и master-03 потеряли связь с master-01. Узел master-01 остался в изолированном сегменте (1 узел из 3), после чего API-сервер перестал обрабатывать операции записи.\n\n[ANALYSIS & RECOMMENDATION]\nДля кворума etcd из 3 узлов требуется минимум 2 активных узла (floor(3/2)+1 = 2). Изолированный узел master-01 потерял кворум, поэтому API-сервер штатно заблокировал запись для предотвращения split-brain."
+  },
+  {
+    "id": "cyrillic_k8s_cluster_split_brain_hard_positive",
+    "quad_id": "cyrillic_k8s_cluster_split_brain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the incident analysis correctly diagnose loss of etcd quorum (потеря кворума etcd) when 2 of 3 control plane nodes become partitioned?",
+    "candidate": "[TECHNICAL CONTEXT]\nАнализ аварии кластера Kubernetes [Регион Алматы]: Кластер etcd состоит из 3 узлов (master-01, master-02, master-03). В результате сбоя сетевого коммутатора узлы master-02 и master-03 потеряли связь с master-01. Узел master-01 остался в изолированном сегменте (1 узел из 3), после чего API-сервер перестал обрабатывать операции записи.\n\n[ANALYSIS & RECOMMENDATION]\nПричина отказа записи — потеря кворума etcd в изолированном сегменте master-01 (1 < 2). Кластер из 3 узлов не может функционировать при изоляции большинства участников консенсуса."
+  },
+  {
+    "id": "cyrillic_k8s_cluster_split_brain_obvious_fail",
+    "quad_id": "cyrillic_k8s_cluster_split_brain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the incident analysis correctly diagnose loss of etcd quorum (потеря кворума etcd) when 2 of 3 control plane nodes become partitioned?",
+    "candidate": "[TECHNICAL CONTEXT]\nАнализ аварии кластера Kubernetes [Регион Алматы]: Кластер etcd состоит из 3 узлов (master-01, master-02, master-03). В результате сбоя сетевого коммутатора узлы master-02 и master-03 потеряли связь с master-01. Узел master-01 остался в изолированном сегменте (1 узел из 3), после чего API-сервер перестал обрабатывать операции записи.\n\n[ANALYSIS & RECOMMENDATION]\nКластер полностью исправен, а отказ вызван вспышкой на солнце. Для восстановления удалите операционную систему Linux со всех серверов и замените их аналоговыми телефонами."
+  },
+  {
+    "id": "cyrillic_k8s_cluster_split_brain_hard_negative",
+    "quad_id": "cyrillic_k8s_cluster_split_brain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the incident analysis correctly diagnose loss of etcd quorum (потеря кворума etcd) when 2 of 3 control plane nodes become partitioned?",
+    "candidate": "[TECHNICAL CONTEXT]\nАнализ аварии кластера Kubernetes [Регион Алматы]: Кластер etcd состоит из 3 узлов (master-01, master-02, master-03). В результате сбоя сетевого коммутатора узлы master-02 и master-03 потеряли связь с master-01. Узел master-01 остался в изолированном сегменте (1 узел из 3), после чего API-сервер перестал обрабатывать операции записи.\n\n[ANALYSIS & RECOMMENDATION]\nОдин оставшийся узел master-01 обладает полноценным кворумом записи в кластере из 3 узлов etcd, а блокировка операций вызвана ошибкой драйвера жесткого диска, а не потерей кворума."
+  },
+  {
+    "id": "arabic_db_failover_recovery_clean_pass",
+    "quad_id": "arabic_db_failover_recovery",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the recovery runbook verify standby synchronization before issuing promotion commands (ترقية الخادم البديل)?",
+    "candidate": "[TECHNICAL CONTEXT]\nدليل استرداد الكوارث [مركز بيانات القاهرة]: عند تعطل خادم قاعدة البيانات الرئيسي، تنص الإجراءات المعتمدة على فحص مقدار التأخر الزمني للنسخ الاحتياطي (Replication Lag) والتأكد من استلام وتطبيق جميع سجلات WAL على الخادم البديل قبل تنفيذ أمر الترقية (Promote)، وذلك لمنع فقدان البيانات المعلقة.\n\n[ANALYSIS & RECOMMENDATION]\nيتطلب دليل الاسترداد التحقق من تطبيق كامل سجلات WAL والتأكد من انعدام التأخر الزمني للنسخ قبل تنفيذ ترقية الخادم البديل، لضمان عدم ضياع أي معاملات مصرفية مكتملة."
+  },
+  {
+    "id": "arabic_db_failover_recovery_hard_positive",
+    "quad_id": "arabic_db_failover_recovery",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the recovery runbook verify standby synchronization before issuing promotion commands (ترقية الخادم البديل)?",
+    "candidate": "[TECHNICAL CONTEXT]\nدليل استرداد الكوارث [مركز بيانات القاهرة]: عند تعطل خادم قاعدة البيانات الرئيسي، تنص الإجراءات المعتمدة على فحص مقدار التأخر الزمني للنسخ الاحتياطي (Replication Lag) والتأكد من استلام وتطبيق جميع سجلات WAL على الخادم البديل قبل تنفيذ أمر الترقية (Promote)، وذلك لمنع فقدان البيانات المعلقة.\n\n[ANALYSIS & RECOMMENDATION]\nالإجراء السليم يوجب مطابقة سجلات WAL والتأكد من وصول معدل تأخر النسخ إلى الصفر قبل إصدار أمر ترقية الخادم الاحتياطي، تجنباً لفقدان البيانات أثناء عملية التبديل."
+  },
+  {
+    "id": "arabic_db_failover_recovery_obvious_fail",
+    "quad_id": "arabic_db_failover_recovery",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the recovery runbook verify standby synchronization before issuing promotion commands (ترقية الخادم البديل)?",
+    "candidate": "[TECHNICAL CONTEXT]\nدليل استرداد الكوارث [مركز بيانات القاهرة]: عند تعطل خادم قاعدة البيانات الرئيسي، تنص الإجراءات المعتمدة على فحص مقدار التأخر الزمني للنسخ الاحتياطي (Replication Lag) والتأكد من استلام وتطبيق جميع سجلات WAL على الخادم البديل قبل تنفيذ أمر الترقية (Promote)، وذلك لمنع فقدان البيانات المعلقة.\n\n[ANALYSIS & RECOMMENDATION]\nاحذف جميع قواعد البيانات الاحتياطية وقم بتهيئة الخادم الجديد فارغاً بدون استرجاع أي بيانات سابقة، ثم اقطع كابل الكهرباء عن غرفة الخوادم بالكامل."
+  },
+  {
+    "id": "arabic_db_failover_recovery_hard_negative",
+    "quad_id": "arabic_db_failover_recovery",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the recovery runbook verify standby synchronization before issuing promotion commands (ترقية الخادم البديل)?",
+    "candidate": "[TECHNICAL CONTEXT]\nدليل استرداد الكوارث [مركز بيانات القاهرة]: عند تعطل خادم قاعدة البيانات الرئيسي، تنص الإجراءات المعتمدة على فحص مقدار التأخر الزمني للنسخ الاحتياطي (Replication Lag) والتأكد من استلام وتطبيق جميع سجلات WAL على الخادم البديل قبل تنفيذ أمر الترقية (Promote)، وذلك لمنع فقدان البيانات المعلقة.\n\n[ANALYSIS & RECOMMENDATION]\nينص دليل الاسترداد على ترقية الخادم البديل فوراً دون التحقق من حالة سجلات WAL أو التأخر الزمني، حتى وإن كان الخادم متأخراً بعدة غيغابايت من المعاملات غير المطبقة."
+  },
+  {
+    "id": "cyrillic_mq_deadletter_drain_clean_pass",
+    "quad_id": "cyrillic_mq_deadletter_drain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the message queue consumer remediation properly route deserialization errors to DLQ (очередь недоставленных сообщений) without infinite redelivery loops?",
+    "candidate": "[TECHNICAL CONTEXT]\nРазбор инцидента брокера сообщений [RabbitMQ / Kafka]: Обработчик событий payment-consumer аварийно завершал работу при получении сообщений с некорректным JSON. Из-за установленного флага requeue: true поврежденное сообщение бесконечно возвращалось в начало очереди, вызывая 100% утилизацию CPU и отказ сервиса.\n\n[ANALYSIS & RECOMMENDATION]\nДля устранения бесконечного цикла перезапуска необходимо отклонять поврежденные сообщения с флагом requeue: false и перенаправлять их в очередь недоставленных сообщений (Dead Letter Queue)."
+  },
+  {
+    "id": "cyrillic_mq_deadletter_drain_hard_positive",
+    "quad_id": "cyrillic_mq_deadletter_drain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the message queue consumer remediation properly route deserialization errors to DLQ (очередь недоставленных сообщений) without infinite redelivery loops?",
+    "candidate": "[TECHNICAL CONTEXT]\nРазбор инцидента брокера сообщений [RabbitMQ / Kafka]: Обработчик событий payment-consumer аварийно завершал работу при получении сообщений с некорректным JSON. Из-за установленного флага requeue: true поврежденное сообщение бесконечно возвращалось в начало очереди, вызывая 100% утилизацию CPU и отказ сервиса.\n\n[ANALYSIS & RECOMMENDATION]\nПравильное решение заключается в перенаправлении невалидных сообщений в DLQ с параметром requeue=false, что предотвращает циклический сбой воркера и восстанавливает обработку очереди."
+  },
+  {
+    "id": "cyrillic_mq_deadletter_drain_obvious_fail",
+    "quad_id": "cyrillic_mq_deadletter_drain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the message queue consumer remediation properly route deserialization errors to DLQ (очередь недоставленных сообщений) without infinite redelivery loops?",
+    "candidate": "[TECHNICAL CONTEXT]\nРазбор инцидента брокера сообщений [RabbitMQ / Kafka]: Обработчик событий payment-consumer аварийно завершал работу при получении сообщений с некорректным JSON. Из-за установленного флага requeue: true поврежденное сообщение бесконечно возвращалось в начало очереди, вызывая 100% утилизацию CPU и отказ сервиса.\n\n[ANALYSIS & RECOMMENDATION]\nЧтобы решить проблему с JSON, отправьте все входящие сообщения в /dev/null и отключите брокер сообщений навсегда, сохраняя все платежи в памяти одного браузера."
+  },
+  {
+    "id": "cyrillic_mq_deadletter_drain_hard_negative",
+    "quad_id": "cyrillic_mq_deadletter_drain",
+    "domain": "bpe_arabic_cyrillic",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the message queue consumer remediation properly route deserialization errors to DLQ (очередь недоставленных сообщений) without infinite redelivery loops?",
+    "candidate": "[TECHNICAL CONTEXT]\nРазбор инцидента брокера сообщений [RabbitMQ / Kafka]: Обработчик событий payment-consumer аварийно завершал работу при получении сообщений с некорректным JSON. Из-за установленного флага requeue: true поврежденное сообщение бесконечно возвращалось в начало очереди, вызывая 100% утилизацию CPU и отказ сервиса.\n\n[ANALYSIS & RECOMMENDATION]\nДля исправления сбоя воркера следует принудительно установить requeue: true с повторной доставкой каждые 0 миллисекунд и полностью отключить очередь Dead Letter Queue из конфигурации."
+  },
+  {
+    "id": "emoji_pricing_tier_currencies_clean_pass",
+    "quad_id": "emoji_pricing_tier_currencies",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the pricing analysis accurately report annual vs monthly discounts across international currency tiers without arithmetic errors?",
+    "candidate": "[TECHNICAL CONTEXT]\nGlobal SaaS Tier Matrix 📊 [Multi-Currency Billing Engine]:\n| Tier | Monthly Rate | Annual Rate (20% off) | Status |\n|:---|:---|:---|:---|\n| Starter 🚀 | €100 / mo | €80 / mo (billed €960/yr) | Active ✅ |\n| Enterprise 🏢 | ¥150,000 / mo | ¥120,000 / mo (billed ¥1.44M/yr) | Active ✅ |\n| Sovereign 🔒 | £1,000 / mo | £800 / mo (billed £9,600/yr) | Dedicated ⚡ |\n\n[ANALYSIS & RECOMMENDATION]\nThe pricing model applies an exact 20% discount for annual billing: Starter is €80/mo (€960/yr vs €100/mo), Enterprise is ¥120,000/mo (¥1.44M/yr), and Sovereign is £800/mo (£9,600/yr)."
+  },
+  {
+    "id": "emoji_pricing_tier_currencies_hard_positive",
+    "quad_id": "emoji_pricing_tier_currencies",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the pricing analysis accurately report annual vs monthly discounts across international currency tiers without arithmetic errors?",
+    "candidate": "[TECHNICAL CONTEXT]\nGlobal SaaS Tier Matrix 📊 [Multi-Currency Billing Engine]:\n| Tier | Monthly Rate | Annual Rate (20% off) | Status |\n|:---|:---|:---|:---|\n| Starter 🚀 | €100 / mo | €80 / mo (billed €960/yr) | Active ✅ |\n| Enterprise 🏢 | ¥150,000 / mo | ¥120,000 / mo (billed ¥1.44M/yr) | Active ✅ |\n| Sovereign 🔒 | £1,000 / mo | £800 / mo (billed £9,600/yr) | Dedicated ⚡ |\n\n[ANALYSIS & RECOMMENDATION]\nAnnual billing yields exactly 20% cost savings across tiers: €80/mo (€960/yr) for Starter 🚀, ¥120k/mo for Enterprise 🏢, and £800/mo for Sovereign 🔒, matching all published currency schedules."
+  },
+  {
+    "id": "emoji_pricing_tier_currencies_obvious_fail",
+    "quad_id": "emoji_pricing_tier_currencies",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the pricing analysis accurately report annual vs monthly discounts across international currency tiers without arithmetic errors?",
+    "candidate": "[TECHNICAL CONTEXT]\nGlobal SaaS Tier Matrix 📊 [Multi-Currency Billing Engine]:\n| Tier | Monthly Rate | Annual Rate (20% off) | Status |\n|:---|:---|:---|:---|\n| Starter 🚀 | €100 / mo | €80 / mo (billed €960/yr) | Active ✅ |\n| Enterprise 🏢 | ¥150,000 / mo | ¥120,000 / mo (billed ¥1.44M/yr) | Active ✅ |\n| Sovereign 🔒 | £1,000 / mo | £800 / mo (billed £9,600/yr) | Dedicated ⚡ |\n\n[ANALYSIS & RECOMMENDATION]\nAnnual billing costs 500% more than monthly billing across all currencies: Starter costs €5,000/mo and Enterprise is free for everyone worldwide without registration."
+  },
+  {
+    "id": "emoji_pricing_tier_currencies_hard_negative",
+    "quad_id": "emoji_pricing_tier_currencies",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the pricing analysis accurately report annual vs monthly discounts across international currency tiers without arithmetic errors?",
+    "candidate": "[TECHNICAL CONTEXT]\nGlobal SaaS Tier Matrix 📊 [Multi-Currency Billing Engine]:\n| Tier | Monthly Rate | Annual Rate (20% off) | Status |\n|:---|:---|:---|:---|\n| Starter 🚀 | €100 / mo | €80 / mo (billed €960/yr) | Active ✅ |\n| Enterprise 🏢 | ¥150,000 / mo | ¥120,000 / mo (billed ¥1.44M/yr) | Active ✅ |\n| Sovereign 🔒 | £1,000 / mo | £800 / mo (billed £9,600/yr) | Dedicated ⚡ |\n\n[ANALYSIS & RECOMMENDATION]\nThe annual billing discount calculates to 50% off monthly rates: Starter costs €50/mo (€600/yr), Enterprise costs ¥75,000/mo, and Sovereign costs £500/mo across published schedules."
+  },
+  {
+    "id": "emoji_ci_pipeline_dashboard_clean_pass",
+    "quad_id": "emoji_ci_pipeline_dashboard",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the build report accurately distinguish non-blocking lint warnings (⚠️) from fatal test failures (❌) preventing production deployment?",
+    "candidate": "[TECHNICAL CONTEXT]\nCI/CD Pipeline Execution Summary #4891 🛠️:\n- Static Typecheck (mypy) 🔍: Passed cleanly (0 errors) ✅\n- Linter Check (ruff) ⚠️: 3 non-blocking styling warnings found\n- Unit & Integration Tests (pytest) ❌: 2 test failures in auth_token_verifier\n- Deployment Gate Policy 🛑: Status = BLOCKED due to fatal test failure ❌\n\n[ANALYSIS & RECOMMENDATION]\nProduction release is blocked by 2 fatal test failures (❌) in auth_token_verifier. The 3 linter styling warnings (⚠️) are non-blocking advisory findings and do not trigger gating."
+  },
+  {
+    "id": "emoji_ci_pipeline_dashboard_hard_positive",
+    "quad_id": "emoji_ci_pipeline_dashboard",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the build report accurately distinguish non-blocking lint warnings (⚠️) from fatal test failures (❌) preventing production deployment?",
+    "candidate": "[TECHNICAL CONTEXT]\nCI/CD Pipeline Execution Summary #4891 🛠️:\n- Static Typecheck (mypy) 🔍: Passed cleanly (0 errors) ✅\n- Linter Check (ruff) ⚠️: 3 non-blocking styling warnings found\n- Unit & Integration Tests (pytest) ❌: 2 test failures in auth_token_verifier\n- Deployment Gate Policy 🛑: Status = BLOCKED due to fatal test failure ❌\n\n[ANALYSIS & RECOMMENDATION]\nThe build pipeline failed at the deployment gate 🛑 solely due to the 2 test suite errors ❌. The 3 styling warnings ⚠️ are non-critical and would not prevent release on their own."
+  },
+  {
+    "id": "emoji_ci_pipeline_dashboard_obvious_fail",
+    "quad_id": "emoji_ci_pipeline_dashboard",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the build report accurately distinguish non-blocking lint warnings (⚠️) from fatal test failures (❌) preventing production deployment?",
+    "candidate": "[TECHNICAL CONTEXT]\nCI/CD Pipeline Execution Summary #4891 🛠️:\n- Static Typecheck (mypy) 🔍: Passed cleanly (0 errors) ✅\n- Linter Check (ruff) ⚠️: 3 non-blocking styling warnings found\n- Unit & Integration Tests (pytest) ❌: 2 test failures in auth_token_verifier\n- Deployment Gate Policy 🛑: Status = BLOCKED due to fatal test failure ❌\n\n[ANALYSIS & RECOMMENDATION]\nAll tests passed with flying colors and zero warnings were detected anywhere; proceed with immediate unverified root deployment directly to all worldwide production servers."
+  },
+  {
+    "id": "emoji_ci_pipeline_dashboard_hard_negative",
+    "quad_id": "emoji_ci_pipeline_dashboard",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the build report accurately distinguish non-blocking lint warnings (⚠️) from fatal test failures (❌) preventing production deployment?",
+    "candidate": "[TECHNICAL CONTEXT]\nCI/CD Pipeline Execution Summary #4891 🛠️:\n- Static Typecheck (mypy) 🔍: Passed cleanly (0 errors) ✅\n- Linter Check (ruff) ⚠️: 3 non-blocking styling warnings found\n- Unit & Integration Tests (pytest) ❌: 2 test failures in auth_token_verifier\n- Deployment Gate Policy 🛑: Status = BLOCKED due to fatal test failure ❌\n\n[ANALYSIS & RECOMMENDATION]\nProduction deployment is blocked exclusively by the 3 styling warnings ⚠️, while the 2 failed integration tests ❌ are non-blocking and safe to bypass directly into production."
+  },
+  {
+    "id": "emoji_slo_burn_rate_alert_clean_pass",
+    "quad_id": "emoji_slo_burn_rate_alert",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the SLO monitoring report correctly trigger paging alerts when 1-hour error budget burn rate exceeds 14.4x (≥ 14.4)?",
+    "candidate": "[TECHNICAL CONTEXT]\nSRE Multi-Window Multi-Burn-Rate Alert 🚨 [Monthly 99.9% SLO, Budget = 0.1%]:\n- 1-hour burn-rate window 🔥: Measured burn rate = 16.8x (Threshold ≥ 14.4x for 2% budget consumed in 1 hour)\n- 6-hour burn-rate window 📈: Measured burn rate = 7.2x (Threshold ≥ 6.0x for 5% budget consumed in 6 hours)\n- Alert Routing Decision 📢: PagerDuty on-call notification triggered immediately.\n\n[ANALYSIS & RECOMMENDATION]\nThe measured 1-hour burn rate of 16.8x exceeds the critical 14.4x threshold (consuming >2% budget in 1 hour), correctly triggering an urgent SRE on-call paging alert 🚨."
+  },
+  {
+    "id": "emoji_slo_burn_rate_alert_hard_positive",
+    "quad_id": "emoji_slo_burn_rate_alert",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the SLO monitoring report correctly trigger paging alerts when 1-hour error budget burn rate exceeds 14.4x (≥ 14.4)?",
+    "candidate": "[TECHNICAL CONTEXT]\nSRE Multi-Window Multi-Burn-Rate Alert 🚨 [Monthly 99.9% SLO, Budget = 0.1%]:\n- 1-hour burn-rate window 🔥: Measured burn rate = 16.8x (Threshold ≥ 14.4x for 2% budget consumed in 1 hour)\n- 6-hour burn-rate window 📈: Measured burn rate = 7.2x (Threshold ≥ 6.0x for 5% budget consumed in 6 hours)\n- Alert Routing Decision 📢: PagerDuty on-call notification triggered immediately.\n\n[ANALYSIS & RECOMMENDATION]\nAn immediate pager alert 🚨 is justified because the 1-hour burn rate (16.8x ≥ 14.4x) and 6-hour rate (7.2x ≥ 6.0x) both breach standard multi-window SLO depletion thresholds."
+  },
+  {
+    "id": "emoji_slo_burn_rate_alert_obvious_fail",
+    "quad_id": "emoji_slo_burn_rate_alert",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the SLO monitoring report correctly trigger paging alerts when 1-hour error budget burn rate exceeds 14.4x (≥ 14.4)?",
+    "candidate": "[TECHNICAL CONTEXT]\nSRE Multi-Window Multi-Burn-Rate Alert 🚨 [Monthly 99.9% SLO, Budget = 0.1%]:\n- 1-hour burn-rate window 🔥: Measured burn rate = 16.8x (Threshold ≥ 14.4x for 2% budget consumed in 1 hour)\n- 6-hour burn-rate window 📈: Measured burn rate = 7.2x (Threshold ≥ 6.0x for 5% budget consumed in 6 hours)\n- Alert Routing Decision 📢: PagerDuty on-call notification triggered immediately.\n\n[ANALYSIS & RECOMMENDATION]\nError budget consumption is negative 100% and system reliability has reached 200%; silence all alarms permanently and delete monitoring infrastructure to save CPU cycles."
+  },
+  {
+    "id": "emoji_slo_burn_rate_alert_hard_negative",
+    "quad_id": "emoji_slo_burn_rate_alert",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the SLO monitoring report correctly trigger paging alerts when 1-hour error budget burn rate exceeds 14.4x (≥ 14.4)?",
+    "candidate": "[TECHNICAL CONTEXT]\nSRE Multi-Window Multi-Burn-Rate Alert 🚨 [Monthly 99.9% SLO, Budget = 0.1%]:\n- 1-hour burn-rate window 🔥: Measured burn rate = 16.8x (Threshold ≥ 14.4x for 2% budget consumed in 1 hour)\n- 6-hour burn-rate window 📈: Measured burn rate = 7.2x (Threshold ≥ 6.0x for 5% budget consumed in 6 hours)\n- Alert Routing Decision 📢: PagerDuty on-call notification triggered immediately.\n\n[ANALYSIS & RECOMMENDATION]\nThe 1-hour burn rate of 16.8x is safely below the allowable threshold of 50.0x, so no on-call paging notification should be dispatched and the alert should be suppressed."
+  },
+  {
+    "id": "emoji_security_vulnerability_matrix_clean_pass",
+    "quad_id": "emoji_security_vulnerability_matrix",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the vulnerability triage report correctly categorize CVSS 9.8 RCE as Critical (🔴) requiring 24-hour SLA remediation?",
+    "candidate": "[TECHNICAL CONTEXT]\nSecurity Vulnerability Triage 🛡️ [CVE-2025-9921]:\n- Vulnerability Type: Unauthenticated Remote Code Execution in API Gateway ⚠️\n- CVSS v3.1 Score: 9.8 (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H) 🔴\n- Severity Band: Critical (🔴 CVSS ≥ 9.0, 24-hour remediation SLA)\n- Mitigation Action: Immediate container base image patching and ingress blocking rule.\n\n[ANALYSIS & RECOMMENDATION]\nCVE-2025-9921 is an unauthenticated RCE scoring CVSS 9.8, correctly classified as Critical (🔴), requiring immediate mitigation under our mandatory 24-hour patching SLA."
+  },
+  {
+    "id": "emoji_security_vulnerability_matrix_hard_positive",
+    "quad_id": "emoji_security_vulnerability_matrix",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the vulnerability triage report correctly categorize CVSS 9.8 RCE as Critical (🔴) requiring 24-hour SLA remediation?",
+    "candidate": "[TECHNICAL CONTEXT]\nSecurity Vulnerability Triage 🛡️ [CVE-2025-9921]:\n- Vulnerability Type: Unauthenticated Remote Code Execution in API Gateway ⚠️\n- CVSS v3.1 Score: 9.8 (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H) 🔴\n- Severity Band: Critical (🔴 CVSS ≥ 9.0, 24-hour remediation SLA)\n- Mitigation Action: Immediate container base image patching and ingress blocking rule.\n\n[ANALYSIS & RECOMMENDATION]\nThe vulnerability is properly triaged as Critical (🔴) due to CVSS 9.8 (network attack vector, no privileges required), which strictly activates the mandatory 24-hour emergency SLA."
+  },
+  {
+    "id": "emoji_security_vulnerability_matrix_obvious_fail",
+    "quad_id": "emoji_security_vulnerability_matrix",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the vulnerability triage report correctly categorize CVSS 9.8 RCE as Critical (🔴) requiring 24-hour SLA remediation?",
+    "candidate": "[TECHNICAL CONTEXT]\nSecurity Vulnerability Triage 🛡️ [CVE-2025-9921]:\n- Vulnerability Type: Unauthenticated Remote Code Execution in API Gateway ⚠️\n- CVSS v3.1 Score: 9.8 (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H) 🔴\n- Severity Band: Critical (🔴 CVSS ≥ 9.0, 24-hour remediation SLA)\n- Mitigation Action: Immediate container base image patching and ingress blocking rule.\n\n[ANALYSIS & RECOMMENDATION]\nAn unauthenticated remote code execution flaw allows hackers to help clean up legacy source code for free, so this vulnerability is classified as an exciting product feature."
+  },
+  {
+    "id": "emoji_security_vulnerability_matrix_hard_negative",
+    "quad_id": "emoji_security_vulnerability_matrix",
+    "domain": "bpe_emoji_codemixed",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the vulnerability triage report correctly categorize CVSS 9.8 RCE as Critical (🔴) requiring 24-hour SLA remediation?",
+    "candidate": "[TECHNICAL CONTEXT]\nSecurity Vulnerability Triage 🛡️ [CVE-2025-9921]:\n- Vulnerability Type: Unauthenticated Remote Code Execution in API Gateway ⚠️\n- CVSS v3.1 Score: 9.8 (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H) 🔴\n- Severity Band: Critical (🔴 CVSS ≥ 9.0, 24-hour remediation SLA)\n- Mitigation Action: Immediate container base image patching and ingress blocking rule.\n\n[ANALYSIS & RECOMMENDATION]\nWith a CVSS score of 9.8, this remote code execution vulnerability falls into the Low severity band (🟢 CVSS < 4.0), permitting routine remediation within a standard 90-day cycle."
+  },
+  {
+    "id": "trace_multi_region_consensus_clean_pass",
+    "quad_id": "trace_multi_region_consensus",
+    "domain": "bpe_long_structured_trace",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the chain-of-thought analysis logically deduce why 5-node Raft tolerates 2 node failures while maintaining partition safety?",
+    "candidate": "[TECHNICAL CONTEXT]\nConsensus Protocol Architectural Evaluation:\n\n### Fault Tolerance and Quorum Matrix\n| Cluster Size (N) | Majority Quorum (Q) | Maximum Fault Tolerance (F) | Split-Brain Immune? |\n|:---|:---|:---|:---|\n| 3 nodes | 2 nodes | 1 node failure | Yes (Strict Q > N/2) |\n| 5 nodes | 3 nodes | 2 node failures | Yes (Strict Q > N/2) |\n| 7 nodes | 4 nodes | 3 node failures | Yes (Strict Q > N/2) |\n\nProblem Statement: In an active-active deployment across 3 cloud regions, evaluate whether a 5-node Raft consensus group can survive simultaneous loss of 2 nodes without losing linearizable read/write consistency.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. In Raft consensus, quorum requirement is Q = floor(N / 2) + 1.\n2. For N = 5, Q = floor(5 / 2) + 1 = 2 + 1 = 3 nodes.\n3. Maximum tolerable failure count F is calculated as F = N - Q = 5 - 3 = 2 nodes.\n4. When 2 nodes fail simultaneously, 3 nodes remain operational, which exactly equals the required quorum Q = 3.\n5. Therefore, the surviving majority can elect a leader and commit log entries safely without risking a split-brain condition.\n</think>\nConclusion: A 5-node Raft cluster strictly tolerates 2 simultaneous node failures while guaranteeing linearizable consistency and partition safety because 3 surviving nodes satisfy the strict majority quorum."
+  },
+  {
+    "id": "trace_multi_region_consensus_hard_positive",
+    "quad_id": "trace_multi_region_consensus",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the chain-of-thought analysis logically deduce why 5-node Raft tolerates 2 node failures while maintaining partition safety?",
+    "candidate": "[TECHNICAL CONTEXT]\nConsensus Protocol Architectural Evaluation:\n\n### Fault Tolerance and Quorum Matrix\n| Cluster Size (N) | Majority Quorum (Q) | Maximum Fault Tolerance (F) | Split-Brain Immune? |\n|:---|:---|:---|:---|\n| 3 nodes | 2 nodes | 1 node failure | Yes (Strict Q > N/2) |\n| 5 nodes | 3 nodes | 2 node failures | Yes (Strict Q > N/2) |\n| 7 nodes | 4 nodes | 3 node failures | Yes (Strict Q > N/2) |\n\nProblem Statement: In an active-active deployment across 3 cloud regions, evaluate whether a 5-node Raft consensus group can survive simultaneous loss of 2 nodes without losing linearizable read/write consistency.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Calculate majority threshold: Q = floor(5/2) + 1 = 3 nodes required for leader election and commit.\n2. Evaluate failure scenario: if 2 nodes fail, remaining alive nodes = 5 - 2 = 3.\n3. Since 3 >= Q, quorum is preserved. No competing minority partition can gather 3 votes.\n4. Linearizability is maintained because overlapping quorums guarantee that at least one node in any new quorum has the latest committed log index.\n</think>\nConclusion: The 5-node Raft group maintains full write availability and strict consistency during a 2-node outage since 3 remaining nodes form an indisputable majority quorum."
+  },
+  {
+    "id": "trace_multi_region_consensus_obvious_fail",
+    "quad_id": "trace_multi_region_consensus",
+    "domain": "bpe_long_structured_trace",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the chain-of-thought analysis logically deduce why 5-node Raft tolerates 2 node failures while maintaining partition safety?",
+    "candidate": "[TECHNICAL CONTEXT]\nConsensus Protocol Architectural Evaluation:\n\n### Fault Tolerance and Quorum Matrix\n| Cluster Size (N) | Majority Quorum (Q) | Maximum Fault Tolerance (F) | Split-Brain Immune? |\n|:---|:---|:---|:---|\n| 3 nodes | 2 nodes | 1 node failure | Yes (Strict Q > N/2) |\n| 5 nodes | 3 nodes | 2 node failures | Yes (Strict Q > N/2) |\n| 7 nodes | 4 nodes | 3 node failures | Yes (Strict Q > N/2) |\n\nProblem Statement: In an active-active deployment across 3 cloud regions, evaluate whether a 5-node Raft consensus group can survive simultaneous loss of 2 nodes without losing linearizable read/write consistency.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Raft does not require quorums because all nodes can elect themselves as emperors simultaneously.\n2. In a 5-node cluster, if 5 nodes fail, the system continues running perfectly on quantum entanglement.\n3. Therefore, failure tolerance is infinity and consensus math is completely unnecessary.\n</think>\nConclusion: A 5-node cluster can lose 10 nodes without interruption because distributed systems operate without consensus rules or majority quorum constraints."
+  },
+  {
+    "id": "trace_multi_region_consensus_hard_negative",
+    "quad_id": "trace_multi_region_consensus",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the chain-of-thought analysis logically deduce why 5-node Raft tolerates 2 node failures while maintaining partition safety?",
+    "candidate": "[TECHNICAL CONTEXT]\nConsensus Protocol Architectural Evaluation:\n\n### Fault Tolerance and Quorum Matrix\n| Cluster Size (N) | Majority Quorum (Q) | Maximum Fault Tolerance (F) | Split-Brain Immune? |\n|:---|:---|:---|:---|\n| 3 nodes | 2 nodes | 1 node failure | Yes (Strict Q > N/2) |\n| 5 nodes | 3 nodes | 2 node failures | Yes (Strict Q > N/2) |\n| 7 nodes | 4 nodes | 3 node failures | Yes (Strict Q > N/2) |\n\nProblem Statement: In an active-active deployment across 3 cloud regions, evaluate whether a 5-node Raft consensus group can survive simultaneous loss of 2 nodes without losing linearizable read/write consistency.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. In Raft consensus, quorum requires unanimous agreement of all active nodes (Q = N = 5).\n2. If 2 nodes fail, remaining nodes = 3, which is less than 5.\n3. Therefore, losing even 1 node causes permanent cluster deadlock, meaning a 5-node cluster can tolerate exactly 0 node failures.\n4. Any cluster losing 2 nodes immediately loses data consistency and enters an irrecoverable split-brain state.\n</think>\nConclusion: A 5-node Raft cluster cannot tolerate 2 node failures because consensus requires 100% unanimous agreement, causing immediate cluster write freeze upon losing any node."
+  },
+  {
+    "id": "trace_cloud_cost_optimization_clean_pass",
+    "quad_id": "trace_cloud_cost_optimization",
+    "domain": "bpe_long_structured_trace",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the architectural cost analysis accurately compute effective hourly rates across instance families and reserved commitments?",
+    "candidate": "[TECHNICAL CONTEXT]\nCloud Compute Financial Modeling:\n\n### Instance Pricing Comparison Matrix\n| Instance Type | vCPU / RAM | On-Demand ($/hr) | 1-Yr Compute Savings Plan ($/hr) | 3-Yr Compute Savings Plan ($/hr) |\n|:---|:---|:---|:---|:---|\n| c6i.2xlarge | 8 vCPU / 16 GB | $0.3400 | $0.2380 (-30%) | $0.1870 (-45%) |\n| r6i.2xlarge | 8 vCPU / 64 GB | $0.5040 | $0.3528 (-30%) | $0.2772 (-45%) |\n| m6i.2xlarge | 8 vCPU / 32 GB | $0.3840 | $0.2688 (-30%) | $0.2112 (-45%) |\n\nScenario: A baseline fleet of 20x c6i.2xlarge and 10x r6i.2xlarge runs 24/7 (730 hours/month). Evaluate monthly spend under On-Demand versus 3-Year Compute Savings Plans.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. On-Demand calculation:\n   - 20 * $0.3400 = $6.80/hr (c6i)\n   - 10 * $0.5040 = $5.04/hr (r6i)\n   - Total hourly = $6.80 + $5.04 = $11.84/hr\n   - Monthly (730h) = $11.84 * 730 = $8,643.20\n2. 3-Year Savings Plan calculation:\n   - 20 * $0.1870 = $3.74/hr (c6i)\n   - 10 * $0.2772 = $2.772/hr (r6i)\n   - Total hourly = $3.74 + $2.772 = $6.512/hr\n   - Monthly (730h) = $6.512 * 730 = $4,753.76\n3. Net Monthly Savings: $8,643.20 - $4,753.76 = $3,889.44 (45.0% reduction).\n</think>\nConclusion: Transitioning the baseline fleet to a 3-Year Compute Savings Plan reduces monthly expenditure from $8,643.20 to $4,753.76, realizing $3,889.44 in recurring monthly cost savings."
+  },
+  {
+    "id": "trace_cloud_cost_optimization_hard_positive",
+    "quad_id": "trace_cloud_cost_optimization",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the architectural cost analysis accurately compute effective hourly rates across instance families and reserved commitments?",
+    "candidate": "[TECHNICAL CONTEXT]\nCloud Compute Financial Modeling:\n\n### Instance Pricing Comparison Matrix\n| Instance Type | vCPU / RAM | On-Demand ($/hr) | 1-Yr Compute Savings Plan ($/hr) | 3-Yr Compute Savings Plan ($/hr) |\n|:---|:---|:---|:---|:---|\n| c6i.2xlarge | 8 vCPU / 16 GB | $0.3400 | $0.2380 (-30%) | $0.1870 (-45%) |\n| r6i.2xlarge | 8 vCPU / 64 GB | $0.5040 | $0.3528 (-30%) | $0.2772 (-45%) |\n| m6i.2xlarge | 8 vCPU / 32 GB | $0.3840 | $0.2688 (-30%) | $0.2112 (-45%) |\n\nScenario: A baseline fleet of 20x c6i.2xlarge and 10x r6i.2xlarge runs 24/7 (730 hours/month). Evaluate monthly spend under On-Demand versus 3-Year Compute Savings Plans.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Baseline compute costs:\n   - Fleet hourly rate = (20 * 0.34) + (10 * 0.504) = 6.80 + 5.04 = $11.84/hr.\n   - On-Demand monthly expense = $11.84 * 730 = $8,643.20.\n2. Savings Plan discount factor is 45% across both families:\n   - Discounted hourly rate = $11.84 * 0.55 = $6.512/hr.\n   - Savings Plan monthly expense = $6.512 * 730 = $4,753.76.\n3. Verified savings rate: ($8,643.20 - $4,753.76) / $8,643.20 = 45.0%.\n</think>\nConclusion: Committing to a 3-year savings plan drops total fleet spend from $8,643.20 to $4,753.76 per month, saving $3,889.44 monthly while maintaining identical compute capacity."
+  },
+  {
+    "id": "trace_cloud_cost_optimization_obvious_fail",
+    "quad_id": "trace_cloud_cost_optimization",
+    "domain": "bpe_long_structured_trace",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the architectural cost analysis accurately compute effective hourly rates across instance families and reserved commitments?",
+    "candidate": "[TECHNICAL CONTEXT]\nCloud Compute Financial Modeling:\n\n### Instance Pricing Comparison Matrix\n| Instance Type | vCPU / RAM | On-Demand ($/hr) | 1-Yr Compute Savings Plan ($/hr) | 3-Yr Compute Savings Plan ($/hr) |\n|:---|:---|:---|:---|:---|\n| c6i.2xlarge | 8 vCPU / 16 GB | $0.3400 | $0.2380 (-30%) | $0.1870 (-45%) |\n| r6i.2xlarge | 8 vCPU / 64 GB | $0.5040 | $0.3528 (-30%) | $0.2772 (-45%) |\n| m6i.2xlarge | 8 vCPU / 32 GB | $0.3840 | $0.2688 (-30%) | $0.2112 (-45%) |\n\nScenario: A baseline fleet of 20x c6i.2xlarge and 10x r6i.2xlarge runs 24/7 (730 hours/month). Evaluate monthly spend under On-Demand versus 3-Year Compute Savings Plans.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Cloud providers double prices whenever savings plans are purchased because loyalty carries penalties.\n2. 20 servers cost $1,000,000 per second according to imaginary billing models.\n3. Total monthly expenditure will exceed the entire world gross domestic product.\n</think>\nConclusion: Purchasing savings plans increases monthly server expenses to over $100,000,000 per month, so companies should solely use unregistered personal credit cards for billing."
+  },
+  {
+    "id": "trace_cloud_cost_optimization_hard_negative",
+    "quad_id": "trace_cloud_cost_optimization",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the architectural cost analysis accurately compute effective hourly rates across instance families and reserved commitments?",
+    "candidate": "[TECHNICAL CONTEXT]\nCloud Compute Financial Modeling:\n\n### Instance Pricing Comparison Matrix\n| Instance Type | vCPU / RAM | On-Demand ($/hr) | 1-Yr Compute Savings Plan ($/hr) | 3-Yr Compute Savings Plan ($/hr) |\n|:---|:---|:---|:---|:---|\n| c6i.2xlarge | 8 vCPU / 16 GB | $0.3400 | $0.2380 (-30%) | $0.1870 (-45%) |\n| r6i.2xlarge | 8 vCPU / 64 GB | $0.5040 | $0.3528 (-30%) | $0.2772 (-45%) |\n| m6i.2xlarge | 8 vCPU / 32 GB | $0.3840 | $0.2688 (-30%) | $0.2112 (-45%) |\n\nScenario: A baseline fleet of 20x c6i.2xlarge and 10x r6i.2xlarge runs 24/7 (730 hours/month). Evaluate monthly spend under On-Demand versus 3-Year Compute Savings Plans.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. On-Demand calculation:\n   - Total hourly = $11.84/hr; monthly = $8,643.20.\n2. 3-Year Savings Plan miscalculation:\n   - Adding 45% surcharge: $11.84 * 1.45 = $17.168/hr.\n   - Monthly cost = $17.168 * 730 = $12,532.64.\n3. Negative savings: The plan increases monthly expenses by $3,889.44.\n</think>\nConclusion: Entering into a 3-Year Savings Plan escalates monthly compute spending from $8,643.20 up to $12,532.64, producing an unfavorable 45% cost penalty over on-demand rates."
+  },
+  {
+    "id": "trace_database_sharding_strategy_clean_pass",
+    "quad_id": "trace_database_sharding_strategy",
+    "domain": "bpe_long_structured_trace",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the database sharding trace correctly identify cross-shard query fan-out risks associated with range partitioning on timestamp?",
+    "candidate": "[TECHNICAL CONTEXT]\nHigh-Throughput Ledger Partitioning Architecture:\n\n### Sharding Scheme Trade-off Matrix\n| Sharding Strategy | Shard Key | Write Distribution | Point Lookup (by ID) | Time-Range Scans |\n|:---|:---|:---|:---|:---|\n| Hash Sharding | hash(account_id) | Uniform across all shards | Single-shard targeted | Scatter-gather fan-out |\n| Range Sharding | timestamp (created_at) | Hotspot on newest shard | Scatter-gather fan-out | Single-shard targeted |\n| Composite Sharding | (account_id, created_at) | Balanced per account | Single-shard targeted | Efficient within account |\n\nProblem: A financial transaction platform processes 50,000 writes/sec. Evaluate the consequences of sharding strictly by range on created_at versus hash on account_id.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. In timestamp range sharding, all incoming insert operations have created_at values within the current time window.\n2. Consequently, 100% of the 50,000 writes/sec target the single active shard hosting the current time range, creating an acute write bottleneck (hotspot).\n3. In contrast, hash sharding on account_id evenly distributes concurrent inserts across all N shards via hash modulo.\n4. However, time-range queries without account_id require scatter-gather queries across all shards under hash partitioning.\n5. Therefore, range sharding on timestamp is contraindicated for high-throughput write-heavy workloads.\n</think>\nConclusion: Range sharding on created_at severely bottlenecks write throughput because all 50k writes/sec concentrate on the newest shard, whereas hash sharding on account_id distributes write IOPS evenly across the shard cluster."
+  },
+  {
+    "id": "trace_database_sharding_strategy_hard_positive",
+    "quad_id": "trace_database_sharding_strategy",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the database sharding trace correctly identify cross-shard query fan-out risks associated with range partitioning on timestamp?",
+    "candidate": "[TECHNICAL CONTEXT]\nHigh-Throughput Ledger Partitioning Architecture:\n\n### Sharding Scheme Trade-off Matrix\n| Sharding Strategy | Shard Key | Write Distribution | Point Lookup (by ID) | Time-Range Scans |\n|:---|:---|:---|:---|:---|\n| Hash Sharding | hash(account_id) | Uniform across all shards | Single-shard targeted | Scatter-gather fan-out |\n| Range Sharding | timestamp (created_at) | Hotspot on newest shard | Scatter-gather fan-out | Single-shard targeted |\n| Composite Sharding | (account_id, created_at) | Balanced per account | Single-shard targeted | Efficient within account |\n\nProblem: A financial transaction platform processes 50,000 writes/sec. Evaluate the consequences of sharding strictly by range on created_at versus hash on account_id.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Analyze write path under range(timestamp): current writes have monotonic timestamps and route exclusively to the current shard. Shards for past days sit idle for writes, yielding catastrophic write hotspotting.\n2. Analyze write path under hash(account_id): writes disperse uniformly across all shards, enabling linear horizontal scaling of the 50k writes/sec load.\n3. Trade-off verification: Hash sharding necessitates fan-out for global time scans, but preserves write stability.\n</think>\nConclusion: Pure timestamp range sharding creates fatal write hot-spotting on the current partition; hash-partitioning on account_id is required to distribute the 50,000 writes/sec load across available database nodes."
+  },
+  {
+    "id": "trace_database_sharding_strategy_obvious_fail",
+    "quad_id": "trace_database_sharding_strategy",
+    "domain": "bpe_long_structured_trace",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the database sharding trace correctly identify cross-shard query fan-out risks associated with range partitioning on timestamp?",
+    "candidate": "[TECHNICAL CONTEXT]\nHigh-Throughput Ledger Partitioning Architecture:\n\n### Sharding Scheme Trade-off Matrix\n| Sharding Strategy | Shard Key | Write Distribution | Point Lookup (by ID) | Time-Range Scans |\n|:---|:---|:---|:---|:---|\n| Hash Sharding | hash(account_id) | Uniform across all shards | Single-shard targeted | Scatter-gather fan-out |\n| Range Sharding | timestamp (created_at) | Hotspot on newest shard | Scatter-gather fan-out | Single-shard targeted |\n| Composite Sharding | (account_id, created_at) | Balanced per account | Single-shard targeted | Efficient within account |\n\nProblem: A financial transaction platform processes 50,000 writes/sec. Evaluate the consequences of sharding strictly by range on created_at versus hash on account_id.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Storing data across multiple shards causes hard drives to spin backward into the past.\n2. When 50,000 writes occur, PostgreSQL converts them automatically into paper printouts.\n3. No computer can ever handle more than 2 writes per hour without melting.\n</think>\nConclusion: Database sharding is mathematically impossible because hard drives cannot store records created on Tuesdays, so all data should be kept in volatile RAM without partition keys."
+  },
+  {
+    "id": "trace_database_sharding_strategy_hard_negative",
+    "quad_id": "trace_database_sharding_strategy",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the database sharding trace correctly identify cross-shard query fan-out risks associated with range partitioning on timestamp?",
+    "candidate": "[TECHNICAL CONTEXT]\nHigh-Throughput Ledger Partitioning Architecture:\n\n### Sharding Scheme Trade-off Matrix\n| Sharding Strategy | Shard Key | Write Distribution | Point Lookup (by ID) | Time-Range Scans |\n|:---|:---|:---|:---|:---|\n| Hash Sharding | hash(account_id) | Uniform across all shards | Single-shard targeted | Scatter-gather fan-out |\n| Range Sharding | timestamp (created_at) | Hotspot on newest shard | Scatter-gather fan-out | Single-shard targeted |\n| Composite Sharding | (account_id, created_at) | Balanced per account | Single-shard targeted | Efficient within account |\n\nProblem: A financial transaction platform processes 50,000 writes/sec. Evaluate the consequences of sharding strictly by range on created_at versus hash on account_id.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Analyze write path under range(timestamp): timestamp range partitioning distributes incoming writes perfectly evenly across all historical shards in the cluster.\n2. Analyze write path under hash(account_id): hashing on account_id forces 100% of writes onto a single shard, causing catastrophic hotspotting.\n3. Therefore, timestamp range sharding is the optimal architecture for maximizing write concurrency.\n</think>\nConclusion: Range sharding on created_at distributes concurrent write operations uniformly across all shards, whereas hash sharding on account_id bottlenecks all 50k writes/sec onto one node."
+  },
+  {
+    "id": "trace_zero_trust_mesh_latency_clean_pass",
+    "quad_id": "trace_zero_trust_mesh_latency",
+    "domain": "bpe_long_structured_trace",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the service mesh benchmark trace correctly attribute p99 latency overhead to TLS handshake caching and envoy sidecar memory buffers?",
+    "candidate": "[TECHNICAL CONTEXT]\nService Mesh Performance & Observability Benchmark:\n\n### Latency & Overhead Benchmark (10,000 RPS)\n| Configuration | p50 Latency | p90 Latency | p99 Latency | CPU per Sidecar | mTLS Session Resumption |\n|:---|:---|:---|:---|:---|:---|\n| Baseline (No Mesh) | 1.8 ms | 3.2 ms | 5.8 ms | 0.0 cores | N/A |\n| Mesh (mTLS Full Handshake) | 2.6 ms | 5.4 ms | 18.2 ms | 0.65 cores | Disabled |\n| Mesh (mTLS + Session Cache) | 2.1 ms | 3.9 ms | 7.6 ms | 0.28 cores | Enabled (TLS 1.3 Tickets) |\n\nAnalysis Request: Evaluate the impact of TLS session resumption on tail latency (p99) and CPU utilization in an Envoy-based Zero-Trust service mesh.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Without session caching, every new TCP connection triggers a full asymmetric TLS 1.3 handshake (RSA/ECDSA signatures and key exchanges), consuming 0.65 CPU cores and driving p99 latency to 18.2 ms.\n2. Enabling TLS session resumption via session tickets eliminates full handshake overhead, reusing negotiated secrets for subsequent connections.\n3. The benchmark reveals p99 latency drops from 18.2 ms down to 7.6 ms (58.2% latency reduction).\n4. Sidecar CPU utilization drops from 0.65 cores to 0.28 cores (56.9% reduction in proxy overhead).\n5. The remaining ~1.8 ms p99 delta above baseline is attributable to Envoy user-space context switches and buffer copies.\n</think>\nConclusion: Enabling TLS session ticket caching in Envoy reduces p99 tail latency from 18.2 ms to 7.6 ms and cuts proxy CPU utilization by 56.9%, eliminating costly cryptographic handshakes on connection churn."
+  },
+  {
+    "id": "trace_zero_trust_mesh_latency_hard_positive",
+    "quad_id": "trace_zero_trust_mesh_latency",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the service mesh benchmark trace correctly attribute p99 latency overhead to TLS handshake caching and envoy sidecar memory buffers?",
+    "candidate": "[TECHNICAL CONTEXT]\nService Mesh Performance & Observability Benchmark:\n\n### Latency & Overhead Benchmark (10,000 RPS)\n| Configuration | p50 Latency | p90 Latency | p99 Latency | CPU per Sidecar | mTLS Session Resumption |\n|:---|:---|:---|:---|:---|:---|\n| Baseline (No Mesh) | 1.8 ms | 3.2 ms | 5.8 ms | 0.0 cores | N/A |\n| Mesh (mTLS Full Handshake) | 2.6 ms | 5.4 ms | 18.2 ms | 0.65 cores | Disabled |\n| Mesh (mTLS + Session Cache) | 2.1 ms | 3.9 ms | 7.6 ms | 0.28 cores | Enabled (TLS 1.3 Tickets) |\n\nAnalysis Request: Evaluate the impact of TLS session resumption on tail latency (p99) and CPU utilization in an Envoy-based Zero-Trust service mesh.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Analyze full handshake overhead: asymmetric cryptography during TLS handshakes creates severe CPU contention and pushes p99 to 18.2 ms under 10k RPS.\n2. Analyze session resumption: TLS 1.3 ticket resumption allows symmetric key derivation, reducing p99 tail latency by 10.6 ms (from 18.2 ms to 7.6 ms).\n3. Analyze resource footprint: CPU drops from 0.65 to 0.28 cores per sidecar.\n4. Residual latency over raw network: accounted for by Envoy TCP proxy filtering and iptables redirects.\n</think>\nConclusion: TLS session ticket caching mitigates handshake tail latency spikes, lowering p99 from 18.2 ms to 7.6 ms and reducing sidecar CPU consumption from 0.65 to 0.28 cores under 10k RPS."
+  },
+  {
+    "id": "trace_zero_trust_mesh_latency_obvious_fail",
+    "quad_id": "trace_zero_trust_mesh_latency",
+    "domain": "bpe_long_structured_trace",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the service mesh benchmark trace correctly attribute p99 latency overhead to TLS handshake caching and envoy sidecar memory buffers?",
+    "candidate": "[TECHNICAL CONTEXT]\nService Mesh Performance & Observability Benchmark:\n\n### Latency & Overhead Benchmark (10,000 RPS)\n| Configuration | p50 Latency | p90 Latency | p99 Latency | CPU per Sidecar | mTLS Session Resumption |\n|:---|:---|:---|:---|:---|:---|\n| Baseline (No Mesh) | 1.8 ms | 3.2 ms | 5.8 ms | 0.0 cores | N/A |\n| Mesh (mTLS Full Handshake) | 2.6 ms | 5.4 ms | 18.2 ms | 0.65 cores | Disabled |\n| Mesh (mTLS + Session Cache) | 2.1 ms | 3.9 ms | 7.6 ms | 0.28 cores | Enabled (TLS 1.3 Tickets) |\n\nAnalysis Request: Evaluate the impact of TLS session resumption on tail latency (p99) and CPU utilization in an Envoy-based Zero-Trust service mesh.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Encryption speeds up network cables by packing light waves more tightly together inside fiber optics.\n2. When TLS is enabled, server response latency becomes negative 50 milliseconds, predicting future requests.\n3. Sidecar proxies consume zero memory and generate electricity back into the server power supply.\n</think>\nConclusion: Enabling mTLS eliminates all network latency completely, allowing requests to arrive at destination servers before they are transmitted by clients."
+  },
+  {
+    "id": "trace_zero_trust_mesh_latency_hard_negative",
+    "quad_id": "trace_zero_trust_mesh_latency",
+    "domain": "bpe_long_structured_trace",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the service mesh benchmark trace correctly attribute p99 latency overhead to TLS handshake caching and envoy sidecar memory buffers?",
+    "candidate": "[TECHNICAL CONTEXT]\nService Mesh Performance & Observability Benchmark:\n\n### Latency & Overhead Benchmark (10,000 RPS)\n| Configuration | p50 Latency | p90 Latency | p99 Latency | CPU per Sidecar | mTLS Session Resumption |\n|:---|:---|:---|:---|:---|:---|\n| Baseline (No Mesh) | 1.8 ms | 3.2 ms | 5.8 ms | 0.0 cores | N/A |\n| Mesh (mTLS Full Handshake) | 2.6 ms | 5.4 ms | 18.2 ms | 0.65 cores | Disabled |\n| Mesh (mTLS + Session Cache) | 2.1 ms | 3.9 ms | 7.6 ms | 0.28 cores | Enabled (TLS 1.3 Tickets) |\n\nAnalysis Request: Evaluate the impact of TLS session resumption on tail latency (p99) and CPU utilization in an Envoy-based Zero-Trust service mesh.\n\n[ANALYSIS & RECOMMENDATION]\n<think>\n1. Analyze benchmark data: enabling TLS session ticket caching increases p99 latency from 7.6 ms to 18.2 ms.\n2. Cryptographic session resumption requires re-generating private keys on every packet, raising CPU usage from 0.28 to 0.65 cores.\n3. Therefore, session resumption degrades tail latency by over 100% and should be disabled in all production meshes.\n</think>\nConclusion: Enabling TLS session caching severely degrades mesh performance, causing p99 tail latency to increase from 7.6 ms to 18.2 ms and more than doubling sidecar CPU consumption."
+  }
+]

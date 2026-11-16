@@ -20,6 +20,13 @@ CAL_DISTILL_80_ITEMS: list[dict[str, Any]] = _load_json("cal_distill_80.json")
 OOD_GENERALIZATION_96_ITEMS: list[dict[str, Any]] = _load_json("ood_generalization_96.json")
 STREAMING_TRAJECTORIES_32_ITEMS: list[dict[str, Any]] = _load_json("streaming_trajectories_32.json")
 DRIFT_REGIMES_120_ITEMS: list[dict[str, Any]] = _load_json("drift_regimes_120.json")
+RAG_GROUNDEDNESS_80_ITEMS: list[dict[str, Any]] = _load_json("rag_groundedness_80.json")
+AGENT_MCP_TOOL_SAFETY_80_ITEMS: list[dict[str, Any]] = _load_json("agent_mcp_tool_safety_80.json")
+MULTILINGUAL_UNICODE_BPE_80_ITEMS: list[dict[str, Any]] = _load_json("multilingual_unicode_bpe_80.json")
+
+_RANK_PAIRWISE_DATA: dict[str, Any] = _load_json("rank_pairwise_80.json")
+RANK_PAIRWISE_60_ITEMS: list[dict[str, Any]] = _RANK_PAIRWISE_DATA["pairwise_items"]
+RANK_BEST_OF_N_20_POOLS: list[dict[str, Any]] = _RANK_PAIRWISE_DATA["best_of_n_pools"]
 
 _REASONING_DATA: dict[str, Any] = _load_json("reasoning_tiers_32.json")
 TIER_B_COMPOUND_RUBRIC: str = _REASONING_DATA["tier_b_compound_rubric"]
@@ -68,6 +75,25 @@ def load_streaming_trajectories_32() -> list[dict[str, Any]]:
 
 def load_drift_regimes_120() -> list[dict[str, Any]]:
     return list(DRIFT_REGIMES_120_ITEMS)
+
+
+def load_rag_groundedness_80() -> list[dict[str, Any]]:
+    return list(RAG_GROUNDEDNESS_80_ITEMS)
+
+
+def load_agent_mcp_tool_safety_80() -> list[dict[str, Any]]:
+    return list(AGENT_MCP_TOOL_SAFETY_80_ITEMS)
+
+
+def load_multilingual_unicode_bpe_80() -> list[dict[str, Any]]:
+    return list(MULTILINGUAL_UNICODE_BPE_80_ITEMS)
+
+
+def load_rank_pairwise_80() -> dict[str, Any]:
+    return {
+        "pairwise_items": list(RANK_PAIRWISE_60_ITEMS),
+        "best_of_n_pools": list(RANK_BEST_OF_N_20_POOLS),
+    }
 
 
 def load_reasoning_tiers_32() -> list[dict[str, Any]]:

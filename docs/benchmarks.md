@@ -792,7 +792,51 @@ Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to 
 
 ---
 
-### 14. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
+### 14. `v0.13.0` Decision-Grade Statistical Engine, Deconfounded $N=80$ Core Suites & Canonical External Public Benchmarks
+
+`v0.13.0` upgrades `logitgate.benchmark` with pure-Python Wilson 95% confidence intervals (`wilson_confidence_interval`), deterministic percentile bootstrap intervals (`bootstrap_metric_ci`), exact two-sided McNemar paired significance tests (`mcnemar_exact_test`), probabilistic calibration & selective-abstention metrics (`compute_calibration_metrics`: Brier score, 10-bin ECE, tie-aware Mann-Whitney AUROC, and Area Under the Selective Risk-Coverage Curve `AURC`), `p99_ms` tail latency, and separated `cold_prefix_p50_ms` vs `warm_prefix_p50_ms` KV-cache timings.
+
+#### A. Psychometric Deconfounding & Cross-Split Leakage Verification ($N=80$ Core Suites)
+
+Four new domain-disjoint, natural unpadded benchmark suites (`benchmarks/data/*_80.json`) close prior modality blind spots across multi-chunk RAG groundedness, MCP / OpenAI tool-call safety, multilingual/CJK/Cyrillic/Arabic/emoji BPE boundaries, and `RankGate` / `BestOfNGate` preference pools, passing `audit_benchmark_dataset` with **0 warnings** and **0 cross-split leakage** against both `cal_distill_80.json` and `ood_generalization_96.json`:
+
+| Core Dataset | $N$ (Pos / Neg) | `holds_at_alpha_005` | `char_length_rel_diff` | `length_auroc` | `lexical_loo_accuracy` | Audit Warnings |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `rag_groundedness_80.json` | `80` (`40 / 40`) | `True` | `0.0041` | `0.5497` | `0.0000` | `0` |
+| `agent_mcp_tool_safety_80.json` | `80` (`40 / 40`) | `True` | `0.0052` | `0.4866` | `0.0375` | `0` |
+| `multilingual_unicode_bpe_80.json` | `80` (`40 / 40`) | `True` | `0.0690` | `0.5463` | `0.0000` | `0` |
+| `rank_pairwise_80.json` (`60` pairs + `20` pools) | `120` (`60 / 60`) | `True` | `0.0149` | `0.4478` | `0.3083` | `0` |
+
+#### B. Live Dual-GPU Cascade & Student Discrimination Across $N=80$ Suites
+
+Calibrated strictly once on disjoint Split-A `cal_distill_80.json` ($\alpha = 0.10$, zero target-domain labels) with `gemma4:26b` (RTX 5090) as Layer-2 teacher:
+
+| Suite ($N=80$) | Layer-1 Model (RTX 4070) | L1 `LogitGate` Acc | L1 `AUROC` / `Selective Risk` | `Cascade` Acc (`95% Wilson CI`) | Fast-Path Skip | `JudgeGate` (`gemma4:26b`) | McNemar $p$ |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`rag_groundedness_80`** | `llama3.2:3b` (`3B`) | `76.2%` | `0.9775` / **`0.0%`** | **`100.0%`** (`[95.4%, 100.0%]`) | `41.2%` | `98.8%` | `1.0000` |
+| | `gemma4:e4b` (`4B`) | `98.8%` | `0.9994` / `1.2%` | **`100.0%`** (`[95.4%, 100.0%]`) | `98.8%` | `98.8%` | `1.0000` |
+| **`agent_mcp_tool_safety_80`** | `llama3.2:3b` (`3B`) | `55.0%` | `0.9744` / **`0.0%`** | **`98.8%`** (`[93.3%, 99.8%]`) | `20.0%` | `97.5%` | `1.0000` |
+| | `gemma4:e4b` (`4B`) | `100.0%` | `1.0000` / **`0.0%`** | **`100.0%`** (`[95.4%, 100.0%]`) | `100.0%` | `97.5%` | `0.5000` |
+| **`multilingual_unicode_bpe_80`** | `llama3.2:3b` (`3B`) | `63.7%` | `0.9738` / **`0.0%`** | **`98.8%`** (`[93.3%, 99.8%]`) | `28.7%` | `95.0%` | `0.2500` |
+| | `gemma4:e4b` (`4B`) | `100.0%` | `1.0000` / **`0.0%`** | **`100.0%`** (`[95.4%, 100.0%]`) | `100.0%` | `95.0%` | `0.1250` |
+
+- **`rank_pairwise_80` (`gemma4:e4b`, `0` generated tokens):** Pairwise `RankGate(symmetric_debiasing=True)` achieved **`100.0%` (`60/60`, 95% CI `[94.0%, 100.0%]`)** with **`100.0%` position-swap consistency** at `228.9 ms` mean latency (vs `98.3%` single-pass), and contract-filtered `BestOfNGate` achieved `65.0%` across 4-way pools (including `all_bad` AST/post-gate rejection pools).
+- **Pure-CPU Validation (`options={"num_gpu": 0}`, `0.0 GB` VRAM, `qwen2.5-coder:3b`, `MCP-24`):** Confirmed `size_vram = 0` (`2.09 GB` system RAM), `p50 = 2,312.3 ms` (`cold_prefix_p50 = 2,418.7 ms` vs `warm_prefix_p50 = 2,301.3 ms`, `p99 = 2,621.2 ms`), **`AUROC = 1.0000`**, **`AURC = 0.0617`**, and **`7.7% <= 10.0%` selective risk** at `54.2%` uncalibrated coverage.
+
+#### C. Live Canonical External Public Benchmarks (`benchmarks/external/`, Zero-Token `gemma4:e4b`)
+
+Evaluated live via `benchmarks/external/run_external.py` (`seed=42`, $N=60$ per suite) across commercial-clean public benchmarks (`MIT` / `Apache-2.0`):
+
+| External Public Suite | License | Task | Single-Pass Acc (`Swap Consistency`) | Symmetric Debiased Acc (`95% CI`) | Symmetric Swap Consistency | Key Empirical Takeaway |
+| :--- | :---: | :--- | :---: | :---: | :---: | :--- |
+| **`princeton-nlp/LLMBar`** (`Adversarial_Neighbor`) | `MIT` | Pairwise (`60`) | `55.0%` (`75.0%`) | **`58.3%`** (`[45.7%, 69.9%]`) | **`100.0%` (`+25.0 pp`)** | Eliminates `25.0%` slot-order flip rate on surface-bias adversarial distractors at `0` generated tokens. |
+| **`ScalerLab/JudgeBench`** (`gpt` split) | `MIT` | Pairwise (`60`) | `58.3%` (`71.7%`) | **`61.7%`** (`[49.0%, 72.9%]`) | **`93.3%` (`+21.6 pp`)** | `+3.4 pp` accuracy and `+21.6 pp` swap consistency on hard math/coding/reasoning pairs. |
+| **`truthfulqa/truthful_qa`** (`validation`) | `Apache-2.0` | Pairwise (`60`) | `81.7%` (`91.7%`) | **`80.0%`** (`[68.2%, 88.2%]`) | **`98.3%` (`+6.6 pp`)** | High misconception rejection with near-perfect (`98.3%`) slot invariance. |
+| **`wandb/RAGTruth-processed`** (`test`, `40` faithful / `20` hallu) | `MIT` | Grounded RAG (`60`) | - | `LogitGate`: **`71.7%`** (`[59.2%, 81.5%]`, `AUROC 0.7888`, `ECE 0.0933`) | `JudgeGate` (`gemma4:26b`): **`85.0%`** (`[73.9%, 91.9%]`) | Baseline when `4k`-char source articles are concatenated inside `candidate`; motivates dedicated `<reference_context_NONCE>` RAG slot (`v0.15.0`). |
+
+---
+
+### 15. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
 - **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.

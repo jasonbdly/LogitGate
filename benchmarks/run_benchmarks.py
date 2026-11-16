@@ -66,7 +66,9 @@ def unload_all(urls: list[str]) -> None:
         try:
             with urllib.request.urlopen(f"{base_url}/api/ps", timeout=5.0) as resp:
                 data = json.loads(resp.read().decode())
-                active = [m.get("model") or m.get("name") for m in data.get("models", [])]
+                active = [
+                    m.get("model") or m.get("name") for m in data.get("models", [])
+                ]
         except (OSError, ValueError):
             active = []
         for model in set(active + known):
@@ -95,11 +97,15 @@ def _judge_budget(model_name: str, is_cpu: bool = False) -> tuple[int, bool | No
 
 def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, Any]:
     """Evaluates the 32-item reasoning depth suite (Tiers A, B-Compound, B-Atomic, C, D)."""
-    print(f"\n=== [Suite 2: 32-Item Reasoning Depth] Model: {model_name} ===", flush=True)
+    print(
+        f"\n=== [Suite 2: 32-Item Reasoning Depth] Model: {model_name} ===", flush=True
+    )
     out: dict[str, Any] = {}
     max_tok, think_mode = _judge_budget(model_name, is_cpu=False)
 
-    def _run_binary_tier(tier_key: str, items: list[dict[str, Any]], rubric_override: str | None = None) -> dict[str, Any]:
+    def _run_binary_tier(
+        tier_key: str, items: list[dict[str, Any]], rubric_override: str | None = None
+    ) -> dict[str, Any]:
         l1_correct = 0
         l1_false_pass = 0
         l1_escalated = 0
@@ -109,7 +115,9 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
 
         for item in items:
             rubric = rubric_override or item["rubric"]
-            gate = LogitGate(rubric=rubric, backend=backend, model=model_name, preset="balanced")
+            gate = LogitGate(
+                rubric=rubric, backend=backend, model=model_name, preset="balanced"
+            )
             v_l1 = gate.evaluate(item["candidate"])
             p = v_l1.probability if v_l1.probability is not None else 0.5
             l1_pass = p >= 0.5
@@ -155,16 +163,18 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
             if ambig_only_pass == item["expected"]:
                 casc_on_ambig_only_correct += 1
 
-            rows.append({
-                "id": item["id"],
-                "expected": item["expected"],
-                "prob": round(p, 4),
-                "l1_status": v_l1.status.value,
-                "l1_correct": l1_pass == item["expected"],
-                "casc_passed": casc_pass,
-                "casc_correct": casc_pass == item["expected"],
-                "layer_used": layer_used,
-            })
+            rows.append(
+                {
+                    "id": item["id"],
+                    "expected": item["expected"],
+                    "prob": round(p, 4),
+                    "l1_status": v_l1.status.value,
+                    "l1_correct": l1_pass == item["expected"],
+                    "casc_passed": casc_pass,
+                    "casc_correct": casc_pass == item["expected"],
+                    "layer_used": layer_used,
+                }
+            )
             print(
                 f"  [{tier_key}] {item['id']}: exp={item['expected']} P={p:.4f} ({v_l1.status.value}) "
                 f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} "
@@ -189,7 +199,9 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
         }
 
     out["tier_a"] = _run_binary_tier("tier_a", TIER_A_8_ITEMS)
-    out["tier_b_compound"] = _run_binary_tier("tier_b_compound", TIER_B_8_ITEMS, rubric_override=TIER_B_COMPOUND_RUBRIC)
+    out["tier_b_compound"] = _run_binary_tier(
+        "tier_b_compound", TIER_B_8_ITEMS, rubric_override=TIER_B_COMPOUND_RUBRIC
+    )
 
     # Tier B Atomic via evaluate_batch
     l1_b_atom_correct = 0
@@ -197,7 +209,12 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
     l1_b_atom_esc = 0
     casc_b_atom_correct = 0
     atom_rows = []
-    gate_batch = LogitGate(rubric=TIER_B_ATOMIC_RUBRICS[0], backend=backend, model=model_name, preset="balanced")
+    gate_batch = LogitGate(
+        rubric=TIER_B_ATOMIC_RUBRICS[0],
+        backend=backend,
+        model=model_name,
+        preset="balanced",
+    )
     for item in TIER_B_8_ITEMS:
         verdicts = gate_batch.evaluate_batch(item["candidate"], TIER_B_ATOMIC_RUBRICS)
         probs = [v.probability if v.probability is not None else 0.5 for v in verdicts]
@@ -225,18 +242,22 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
                     max_tokens=max_tok,
                     think=think_mode,
                 )
-                fused_atomic_pass, _, _, _ = fuse_escalated_verdict(v, jg.evaluate(item["candidate"]))
+                fused_atomic_pass, _, _, _ = fuse_escalated_verdict(
+                    v, jg.evaluate(item["candidate"])
+                )
                 rule_passes.append(fused_atomic_pass)
         casc_pass = all(rule_passes)
         if casc_pass == item["expected"]:
             casc_b_atom_correct += 1
-        atom_rows.append({
-            "id": item["id"],
-            "expected": item["expected"],
-            "probs": [round(p, 4) for p in probs],
-            "l1_correct": l1_pass == item["expected"],
-            "casc_correct": casc_pass == item["expected"],
-        })
+        atom_rows.append(
+            {
+                "id": item["id"],
+                "expected": item["expected"],
+                "probs": [round(p, 4) for p in probs],
+                "l1_correct": l1_pass == item["expected"],
+                "casc_correct": casc_pass == item["expected"],
+            }
+        )
         print(
             f"  [tier_b_atomic] {item['id']}: exp={item['expected']} probs={[round(p, 2) for p in probs]} "
             f"L1={'OK' if l1_pass == item['expected'] else 'ERR'} Casc={'OK' if casc_pass == item['expected'] else 'ERR'}",
@@ -278,7 +299,9 @@ def eval_reasoning_tiers(backend: OllamaBackend, model_name: str) -> dict[str, A
     return out
 
 
-def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool = False) -> dict[str, Any]:
+def eval_multi_domain_24(
+    backend: OllamaBackend, model_name: str, is_cpu: bool = False
+) -> dict[str, Any]:
     """Evaluates the 24-item multi-domain suite (Baseline Judge vs Cascade modes)."""
     label = f"{model_name} ({'Pure CPU' if is_cpu else 'GPU'})"
     print(f"\n=== [Suite 1: 24-Item Multi-Domain Cascade] {label} ===", flush=True)
@@ -292,7 +315,13 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
     base_tokens = 0
     base_correct = 0
     for item in MULTI_DOMAIN_24_ITEMS:
-        jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=think_mode)
+        jg = JudgeGate(
+            rubric=item["rubric"],
+            backend=backend,
+            model=model_name,
+            max_tokens=max_tok,
+            think=think_mode,
+        )
         v = jg.evaluate(item["candidate"])
         base_tokens += v.total_tokens_generated
         if v.passed == item["expected"]:
@@ -314,7 +343,9 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
 
     for item in MULTI_DOMAIN_24_ITEMS:
         ast_gate = ASTGate(**item.get("ast_config", {}))
-        logit_gate = LogitGate(rubric=item["rubric"], backend=backend, model=model_name, preset="balanced")
+        logit_gate = LogitGate(
+            rubric=item["rubric"], backend=backend, model=model_name, preset="balanced"
+        )
 
         # Measure L0 + L1
         t_start = time.perf_counter()
@@ -348,7 +379,13 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
 
             # on_ambiguous_or_fail invokes JudgeGate for failure diagnostics
             t_j = time.perf_counter()
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=think_mode)
+            jg = JudgeGate(
+                rubric=item["rubric"],
+                backend=backend,
+                model=model_name,
+                max_tokens=max_tok,
+                think=think_mode,
+            )
             v_j = jg.evaluate(item["candidate"])
             dt_j = (time.perf_counter() - t_j) * 1000.0
             time_ambig_or_fail_ms += dt_l0_l1 + dt_j
@@ -360,7 +397,13 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
             # AMBIGUOUS: both modes escalate to JudgeGate!
             l2_escalated_count += 1
             t_j = time.perf_counter()
-            jg = JudgeGate(rubric=item["rubric"], backend=backend, model=model_name, max_tokens=max_tok, think=think_mode)
+            jg = JudgeGate(
+                rubric=item["rubric"],
+                backend=backend,
+                model=model_name,
+                max_tokens=max_tok,
+                think=think_mode,
+            )
             v_j = jg.evaluate(item["candidate"])
             dt_j = (time.perf_counter() - t_j) * 1000.0
             time_ambig_or_fail_ms += dt_l0_l1 + dt_j
@@ -397,9 +440,13 @@ def eval_multi_domain_24(backend: OllamaBackend, model_name: str, is_cpu: bool =
     return res
 
 
-def eval_choice_and_score_gates(backend: OllamaBackend, model_name: str) -> dict[str, Any]:
+def eval_choice_and_score_gates(
+    backend: OllamaBackend, model_name: str
+) -> dict[str, Any]:
     """Evaluates ChoiceGate (6 items) and ScoreGate (6 items) with N=5 latency trials."""
-    print(f"\n=== [Suite 3: ChoiceGate & ScoreGate] Model: {model_name} ===", flush=True)
+    print(
+        f"\n=== [Suite 3: ChoiceGate & ScoreGate] Model: {model_name} ===", flush=True
+    )
     # 1. ChoiceGate accuracy across 6 items
     choice_1p_correct = 0
     choice_2p_correct = 0
@@ -466,7 +513,11 @@ def eval_choice_and_score_gates(backend: OllamaBackend, model_name: str) -> dict
     h_mean = statistics.mean(scores_by_tier["high"])
     m_mean = statistics.mean(scores_by_tier["medium"])
     l_mean = statistics.mean(scores_by_tier["low"])
-    if scores_by_tier["high"][0] > scores_by_tier["medium"][0] > scores_by_tier["low"][0]:
+    if (
+        scores_by_tier["high"][0]
+        > scores_by_tier["medium"][0]
+        > scores_by_tier["low"][0]
+    ):
         rank_pairs_correct += 3
     else:
         if scores_by_tier["high"][0] > scores_by_tier["medium"][0]:
@@ -476,7 +527,11 @@ def eval_choice_and_score_gates(backend: OllamaBackend, model_name: str) -> dict
         if scores_by_tier["high"][0] > scores_by_tier["low"][0]:
             rank_pairs_correct += 1
 
-    if scores_by_tier["high"][1] > scores_by_tier["medium"][1] > scores_by_tier["low"][1]:
+    if (
+        scores_by_tier["high"][1]
+        > scores_by_tier["medium"][1]
+        > scores_by_tier["low"][1]
+    ):
         rank_pairs_correct += 3
     else:
         if scores_by_tier["high"][1] > scores_by_tier["medium"][1]:
@@ -516,9 +571,14 @@ def eval_choice_and_score_gates(backend: OllamaBackend, model_name: str) -> dict
     return res
 
 
-def eval_diverse_haystack(backend: OllamaBackend, model_name: str) -> list[dict[str, Any]]:
+def eval_diverse_haystack(
+    backend: OllamaBackend, model_name: str
+) -> list[dict[str, Any]]:
     """Evaluates needle-in-a-haystack across diverse 12-section handbook documents (200 to 16,000 tokens)."""
-    print(f"\n=== [Suite 4: Diverse Multi-Section Haystack] Model: {model_name} ===", flush=True)
+    print(
+        f"\n=== [Suite 4: Diverse Multi-Section Haystack] Model: {model_name} ===",
+        flush=True,
+    )
     tiers = [
         ("Short (~200 tok)", 150),
         ("Medium (~1,500 tok)", 1100),
@@ -526,7 +586,9 @@ def eval_diverse_haystack(backend: OllamaBackend, model_name: str) -> list[dict[
         ("Very Long (~8,000 tok)", 5800),
         ("Massive (~16,000 tok)", 11000),
     ]
-    gate = LogitGate(rubric=HAYSTACK_RUBRIC, backend=backend, model=model_name, preset="balanced")
+    gate = LogitGate(
+        rubric=HAYSTACK_RUBRIC, backend=backend, model=model_name, preset="balanced"
+    )
     rows = []
     for label, words in tiers:
         doc_clean = build_diverse_haystack_document(words, NEEDLE_COMPLIANT)
@@ -550,26 +612,151 @@ def eval_diverse_haystack(backend: OllamaBackend, model_name: str) -> list[dict[
             "correct_both": (p_clean >= 0.85 and p_viol <= 0.20),
         }
         rows.append(row)
-        print(f"  [{label}] P_clean={p_clean:.4f} P_viol={p_viol:.4f} ΔP={delta_p:.4f} Latency={warm_ms:.1f}ms", flush=True)
+        print(
+            f"  [{label}] P_clean={p_clean:.4f} P_viol={p_viol:.4f} ΔP={delta_p:.4f} Latency={warm_ms:.1f}ms",
+            flush=True,
+        )
     return rows
 
 
+def eval_core_dataset(
+    backend: OllamaBackend, model_name: str, file_path: Path
+) -> dict[str, Any]:
+    """Evaluates a modern v0.13.0 core dataset file (e.g. ood_generalization_96 or *_80.json)."""
+    suite_name = file_path.stem
+    print(
+        f"\n=== [v0.13.0 Core Suite: {suite_name}] Model: {model_name} ===", flush=True
+    )
+    items = json.loads(file_path.read_text(encoding="utf-8"))
+    max_tok, think_mode = _judge_budget(model_name, is_cpu=False)
+
+    l1_correct = 0
+    l1_false_pass = 0
+    l1_escalated = 0
+    casc_correct = 0
+    rows: list[dict[str, Any]] = []
+
+    for item in items:
+        rubric = item["rubric"]
+        expected = bool(item["expected"])
+        gate = LogitGate(
+            rubric=rubric, backend=backend, model=model_name, preset="balanced"
+        )
+        v_l1 = gate.evaluate(item["candidate"])
+        p = v_l1.probability if v_l1.probability is not None else 0.5
+        l1_pass = p >= 0.5
+
+        if l1_pass == expected:
+            l1_correct += 1
+        if p >= 0.85 and not expected:
+            l1_false_pass += 1
+        if 0.20 < p < 0.85:
+            l1_escalated += 1
+
+        if v_l1.status == DecisionStatus.PASSED:
+            casc_pass = True
+            layer_used = "LogitGate"
+        else:
+            jg = JudgeGate(
+                rubric=rubric,
+                backend=backend,
+                model=model_name,
+                trigger="on_ambiguous_or_fail",
+                max_tokens=max_tok,
+                think=think_mode,
+            )
+            v_j = jg.evaluate(item["candidate"])
+            if v_l1.status == DecisionStatus.FAILED:
+                casc_pass = False
+            else:
+                casc_pass, _, _, _ = fuse_escalated_verdict(v_l1, v_j)
+            layer_used = "JudgeGate"
+
+        if casc_pass == expected:
+            casc_correct += 1
+
+        rows.append(
+            {
+                "id": item.get("id"),
+                "expected": expected,
+                "prob": round(p, 4),
+                "l1_status": v_l1.status.value,
+                "l1_correct": l1_pass == expected,
+                "casc_passed": casc_pass,
+                "casc_correct": casc_pass == expected,
+                "layer_used": layer_used,
+            }
+        )
+
+    n = len(items)
+    n_fail = sum(1 for it in items if not it["expected"])
+    res = {
+        "dataset_file": file_path.name,
+        "total": n,
+        "l1_correct": l1_correct,
+        "l1_accuracy": f"{l1_correct}/{n} ({round(l1_correct / max(n, 1) * 100, 1)}%)",
+        "l1_false_pass": l1_false_pass,
+        "l1_false_pass_rate": f"{l1_false_pass}/{n_fail} ({round(l1_false_pass / max(n_fail, 1) * 100, 1)}%)",
+        "l1_escalated": l1_escalated,
+        "l1_escalation_rate": f"{l1_escalated}/{n} ({round(l1_escalated / max(n, 1) * 100, 1)}%)",
+        "casc_correct": casc_correct,
+        "casc_accuracy": f"{casc_correct}/{n} ({round(casc_correct / max(n, 1) * 100, 1)}%)",
+        "items": rows,
+    }
+    print(
+        f"  --> {suite_name}: L1 Acc={res['l1_accuracy']} Casc Acc={res['casc_accuracy']} (Escalated {res['l1_escalated']}/{n})",
+        flush=True,
+    )
+    return res
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run LogitGate reproducible benchmarks.")
-    parser.add_argument("--output", default=str(REPO_ROOT / "benchmarks" / "latest_results.json"))
+    parser = argparse.ArgumentParser(
+        description="Run LogitGate reproducible benchmarks."
+    )
+    parser.add_argument(
+        "--suite",
+        choices=["v0130_core", "legacy", "all"],
+        default="v0130_core",
+        help="Benchmark suite to run (default: v0130_core)",
+    )
+    parser.add_argument(
+        "--output", default=str(REPO_ROOT / "benchmarks" / "latest_results.json")
+    )
+    parser.add_argument(
+        "--models",
+        nargs="*",
+        default=None,
+        help="Optional subset of models to evaluate",
+    )
     args = parser.parse_args()
 
     gpu1_url = os.environ.get("LOGITGATE_BENCH_GPU1_URL", "http://localhost:11434")
     gpu0_url = os.environ.get("LOGITGATE_BENCH_GPU0_URL", "http://localhost:11434")
     all_urls = [gpu1_url, gpu0_url]
 
+    data_dir = REPO_ROOT / "benchmarks" / "data"
+    core_files: list[Path] = []
+    ood_path = data_dir / "ood_generalization_96.json"
+    if ood_path.is_file():
+        core_files.append(ood_path)
+    for p in sorted(data_dir.glob("*_80.json")):
+        if p not in core_files:
+            core_files.append(p)
+
     out_path = Path(args.output)
-    master: dict[str, Any] = {
-        "suite_1_multi_domain_24": {},
-        "suite_2_reasoning_depth_32": {},
-        "suite_3_choice_and_score": {},
-        "suite_4_diverse_haystack": {},
-    }
+    master: dict[str, Any] = {}
+    if args.suite in ("v0130_core", "all"):
+        master["v0130_core"] = {}
+    if args.suite in ("legacy", "all"):
+        master.update(
+            {
+                "suite_1_multi_domain_24": {},
+                "suite_2_reasoning_depth_32": {},
+                "suite_3_choice_and_score": {},
+                "suite_4_diverse_haystack": {},
+            }
+        )
 
     def _save() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -578,46 +765,95 @@ def main() -> None:
 
     unload_all(all_urls)
 
-    # 1. GPU 1 Models (4B, 14B, 14B-Coder)
-    for model in ["gemma4:e4b", "qwen2.5:14b", "qwen2.5-coder:14b"]:
+    gpu1_default_models = ["gemma4:e4b", "qwen2.5:14b", "qwen2.5-coder:14b"]
+    gpu0_default_models = ["gemma4:26b", "gemma4:31b"]
+
+    if args.models:
+        gpu1_models = [m for m in args.models if m in gpu1_default_models]
+        gpu0_models = [m for m in args.models if m in gpu0_default_models]
+        # Any remaining user-requested models go to gpu1
+        for m in args.models:
+            if m not in gpu1_models and m not in gpu0_models:
+                gpu1_models.append(m)
+    else:
+        gpu1_models = gpu1_default_models
+        gpu0_models = gpu0_default_models
+
+    # 1. GPU 1 Models
+    for model in gpu1_models:
         b = OllamaBackend(base_url=gpu1_url, model=model, num_ctx=32768, timeout=180.0)
         try:
-            master["suite_2_reasoning_depth_32"][model] = eval_reasoning_tiers(b, model)
-            _save()
-            master["suite_3_choice_and_score"][model] = eval_choice_and_score_gates(b, model)
-            _save()
-            master["suite_1_multi_domain_24"][f"{model}_gpu"] = eval_multi_domain_24(b, model, is_cpu=False)
-            _save()
-            if model in ("gemma4:e4b", "qwen2.5:14b"):
-                master["suite_4_diverse_haystack"][model] = eval_diverse_haystack(b, model)
+            if args.suite in ("v0130_core", "all"):
+                for core_f in core_files:
+                    suite_bucket = master["v0130_core"].setdefault(core_f.stem, {})
+                    suite_bucket[model] = eval_core_dataset(b, model, core_f)
+                    _save()
+
+            if args.suite in ("legacy", "all"):
+                master["suite_2_reasoning_depth_32"][model] = eval_reasoning_tiers(
+                    b, model
+                )
+                _save()
+                master["suite_3_choice_and_score"][model] = eval_choice_and_score_gates(
+                    b, model
+                )
+                _save()
+                master["suite_1_multi_domain_24"][f"{model}_gpu"] = (
+                    eval_multi_domain_24(b, model, is_cpu=False)
+                )
+                _save()
+                if model in ("gemma4:e4b", "qwen2.5:14b"):
+                    master["suite_4_diverse_haystack"][model] = eval_diverse_haystack(
+                        b, model
+                    )
+                    _save()
+        finally:
+            b.close()
+            unload_all(all_urls)
+
+    # 2. GPU 0 Models
+    for model in gpu0_models:
+        b = OllamaBackend(base_url=gpu0_url, model=model, num_ctx=32768, timeout=180.0)
+        try:
+            if args.suite in ("v0130_core", "all"):
+                for core_f in core_files:
+                    suite_bucket = master["v0130_core"].setdefault(core_f.stem, {})
+                    suite_bucket[model] = eval_core_dataset(b, model, core_f)
+                    _save()
+
+            if args.suite in ("legacy", "all"):
+                master["suite_2_reasoning_depth_32"][model] = eval_reasoning_tiers(
+                    b, model
+                )
+                _save()
+                master["suite_3_choice_and_score"][model] = eval_choice_and_score_gates(
+                    b, model
+                )
+                _save()
+                master["suite_4_diverse_haystack"][model] = eval_diverse_haystack(
+                    b, model
+                )
                 _save()
         finally:
             b.close()
             unload_all(all_urls)
 
-    # 2. GPU 0 Models (26B MoE, 31B Dense)
-    for model in ["gemma4:26b", "gemma4:31b"]:
-        b = OllamaBackend(base_url=gpu0_url, model=model, num_ctx=32768, timeout=180.0)
+    # 3. Pure CPU Mode for gemma4:e4b (Suite 1 in legacy, or cpu in core)
+    if args.suite in ("legacy", "all") and (
+        not args.models or "gemma4:e4b" in args.models
+    ):
+        print("\n=== [Pure CPU Benchmark: gemma4:e4b] ===", flush=True)
+        b_cpu = OllamaBackend(
+            base_url=gpu1_url, model="gemma4:e4b", options={"num_gpu": 0}, timeout=240.0
+        )
         try:
-            master["suite_2_reasoning_depth_32"][model] = eval_reasoning_tiers(b, model)
-            _save()
-            master["suite_3_choice_and_score"][model] = eval_choice_and_score_gates(b, model)
-            _save()
-            master["suite_4_diverse_haystack"][model] = eval_diverse_haystack(b, model)
+            master["suite_1_multi_domain_24"]["gemma4:e4b_cpu"] = eval_multi_domain_24(
+                b_cpu, "gemma4:e4b", is_cpu=True
+            )
             _save()
         finally:
-            b.close()
+            b_cpu.close()
             unload_all(all_urls)
-
-    # 3. Pure CPU Mode for gemma4:e4b (Suite 1)
-    print("\n=== [Pure CPU Benchmark: gemma4:e4b] ===", flush=True)
-    b_cpu = OllamaBackend(base_url=gpu1_url, model="gemma4:e4b", options={"num_gpu": 0}, timeout=240.0)
-    try:
-        master["suite_1_multi_domain_24"]["gemma4:e4b_cpu"] = eval_multi_domain_24(b_cpu, "gemma4:e4b", is_cpu=True)
-        _save()
-    finally:
-        b_cpu.close()
-        unload_all(all_urls)
 
     print(f"\nALL BENCHMARKS COMPLETE! Saved to {out_path}", flush=True)
 

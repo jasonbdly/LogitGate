@@ -39,6 +39,7 @@ class _NormalizedCase:
     domain: str | None = None
     quad_id: str | None = None
     variant: str | None = None
+    projected: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +243,192 @@ def _extract_case_from_mapping(item: Mapping[str, Any]) -> _NormalizedCase | Non
     )
 
 
+def _extract_pairwise_cases(item: Mapping[str, Any]) -> list[_NormalizedCase]:
+    """Extracts (winner -> True, loser -> False) from pairwise preference items."""
+    cand_a_raw = item.get("candidate_a", item.get("response_a"))
+    cand_b_raw = item.get("candidate_b", item.get("response_b"))
+    if cand_a_raw is None or cand_b_raw is None:
+        return []
+    winner = item.get("winner", item.get("preferred", item.get("chosen")))
+    if winner is None:
+        return []
+
+    rubric = str(item.get("rubric") or item.get("question") or item.get("instruction") or "").strip()
+    cand_a = (json.dumps(cand_a_raw) if isinstance(cand_a_raw, (dict, list)) else str(cand_a_raw)).strip()
+    cand_b = (json.dumps(cand_b_raw) if isinstance(cand_b_raw, (dict, list)) else str(cand_b_raw)).strip()
+    if not rubric or not cand_a or not cand_b:
+        return []
+
+    if isinstance(winner, str):
+        w_norm = winner.strip().lower()
+        if w_norm in ("a", "0", "candidate_a", "response_a") or winner == cand_a:
+            w_text, l_text = cand_a, cand_b
+        elif w_norm in ("b", "1", "candidate_b", "response_b") or winner == cand_b:
+            w_text, l_text = cand_b, cand_a
+        else:
+            return []
+    elif isinstance(winner, int) and not isinstance(winner, bool):
+        if winner == 0:
+            w_text, l_text = cand_a, cand_b
+        elif winner == 1:
+            w_text, l_text = cand_b, cand_a
+        else:
+            return []
+    elif isinstance(winner, bool):
+        if winner:
+            w_text, l_text = cand_a, cand_b
+        else:
+            w_text, l_text = cand_b, cand_a
+    else:
+        return []
+
+    raw_dom = item.get("domain") or item.get("family")
+    domain = str(raw_dom).strip() if raw_dom is not None and str(raw_dom).strip() else None
+    raw_quad = item.get("quad_id") or item.get("id")
+    quad_id = str(raw_quad).strip() if raw_quad is not None and str(raw_quad).strip() else None
+    raw_var = item.get("variant") or item.get("trajectory_type")
+    variant = str(raw_var).strip() if raw_var is not None and str(raw_var).strip() else None
+
+    return [
+        _NormalizedCase(rubric=rubric, candidate=w_text, label=True, domain=domain, quad_id=quad_id, variant=variant),
+        _NormalizedCase(rubric=rubric, candidate=l_text, label=False, domain=domain, quad_id=quad_id, variant=variant),
+    ]
+
+
+def _extract_cases_from_mapping_root(parsed: Mapping[str, Any], path_desc: str) -> list[_NormalizedCase]:
+    out: list[_NormalizedCase] = []
+
+    # 1. pairwise_items
+    if "pairwise_items" in parsed:
+        pw_items = parsed.get("pairwise_items")
+        if isinstance(pw_items, Sequence) and not isinstance(pw_items, (str, bytes)):
+            for item in pw_items:
+                if not isinstance(item, Mapping):
+                    raise CalibrationError(f"Expected JSON object in {path_desc}, got {type(item).__name__}")
+                out.extend(_extract_pairwise_cases(item))
+
+    # 2. Reasoning-tier dicts: tier_a, tier_b, tier_c, tier_d
+    tier_keys = [k for k in ("tier_a", "tier_b", "tier_c", "tier_d") if k in parsed]
+    if tier_keys:
+        for tier_key in ("tier_a", "tier_b", "tier_c", "tier_d"):
+            t_items = parsed.get(tier_key)
+            if isinstance(t_items, Sequence) and not isinstance(t_items, (str, bytes)):
+                for raw_item in t_items:
+                    if not isinstance(raw_item, Mapping):
+                        raise CalibrationError(f"Expected JSON object in {path_desc}, got {type(raw_item).__name__}")
+                    item = dict(raw_item)
+                    if tier_key == "tier_b" and not item.get("rubric"):
+                        fallback = parsed.get("tier_b_compound_rubric")
+                        if fallback:
+                            item["rubric"] = fallback
+                    pw = _extract_pairwise_cases(item)
+                    if pw:
+                        out.extend(pw)
+                    else:
+                        nc = _extract_case_from_mapping(item)
+                        if nc is not None:
+                            out.append(nc)
+
+    # 3. Choice/Score benchmark dicts: choice_gate_items and/or score_gate_items
+    if "choice_gate_items" in parsed or "score_gate_items" in parsed:
+        cg_items = parsed.get("choice_gate_items", [])
+        if isinstance(cg_items, Sequence) and not isinstance(cg_items, (str, bytes)):
+            for raw_item in cg_items:
+                if not isinstance(raw_item, Mapping):
+                    raise CalibrationError(f"Expected JSON object in {path_desc}, got {type(raw_item).__name__}")
+                nc = _extract_case_from_mapping(raw_item)
+                if nc is not None:
+                    out.append(nc)
+                else:
+                    rubric = str(raw_item.get("question") or raw_item.get("rubric") or raw_item.get("instruction") or "").strip()
+                    cand = str(raw_item.get("candidate") or raw_item.get("actual_output") or raw_item.get("output") or raw_item.get("response") or raw_item.get("text") or "").strip()
+                    exp = raw_item.get("expected_choice", raw_item.get("expected"))
+                    opts = raw_item.get("options")
+                    if isinstance(opts, Mapping) and opts:
+                        keys = list(opts.keys())
+                        mid = len(keys) // 2
+                        lbl = exp in keys[:max(1, mid)]
+                    elif exp in ("A", "a", 0, "0"):
+                        lbl = True
+                    else:
+                        lbl = False
+                    if rubric and cand:
+                        raw_dom = raw_item.get("domain") or raw_item.get("family")
+                        domain = str(raw_dom).strip() if raw_dom is not None and str(raw_dom).strip() else None
+                        raw_quad = raw_item.get("quad_id") or raw_item.get("id")
+                        quad_id = str(raw_quad).strip() if raw_quad is not None and str(raw_quad).strip() else None
+                        raw_var = raw_item.get("variant") or raw_item.get("trajectory_type")
+                        variant = str(raw_var).strip() if raw_var is not None and str(raw_var).strip() else None
+                        out.append(_NormalizedCase(
+                            rubric=rubric,
+                            candidate=cand,
+                            label=lbl,
+                            domain=domain,
+                            quad_id=quad_id,
+                            variant=variant,
+                            projected=True,
+                        ))
+
+        sg_items = parsed.get("score_gate_items", [])
+        if isinstance(sg_items, Sequence) and not isinstance(sg_items, (str, bytes)):
+            for raw_item in sg_items:
+                if not isinstance(raw_item, Mapping):
+                    raise CalibrationError(f"Expected JSON object in {path_desc}, got {type(raw_item).__name__}")
+                nc = _extract_case_from_mapping(raw_item)
+                if nc is not None:
+                    out.append(nc)
+                else:
+                    rubric = str(raw_item.get("rubric") or raw_item.get("question") or raw_item.get("instruction") or "").strip()
+                    cand = str(raw_item.get("candidate") or raw_item.get("actual_output") or raw_item.get("output") or raw_item.get("response") or raw_item.get("text") or "").strip()
+                    tier = str(raw_item.get("tier") or "").strip().lower()
+                    band = raw_item.get("expected_band")
+                    if tier in ("high", "pass"):
+                        lbl = True
+                    elif tier in ("low", "fail"):
+                        lbl = False
+                    elif isinstance(band, (list, tuple)) and len(band) >= 1:
+                        lbl = bool(band[0] >= 3.0)
+                    else:
+                        lbl = False
+                    if rubric and cand:
+                        raw_dom = raw_item.get("domain") or raw_item.get("family")
+                        domain = str(raw_dom).strip() if raw_dom is not None and str(raw_dom).strip() else None
+                        raw_quad = raw_item.get("quad_id") or raw_item.get("id")
+                        quad_id = str(raw_quad).strip() if raw_quad is not None and str(raw_quad).strip() else None
+                        raw_var = raw_item.get("variant") or raw_item.get("trajectory_type")
+                        variant = str(raw_var).strip() if raw_var is not None and str(raw_var).strip() else None
+                        out.append(_NormalizedCase(
+                            rubric=rubric,
+                            candidate=cand,
+                            label=lbl,
+                            domain=domain,
+                            quad_id=quad_id,
+                            variant=variant,
+                            projected=True,
+                        ))
+
+    # 4. Standard keys: test_cases, samples, cases, data
+    standard_items = (
+        parsed.get("test_cases")
+        or parsed.get("samples")
+        or parsed.get("cases")
+        or parsed.get("data")
+    )
+    if standard_items is not None and isinstance(standard_items, Sequence) and not isinstance(standard_items, (str, bytes)):
+        for raw_item in standard_items:
+            if not isinstance(raw_item, Mapping):
+                raise CalibrationError(f"Expected JSON object in {path_desc}, got {type(raw_item).__name__}")
+            pw = _extract_pairwise_cases(raw_item)
+            if pw:
+                out.extend(pw)
+            else:
+                nc = _extract_case_from_mapping(raw_item)
+                if nc is not None:
+                    out.append(nc)
+
+    return out
+
+
 def _load_normalized_cases(source: Any, *, default_label: str = "in_memory") -> tuple[list[_NormalizedCase], str]:
     if isinstance(source, (str, Path)):
         p = Path(source)
@@ -259,32 +446,39 @@ def _load_normalized_cases(source: Any, *, default_label: str = "in_memory") -> 
         suffix = p.suffix.lower()
         if suffix in (".json", ".jsonl"):
             text = p.read_text(encoding="utf-8")
-            raw_items: list[Any]
+            out: list[_NormalizedCase] = []
             if suffix == ".jsonl":
                 raw_items = [
                     json.loads(line) for line in text.splitlines() if line.strip()
                 ]
+                for item in raw_items:
+                    if not isinstance(item, Mapping):
+                        raise CalibrationError(f"Expected JSON object in {p}, got {type(item).__name__}")
+                    pw = _extract_pairwise_cases(item)
+                    if pw:
+                        out.extend(pw)
+                    else:
+                        nc = _extract_case_from_mapping(item)
+                        if nc is not None:
+                            out.append(nc)
             else:
                 parsed = json.loads(text)
                 if isinstance(parsed, list):
-                    raw_items = parsed
+                    for item in parsed:
+                        if not isinstance(item, Mapping):
+                            raise CalibrationError(f"Expected JSON object in {p}, got {type(item).__name__}")
+                        pw = _extract_pairwise_cases(item)
+                        if pw:
+                            out.extend(pw)
+                        else:
+                            nc = _extract_case_from_mapping(item)
+                            if nc is not None:
+                                out.append(nc)
                 elif isinstance(parsed, Mapping):
-                    raw_items = list(
-                        parsed.get("test_cases")
-                        or parsed.get("samples")
-                        or parsed.get("cases")
-                        or parsed.get("data")
-                        or []
-                    )
+                    out = _extract_cases_from_mapping_root(parsed, str(p))
                 else:
                     raise CalibrationError(f"Unsupported JSON root type in {p}: {type(parsed).__name__}")
-            out: list[_NormalizedCase] = []
-            for item in raw_items:
-                if not isinstance(item, Mapping):
-                    raise CalibrationError(f"Expected JSON object in {p}, got {type(item).__name__}")
-                nc = _extract_case_from_mapping(item)
-                if nc is not None:
-                    out.append(nc)
+
             if not out:
                 raise CalibrationError(f"No valid labeled cases found in {p}")
             return out, str(source)
@@ -297,15 +491,25 @@ def _load_normalized_cases(source: Any, *, default_label: str = "in_memory") -> 
             for r, c, y in tuples
         ], str(source)
 
+    if isinstance(source, Mapping):
+        out = _extract_cases_from_mapping_root(source, default_label)
+        if not out:
+            raise CalibrationError(f"No valid labeled cases found in {default_label}")
+        return out, default_label
+
     if not isinstance(source, Sequence) or isinstance(source, (bytes, bytearray)):
         raise CalibrationError(f"Unsupported dataset source type: {type(source).__name__}")
 
     cases: list[_NormalizedCase] = []
     for item in source:
         if isinstance(item, Mapping):
-            nc = _extract_case_from_mapping(item)
-            if nc is not None:
-                cases.append(nc)
+            pw = _extract_pairwise_cases(item)
+            if pw:
+                cases.extend(pw)
+            else:
+                nc = _extract_case_from_mapping(item)
+                if nc is not None:
+                    cases.append(nc)
         elif isinstance(item, tuple) and len(item) >= 3:
             r, c, y = item[0], item[1], item[2]
             lbl = _parse_bool_label(y)
@@ -517,6 +721,8 @@ def audit_benchmark_dataset(
             per_dom_rel[dom] = round(abs(mp - mn) / max(mp, mn, 1.0), 4)
 
     warnings: list[str] = []
+    if any(c.projected for c in cases):
+        warnings.append("Multi-class/ordinal schema projected to binary halves for length/duplicate audit")
     if n_pos == 0 or n_neg == 0:
         warnings.append("Single-class dataset: requires both positive and negative cases.")
     elif abs(pos_rate - 0.5) > 0.20:
@@ -541,6 +747,17 @@ def audit_benchmark_dataset(
         )
     if dup_cands > 0:
         warnings.append(f"Found {dup_cands} duplicate candidate string(s) within dataset.")
+
+    padded_count = sum(
+        1
+        for c in cases
+        if re.search(r"(?: {2,}[.。}!?]\s*\Z|\.{4,}\s*\Z)", c.candidate) is not None
+    )
+    if padded_count > 0:
+        warnings.append(
+            f"Artificial length-padding artifact detected in {padded_count} candidate(s) "
+            "(trailing multi-space before closing punctuation or repeated dot runs)."
+        )
 
     return DatasetAuditReport(
         source=eff_label,

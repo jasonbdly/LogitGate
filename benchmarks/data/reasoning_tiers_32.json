@@ -102,42 +102,50 @@
     {
       "id": "tier_b_pass_1",
       "expected": true,
-      "candidate": "def fetch_user_profiles(user_ids: list[int], timeout_s: float = 5.0) -> dict[int, str]:\n    \"\"\"Retrieves user display names keyed by integer account ID.\n\n    Args:\n        user_ids: Sequence of account IDs to look up.\n        timeout_s: Maximum lookup timeout in seconds.\n\n    Returns:\n        Mapping from account ID to formatted profile label.\n    \"\"\"\n    return {uid: f\"user_{uid}\" for uid in user_ids if timeout_s > 0}\n"
+      "candidate": "def fetch_user_profiles(user_ids: list[int], timeout_s: float = 5.0) -> dict[int, str]:\n    \"\"\"Retrieves user display names keyed by integer account ID.\n\n    Args:\n        user_ids: Sequence of account IDs to look up.\n        timeout_s: Maximum lookup timeout in seconds.\n\n    Returns:\n        Mapping from account ID to formatted profile label.\n    \"\"\"\n    return {uid: f\"user_{uid}\" for uid in user_ids if timeout_s > 0}\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_pass_2",
       "expected": true,
-      "candidate": "def calculate_shipping_fee(weight_kg: float, express: bool = False) -> float:\n    \"\"\"Computes parcel shipping charges from weight and service tier.\n\n    Args:\n        weight_kg: Parcel weight in kilograms.\n        express: Whether priority express delivery is selected.\n\n    Returns:\n        Total shipping charge in USD.\n    \"\"\"\n    base = 14.50 if express else 5.25\n    return round(base + (weight_kg * 1.40), 2)\n"
+      "candidate": "def calculate_shipping_fee(weight_kg: float, express: bool = False) -> float:\n    \"\"\"Computes parcel shipping charges from weight and service tier.\n\n    Args:\n        weight_kg: Parcel weight in kilograms.\n        express: Whether priority express delivery is selected.\n\n    Returns:\n        Total shipping charge in USD.\n    \"\"\"\n    base = 14.50 if express else 5.25\n    return round(base + (weight_kg * 1.40), 2)\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_pass_3",
       "expected": true,
-      "candidate": "def normalize_headers(raw_headers: dict[str, str], prefix: str = \"x-\") -> dict[str, str]:\n    \"\"\"Lowercases header keys and filters by a required prefix.\n\n    Args:\n        raw_headers: Incoming HTTP header dictionary.\n        prefix: Lowercase key prefix to retain.\n\n    Returns:\n        Filtered dictionary with normalized lowercase keys.\n    \"\"\"\n    return {k.lower(): v.strip() for k, v in raw_headers.items() if k.lower().startswith(prefix)}\n"
+      "candidate": "def normalize_headers(raw_headers: dict[str, str], prefix: str = \"x-\") -> dict[str, str]:\n    \"\"\"Lowercases header keys and filters by a required prefix.\n\n    Args:\n        raw_headers: Incoming HTTP header dictionary.\n        prefix: Lowercase key prefix to retain.\n\n    Returns:\n        Filtered dictionary with normalized lowercase keys.\n    \"\"\"\n    return {k.lower(): v.strip() for k, v in raw_headers.items() if k.lower().startswith(prefix)}\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_pass_4",
       "expected": true,
-      "candidate": "def clamp_score(value: float, lower: float = 0.0, upper: float = 1.0) -> float:\n    \"\"\"Bounds a numeric score within the closed interval [lower, upper].\n\n    Args:\n        value: Raw numeric score to clamp.\n        lower: Minimum allowed bound.\n        upper: Maximum allowed bound.\n\n    Returns:\n        Clamped floating-point score.\n    \"\"\"\n    return max(lower, min(upper, value))\n"
+      "candidate": "def clamp_score(value: float, lower: float = 0.0, upper: float = 1.0) -> float:\n    \"\"\"Bounds a numeric score within the closed interval [lower, upper].\n\n    Args:\n        value: Raw numeric score to clamp.\n        lower: Minimum allowed bound.\n        upper: Maximum allowed bound.\n\n    Returns:\n        Clamped floating-point score.\n    \"\"\"\n    return max(lower, min(upper, value))\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_fail_1_mutable_list_default",
       "expected": false,
-      "candidate": "def append_audit_tag(event_id: str, tags: list[str] = []) -> list[str]:\n    \"\"\"Appends an event identifier to the active tag collection.\n\n    Args:\n        event_id: Identifier of the audit event.\n        tags: Existing list of audit tags.\n\n    Returns:\n        Updated list of tags including event_id.\n    \"\"\"\n    tags.append(event_id)\n    return tags\n"
+      "candidate": "def append_audit_tag(event_id: str, tags: list[str] = []) -> list[str]:\n    \"\"\"Appends an event identifier to the active tag collection.\n\n    Args:\n        event_id: Identifier of the audit event.\n        tags: Existing list of audit tags.\n\n    Returns:\n        Updated list of tags including event_id.\n    \"\"\"\n    tags.append(event_id)\n    return tags\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_fail_2_missing_docstring_args",
       "expected": false,
-      "candidate": "def format_currency(amount: float, symbol: str = \"$\") -> str:\n    \"\"\"Formats a numeric amount into a localized currency string.\n\n    Returns:\n        Formatted currency string with two decimal places.\n    \"\"\"\n    return f\"{symbol}{amount:.2f}\"\n"
+      "candidate": "def format_currency(amount: float, symbol: str = \"$\") -> str:\n    \"\"\"Formats a numeric amount into a localized currency string.\n\n    Returns:\n        Formatted currency string with two decimal places.\n    \"\"\"\n    return f\"{symbol}{amount:.2f}\"\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_fail_3_missing_return_annotation",
       "expected": false,
-      "candidate": "def compute_retry_backoff(attempt: int, base_delay: float = 0.5):\n    \"\"\"Calculates exponential backoff duration in seconds.\n\n    Args:\n        attempt: Zero-indexed retry attempt counter.\n        base_delay: Initial backoff multiplier in seconds.\n\n    Returns:\n        Wait time in seconds for the given attempt.\n    \"\"\"\n    return float(base_delay * (2 ** attempt))\n"
+      "candidate": "def compute_retry_backoff(attempt: int, base_delay: float = 0.5):\n    \"\"\"Calculates exponential backoff duration in seconds.\n\n    Args:\n        attempt: Zero-indexed retry attempt counter.\n        base_delay: Initial backoff multiplier in seconds.\n\n    Returns:\n        Wait time in seconds for the given attempt.\n    \"\"\"\n    return float(base_delay * (2 ** attempt))\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     },
     {
       "id": "tier_b_fail_4_bare_except_and_mutable_dict",
       "expected": false,
-      "candidate": "def parse_int_cached(raw: str, cache: dict[str, int] = {}) -> int:\n    \"\"\"Parses an integer string with memoization.\n\n    Args:\n        raw: String representation of an integer.\n        cache: Memoization lookup dictionary.\n\n    Returns:\n        Parsed integer value or zero on failure.\n    \"\"\"\n    try:\n        if raw not in cache:\n            cache[raw] = int(raw)\n        return cache[raw]\n    except:\n        return 0\n"
+      "candidate": "def parse_int_cached(raw: str, cache: dict[str, int] = {}) -> int:\n    \"\"\"Parses an integer string with memoization.\n\n    Args:\n        raw: String representation of an integer.\n        cache: Memoization lookup dictionary.\n\n    Returns:\n        Parsed integer value or zero on failure.\n    \"\"\"\n    try:\n        if raw not in cache:\n            cache[raw] = int(raw)\n        return cache[raw]\n    except:\n        return 0\n",
+      "rubric": "Does this Python function satisfy all four engineering requirements simultaneously: (1) valid Python syntax, (2) a Google-style docstring containing both 'Args:' and 'Returns:' sections, (3) explicit type annotations on every parameter and on the return value, and (4) no mutable default arguments (such as list or dict literals) and no bare 'except:' clauses?"
     }
   ],
   "tier_c": [

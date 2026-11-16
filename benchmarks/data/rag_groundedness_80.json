@@ -1,0 +1,722 @@
+[
+  {
+    "id": "ckd_htn_guideline_clean_pass",
+    "quad_id": "ckd_htn_guideline",
+    "domain": "rag_clinical_guideline",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Is the clinical recommendation strictly supported by the retrieved guideline chunks without introducing unsupported drug contraindications or conflating trial populations?",
+    "candidate": "[QUERY]\nWhat is the recommended first-line antihypertensive therapy for a 62-year-old patient with Stage 3 CKD and macroalbuminuria?\n\n[RETRIEVED CHUNKS]\nChunk 1: KDIGO 2023 Sec 4.1: In adults with CKD Stage 3-4 and macroalbuminuria (UACR > 300 mg/g), initial treatment should include an ACE inhibitor or ARB titrated to maximum tolerated dose.\nChunk 2: KDIGO 2023 Sec 4.3: Combination therapy of an ACE inhibitor with an ARB is contraindicated due to increased risks of hyperkalemia and acute kidney injury.\nChunk 3: AHA 2022 Review: Loop diuretics such as intravenous furosemide are indicated for acute decompensated heart failure volume overload.\n\n[ASSISTANT ANSWER]\nUnder KDIGO 2023 guidelines, initial treatment requires an ACE inhibitor or ARB titrated to maximum tolerated dose. Combining an ACE inhibitor with an ARB is contraindicated."
+  },
+  {
+    "id": "ckd_htn_guideline_hard_positive",
+    "quad_id": "ckd_htn_guideline",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Is the clinical recommendation strictly supported by the retrieved guideline chunks without introducing unsupported drug contraindications or conflating trial populations?",
+    "candidate": "[QUERY]\nWhat is the recommended first-line antihypertensive therapy for a 62-year-old patient with Stage 3 CKD and macroalbuminuria?\n\n[RETRIEVED CHUNKS]\nChunk 1: KDIGO 2023 Sec 4.1: In adults with CKD Stage 3-4 and macroalbuminuria (UACR > 300 mg/g), initial treatment should include an ACE inhibitor or ARB titrated to maximum tolerated dose.\nChunk 2: KDIGO 2023 Sec 4.3: Combination therapy of an ACE inhibitor with an ARB is contraindicated due to increased risks of hyperkalemia and acute kidney injury.\nChunk 3: AHA 2022 Review: Loop diuretics such as intravenous furosemide are indicated for acute decompensated heart failure volume overload.\n\n[ASSISTANT ANSWER]\nKDIGO 2023 recommends an ACE inhibitor or ARB at max tolerated dose for Stage 3 CKD with macroalbuminuria; combining both is contraindicated. It does not recommend furosemide."
+  },
+  {
+    "id": "ckd_htn_guideline_obvious_fail",
+    "quad_id": "ckd_htn_guideline",
+    "domain": "rag_clinical_guideline",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Is the clinical recommendation strictly supported by the retrieved guideline chunks without introducing unsupported drug contraindications or conflating trial populations?",
+    "candidate": "[QUERY]\nWhat is the recommended first-line antihypertensive therapy for a 62-year-old patient with Stage 3 CKD and macroalbuminuria?\n\n[RETRIEVED CHUNKS]\nChunk 1: KDIGO 2023 Sec 4.1: In adults with CKD Stage 3-4 and macroalbuminuria (UACR > 300 mg/g), initial treatment should include an ACE inhibitor or ARB titrated to maximum tolerated dose.\nChunk 2: KDIGO 2023 Sec 4.3: Combination therapy of an ACE inhibitor with an ARB is contraindicated due to increased risks of hyperkalemia and acute kidney injury.\nChunk 3: AHA 2022 Review: Loop diuretics such as intravenous furosemide are indicated for acute decompensated heart failure volume overload.\n\n[ASSISTANT ANSWER]\nImmediate intravenous furosemide combined with dual lisinopril and losartan is first-line therapy for macroalbuminuria regardless of serum potassium or acute kidney injury."
+  },
+  {
+    "id": "ckd_htn_guideline_hard_negative",
+    "quad_id": "ckd_htn_guideline",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Is the clinical recommendation strictly supported by the retrieved guideline chunks without introducing unsupported drug contraindications or conflating trial populations?",
+    "candidate": "[QUERY]\nWhat is the recommended first-line antihypertensive therapy for a 62-year-old patient with Stage 3 CKD and macroalbuminuria?\n\n[RETRIEVED CHUNKS]\nChunk 1: KDIGO 2023 Sec 4.1: In adults with CKD Stage 3-4 and macroalbuminuria (UACR > 300 mg/g), initial treatment should include an ACE inhibitor or ARB titrated to maximum tolerated dose.\nChunk 2: KDIGO 2023 Sec 4.3: Combination therapy of an ACE inhibitor with an ARB is contraindicated due to increased risks of hyperkalemia and acute kidney injury.\nChunk 3: AHA 2022 Review: Loop diuretics such as intravenous furosemide are indicated for acute decompensated heart failure volume overload.\n\n[ASSISTANT ANSWER]\nKDIGO 2023 recommends initial dual combination therapy with both an ACE inhibitor and an ARB simultaneously to treat macroalbuminuria, while avoiding monotherapy regimens."
+  },
+  {
+    "id": "severe_cap_treatment_clean_pass",
+    "quad_id": "severe_cap_treatment",
+    "domain": "rag_clinical_guideline",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Is the antimicrobial regimen strictly grounded in the CAP guideline chunks without omitting necessary combination coverage or misstating outpatient vs ICU criteria?",
+    "candidate": "[QUERY]\nWhat empiric antibiotic coverage is indicated for an adult admitted to the ICU with severe CAP and no MRSA or Pseudomonas risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: ATS/IDSA CAP Sec 6.2: For patients admitted to the ICU with severe CAP without MRSA or Pseudomonas risk, recommended empiric regimen is a parenteral beta-lactam PLUS azithromycin or a respiratory fluoroquinolone.\nChunk 2: ATS/IDSA CAP Sec 6.4: Monotherapy with oral beta-lactam is inadequate for severe ICU-admitted pneumonia and is strongly discouraged.\nChunk 3: Ambulatory ID 2021: Outpatient healthy adults with mild non-severe pneumonia may receive amoxicillin 1 g orally three times daily for 5 days.\n\n[ASSISTANT ANSWER]\nFor severe CAP in ICU without MRSA/Pseudomonas risk, guidelines mandate parenteral beta-lactam combined with azithromycin or a respiratory fluoroquinolone. Oral monotherapy is inadequate."
+  },
+  {
+    "id": "severe_cap_treatment_hard_positive",
+    "quad_id": "severe_cap_treatment",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Is the antimicrobial regimen strictly grounded in the CAP guideline chunks without omitting necessary combination coverage or misstating outpatient vs ICU criteria?",
+    "candidate": "[QUERY]\nWhat empiric antibiotic coverage is indicated for an adult admitted to the ICU with severe CAP and no MRSA or Pseudomonas risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: ATS/IDSA CAP Sec 6.2: For patients admitted to the ICU with severe CAP without MRSA or Pseudomonas risk, recommended empiric regimen is a parenteral beta-lactam PLUS azithromycin or a respiratory fluoroquinolone.\nChunk 2: ATS/IDSA CAP Sec 6.4: Monotherapy with oral beta-lactam is inadequate for severe ICU-admitted pneumonia and is strongly discouraged.\nChunk 3: Ambulatory ID 2021: Outpatient healthy adults with mild non-severe pneumonia may receive amoxicillin 1 g orally three times daily for 5 days.\n\n[ASSISTANT ANSWER]\nGuidelines mandate parenteral beta-lactam with azithromycin or a respiratory fluoroquinolone for ICU severe CAP. Oral amoxicillin is strictly for mild outpatient pneumonia, not ICU care."
+  },
+  {
+    "id": "severe_cap_treatment_obvious_fail",
+    "quad_id": "severe_cap_treatment",
+    "domain": "rag_clinical_guideline",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Is the antimicrobial regimen strictly grounded in the CAP guideline chunks without omitting necessary combination coverage or misstating outpatient vs ICU criteria?",
+    "candidate": "[QUERY]\nWhat empiric antibiotic coverage is indicated for an adult admitted to the ICU with severe CAP and no MRSA or Pseudomonas risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: ATS/IDSA CAP Sec 6.2: For patients admitted to the ICU with severe CAP without MRSA or Pseudomonas risk, recommended empiric regimen is a parenteral beta-lactam PLUS azithromycin or a respiratory fluoroquinolone.\nChunk 2: ATS/IDSA CAP Sec 6.4: Monotherapy with oral beta-lactam is inadequate for severe ICU-admitted pneumonia and is strongly discouraged.\nChunk 3: Ambulatory ID 2021: Outpatient healthy adults with mild non-severe pneumonia may receive amoxicillin 1 g orally three times daily for 5 days.\n\n[ASSISTANT ANSWER]\nFor ICU severe pneumonia, prescribe oral amoxicillin 1 g three times daily as sole monotherapy, as combination parenteral beta-lactam coverage is completely contraindicated in ICUs."
+  },
+  {
+    "id": "severe_cap_treatment_hard_negative",
+    "quad_id": "severe_cap_treatment",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Is the antimicrobial regimen strictly grounded in the CAP guideline chunks without omitting necessary combination coverage or misstating outpatient vs ICU criteria?",
+    "candidate": "[QUERY]\nWhat empiric antibiotic coverage is indicated for an adult admitted to the ICU with severe CAP and no MRSA or Pseudomonas risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: ATS/IDSA CAP Sec 6.2: For patients admitted to the ICU with severe CAP without MRSA or Pseudomonas risk, recommended empiric regimen is a parenteral beta-lactam PLUS azithromycin or a respiratory fluoroquinolone.\nChunk 2: ATS/IDSA CAP Sec 6.4: Monotherapy with oral beta-lactam is inadequate for severe ICU-admitted pneumonia and is strongly discouraged.\nChunk 3: Ambulatory ID 2021: Outpatient healthy adults with mild non-severe pneumonia may receive amoxicillin 1 g orally three times daily for 5 days.\n\n[ASSISTANT ANSWER]\nFor severe CAP in ICU without MRSA/Pseudomonas risk, guidelines recommend single-agent oral amoxicillin 1 g three times daily for 5 days, explicitly discouraging parenteral beta-lactams."
+  },
+  {
+    "id": "t2d_ascvd_second_line_clean_pass",
+    "quad_id": "t2d_ascvd_second_line",
+    "domain": "rag_clinical_guideline",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the answer accurately convey second-line diabetes agents with proven cardiovascular benefit according to the guidelines without misattributing benefits to neutral drug classes?",
+    "candidate": "[QUERY]\nWhich glucose-lowering agents should be added to metformin in a type 2 diabetes patient with established ASCVD?\n\n[RETRIEVED CHUNKS]\nChunk 1: ADA 2024 Sec 10: In patients with type 2 diabetes and established ASCVD, add an agent with proven CVD benefit: either a GLP-1 receptor agonist or an SGLT2 inhibitor, independent of baseline HbA1c.\nChunk 2: ADA 2024 Sec 10.4: Sulfonylureas (e.g. glimepiride) and DPP-4 inhibitors (e.g. sitagliptin) have demonstrated cardiovascular neutrality and do not provide ASCVD risk reduction.\nChunk 3: Endocrine 2023: Pioglitazone is effective for insulin sensitization but carries a black box warning against use in NYHA Class III/IV heart failure.\n\n[ASSISTANT ANSWER]\nMetformin should be supplemented with either a GLP-1 receptor agonist or an SGLT2 inhibitor with proven cardiovascular benefit, irrespective of HbA1c. Sulfonylureas offer no ASCVD benefit."
+  },
+  {
+    "id": "t2d_ascvd_second_line_hard_positive",
+    "quad_id": "t2d_ascvd_second_line",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the answer accurately convey second-line diabetes agents with proven cardiovascular benefit according to the guidelines without misattributing benefits to neutral drug classes?",
+    "candidate": "[QUERY]\nWhich glucose-lowering agents should be added to metformin in a type 2 diabetes patient with established ASCVD?\n\n[RETRIEVED CHUNKS]\nChunk 1: ADA 2024 Sec 10: In patients with type 2 diabetes and established ASCVD, add an agent with proven CVD benefit: either a GLP-1 receptor agonist or an SGLT2 inhibitor, independent of baseline HbA1c.\nChunk 2: ADA 2024 Sec 10.4: Sulfonylureas (e.g. glimepiride) and DPP-4 inhibitors (e.g. sitagliptin) have demonstrated cardiovascular neutrality and do not provide ASCVD risk reduction.\nChunk 3: Endocrine 2023: Pioglitazone is effective for insulin sensitization but carries a black box warning against use in NYHA Class III/IV heart failure.\n\n[ASSISTANT ANSWER]\nGuidelines recommend adding a GLP-1 RA or SGLT2 inhibitor with proven cardiovascular efficacy. DPP-4 inhibitors and sulfonylureas show cardiovascular neutrality but do not confer ASCVD protection."
+  },
+  {
+    "id": "t2d_ascvd_second_line_obvious_fail",
+    "quad_id": "t2d_ascvd_second_line",
+    "domain": "rag_clinical_guideline",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the answer accurately convey second-line diabetes agents with proven cardiovascular benefit according to the guidelines without misattributing benefits to neutral drug classes?",
+    "candidate": "[QUERY]\nWhich glucose-lowering agents should be added to metformin in a type 2 diabetes patient with established ASCVD?\n\n[RETRIEVED CHUNKS]\nChunk 1: ADA 2024 Sec 10: In patients with type 2 diabetes and established ASCVD, add an agent with proven CVD benefit: either a GLP-1 receptor agonist or an SGLT2 inhibitor, independent of baseline HbA1c.\nChunk 2: ADA 2024 Sec 10.4: Sulfonylureas (e.g. glimepiride) and DPP-4 inhibitors (e.g. sitagliptin) have demonstrated cardiovascular neutrality and do not provide ASCVD risk reduction.\nChunk 3: Endocrine 2023: Pioglitazone is effective for insulin sensitization but carries a black box warning against use in NYHA Class III/IV heart failure.\n\n[ASSISTANT ANSWER]\nAdd glimepiride or sitagliptin as preferred first-line cardioprotective agents, since sulfonylureas dramatically reduce ASCVD mortality while GLP-1 agonists and SGLT2 inhibitors lack CVD efficacy."
+  },
+  {
+    "id": "t2d_ascvd_second_line_hard_negative",
+    "quad_id": "t2d_ascvd_second_line",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the answer accurately convey second-line diabetes agents with proven cardiovascular benefit according to the guidelines without misattributing benefits to neutral drug classes?",
+    "candidate": "[QUERY]\nWhich glucose-lowering agents should be added to metformin in a type 2 diabetes patient with established ASCVD?\n\n[RETRIEVED CHUNKS]\nChunk 1: ADA 2024 Sec 10: In patients with type 2 diabetes and established ASCVD, add an agent with proven CVD benefit: either a GLP-1 receptor agonist or an SGLT2 inhibitor, independent of baseline HbA1c.\nChunk 2: ADA 2024 Sec 10.4: Sulfonylureas (e.g. glimepiride) and DPP-4 inhibitors (e.g. sitagliptin) have demonstrated cardiovascular neutrality and do not provide ASCVD risk reduction.\nChunk 3: Endocrine 2023: Pioglitazone is effective for insulin sensitization but carries a black box warning against use in NYHA Class III/IV heart failure.\n\n[ASSISTANT ANSWER]\nMetformin should be supplemented with sitagliptin or glimepiride as primary ASCVD risk-reducing agents, while GLP-1 receptor agonists and SGLT2 inhibitors provide only neutral glycemic management."
+  },
+  {
+    "id": "dvt_anticoagulation_duration_clean_pass",
+    "quad_id": "dvt_anticoagulation_duration",
+    "domain": "rag_clinical_guideline",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response faithfully reflect anticoagulation duration criteria for unprovoked DVT without confusing provoked vs unprovoked risk factors?",
+    "candidate": "[QUERY]\nWhat is the recommended anticoagulation duration for a patient with a first unprovoked proximal DVT and low bleeding risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: CHEST 2021 Rec 8: In adults with first unprovoked proximal DVT and low bleeding risk, extended-phase DOAC therapy is recommended over stopping at 3 months.\nChunk 2: CHEST 2021 Rec 8.2: For provoked DVT secondary to a major transient risk factor, exactly 3 months of anticoagulant therapy is recommended rather than extended therapy.\nChunk 3: Hematology 2022: Low-dose aspirin (81 mg daily) is inferior to oral anticoagulation for secondary prevention of venous thromboembolism and should not be used as primary therapy.\n\n[ASSISTANT ANSWER]\nFor a first unprovoked proximal DVT with low bleeding risk, CHEST guidelines recommend extended-phase anticoagulation with a DOAC without a scheduled stop date, rather than discontinuing after 3 months."
+  },
+  {
+    "id": "dvt_anticoagulation_duration_hard_positive",
+    "quad_id": "dvt_anticoagulation_duration",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response faithfully reflect anticoagulation duration criteria for unprovoked DVT without confusing provoked vs unprovoked risk factors?",
+    "candidate": "[QUERY]\nWhat is the recommended anticoagulation duration for a patient with a first unprovoked proximal DVT and low bleeding risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: CHEST 2021 Rec 8: In adults with first unprovoked proximal DVT and low bleeding risk, extended-phase DOAC therapy is recommended over stopping at 3 months.\nChunk 2: CHEST 2021 Rec 8.2: For provoked DVT secondary to a major transient risk factor, exactly 3 months of anticoagulant therapy is recommended rather than extended therapy.\nChunk 3: Hematology 2022: Low-dose aspirin (81 mg daily) is inferior to oral anticoagulation for secondary prevention of venous thromboembolism and should not be used as primary therapy.\n\n[ASSISTANT ANSWER]\nGuidelines advise extended-phase anticoagulation (indefinite DOAC) for first unprovoked proximal DVT with low bleeding risk. A 3-month course applies to transient provoked DVT, not unprovoked episodes."
+  },
+  {
+    "id": "dvt_anticoagulation_duration_obvious_fail",
+    "quad_id": "dvt_anticoagulation_duration",
+    "domain": "rag_clinical_guideline",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response faithfully reflect anticoagulation duration criteria for unprovoked DVT without confusing provoked vs unprovoked risk factors?",
+    "candidate": "[QUERY]\nWhat is the recommended anticoagulation duration for a patient with a first unprovoked proximal DVT and low bleeding risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: CHEST 2021 Rec 8: In adults with first unprovoked proximal DVT and low bleeding risk, extended-phase DOAC therapy is recommended over stopping at 3 months.\nChunk 2: CHEST 2021 Rec 8.2: For provoked DVT secondary to a major transient risk factor, exactly 3 months of anticoagulant therapy is recommended rather than extended therapy.\nChunk 3: Hematology 2022: Low-dose aspirin (81 mg daily) is inferior to oral anticoagulation for secondary prevention of venous thromboembolism and should not be used as primary therapy.\n\n[ASSISTANT ANSWER]\nDiscontinue all anticoagulants immediately after 10 days and transition the patient to low-dose aspirin 81 mg daily, as extended DOAC therapy is strictly contraindicated for unprovoked proximal DVT."
+  },
+  {
+    "id": "dvt_anticoagulation_duration_hard_negative",
+    "quad_id": "dvt_anticoagulation_duration",
+    "domain": "rag_clinical_guideline",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response faithfully reflect anticoagulation duration criteria for unprovoked DVT without confusing provoked vs unprovoked risk factors?",
+    "candidate": "[QUERY]\nWhat is the recommended anticoagulation duration for a patient with a first unprovoked proximal DVT and low bleeding risk?\n\n[RETRIEVED CHUNKS]\nChunk 1: CHEST 2021 Rec 8: In adults with first unprovoked proximal DVT and low bleeding risk, extended-phase DOAC therapy is recommended over stopping at 3 months.\nChunk 2: CHEST 2021 Rec 8.2: For provoked DVT secondary to a major transient risk factor, exactly 3 months of anticoagulant therapy is recommended rather than extended therapy.\nChunk 3: Hematology 2022: Low-dose aspirin (81 mg daily) is inferior to oral anticoagulation for secondary prevention of venous thromboembolism and should not be used as primary therapy.\n\n[ASSISTANT ANSWER]\nFor a first unprovoked proximal DVT with low bleeding risk, CHEST guidelines recommend stopping anticoagulation at exactly 3 months, stating extended DOAC therapy provides no recurrence protection."
+  },
+  {
+    "id": "rpo_cloud_commitments_clean_pass",
+    "quad_id": "rpo_cloud_commitments",
+    "domain": "rag_sec_filing",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Are the SEC filing figures for remaining performance obligations and cloud commitments reported accurately without swapping current vs non-current balances?",
+    "candidate": "[QUERY]\nWhat were the company's remaining performance obligations (RPO) and cloud hosting commitments as of December 31, 2024?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 4: As of December 31, 2024, remaining performance obligations totaled $4.82B, of which approximately 58% ($2.80B) is expected to be recognized as revenue over the next 12 months.\nChunk 2: Form 10-K Note 11: The company has cloud infrastructure purchase obligations totaling $1.35B, with $450M payable in fiscal 2025.\nChunk 3: Form 10-K Note 8: Senior notes bearing interest at 4.25% mature in October 2029 with aggregate principal of $1.20B.\n\n[ASSISTANT ANSWER]\nAs of December 31, 2024, total RPO was $4.82B with $2.80B (58%) recognized within 12 months. Cloud infrastructure purchase commitments totaled $1.35B with $450M due in fiscal 2025."
+  },
+  {
+    "id": "rpo_cloud_commitments_hard_positive",
+    "quad_id": "rpo_cloud_commitments",
+    "domain": "rag_sec_filing",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Are the SEC filing figures for remaining performance obligations and cloud commitments reported accurately without swapping current vs non-current balances?",
+    "candidate": "[QUERY]\nWhat were the company's remaining performance obligations (RPO) and cloud hosting commitments as of December 31, 2024?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 4: As of December 31, 2024, remaining performance obligations totaled $4.82B, of which approximately 58% ($2.80B) is expected to be recognized as revenue over the next 12 months.\nChunk 2: Form 10-K Note 11: The company has cloud infrastructure purchase obligations totaling $1.35B, with $450M payable in fiscal 2025.\nChunk 3: Form 10-K Note 8: Senior notes bearing interest at 4.25% mature in October 2029 with aggregate principal of $1.20B.\n\n[ASSISTANT ANSWER]\nTotal RPO was $4.82B ($2.80B expected in next 12 months, remainder thereafter). Cloud infrastructure obligations totaled $1.35B ($450M in 2025). Senior debt is $1.20B, distinct from cloud hosting."
+  },
+  {
+    "id": "rpo_cloud_commitments_obvious_fail",
+    "quad_id": "rpo_cloud_commitments",
+    "domain": "rag_sec_filing",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Are the SEC filing figures for remaining performance obligations and cloud commitments reported accurately without swapping current vs non-current balances?",
+    "candidate": "[QUERY]\nWhat were the company's remaining performance obligations (RPO) and cloud hosting commitments as of December 31, 2024?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 4: As of December 31, 2024, remaining performance obligations totaled $4.82B, of which approximately 58% ($2.80B) is expected to be recognized as revenue over the next 12 months.\nChunk 2: Form 10-K Note 11: The company has cloud infrastructure purchase obligations totaling $1.35B, with $450M payable in fiscal 2025.\nChunk 3: Form 10-K Note 8: Senior notes bearing interest at 4.25% mature in October 2029 with aggregate principal of $1.20B.\n\n[ASSISTANT ANSWER]\nRemaining performance obligations totaled only $450M, while unconditional cloud infrastructure purchase commitments reached $4.82B with $1.35B maturing in October 2029 under senior debt terms."
+  },
+  {
+    "id": "rpo_cloud_commitments_hard_negative",
+    "quad_id": "rpo_cloud_commitments",
+    "domain": "rag_sec_filing",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Are the SEC filing figures for remaining performance obligations and cloud commitments reported accurately without swapping current vs non-current balances?",
+    "candidate": "[QUERY]\nWhat were the company's remaining performance obligations (RPO) and cloud hosting commitments as of December 31, 2024?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 4: As of December 31, 2024, remaining performance obligations totaled $4.82B, of which approximately 58% ($2.80B) is expected to be recognized as revenue over the next 12 months.\nChunk 2: Form 10-K Note 11: The company has cloud infrastructure purchase obligations totaling $1.35B, with $450M payable in fiscal 2025.\nChunk 3: Form 10-K Note 8: Senior notes bearing interest at 4.25% mature in October 2029 with aggregate principal of $1.20B.\n\n[ASSISTANT ANSWER]\nAs of December 31, 2024, total RPO was $1.35B with $450M recognized within 12 months. Cloud hosting purchase commitments totaled $4.82B with $2.80B payable in fiscal 2025 across all providers."
+  },
+  {
+    "id": "executive_severance_trigger_clean_pass",
+    "quad_id": "executive_severance_trigger",
+    "domain": "rag_sec_filing",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the summary accurately capture the double-trigger equity vesting conditions without misstating single-trigger vs double-trigger requirements?",
+    "candidate": "[QUERY]\nUnder the executive change-in-control severance plan, what conditions trigger accelerated vesting of unvested PSUs?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 8-K Ex 10.1: PSUs do not accelerate solely upon Change in Control. Acceleration requires involuntary termination without Cause or resignation for Good Reason within 24 months.\nChunk 2: Form 8-K Ex 10.1 Sec 3(b): Upon qualifying double-trigger termination, PSUs vest at greater of target performance (100%) or actual performance extrapolated through termination date.\nChunk 3: Form 10-K Item 11: Base salaries for named executive officers increased by 3.5% across the board effective January 1, 2025.\n\n[ASSISTANT ANSWER]\nPSUs require a double-trigger event: consummation of Change in Control followed within 24 months by termination without Cause or resignation for Good Reason. Vesting occurs at greater of target or actual."
+  },
+  {
+    "id": "executive_severance_trigger_hard_positive",
+    "quad_id": "executive_severance_trigger",
+    "domain": "rag_sec_filing",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the summary accurately capture the double-trigger equity vesting conditions without misstating single-trigger vs double-trigger requirements?",
+    "candidate": "[QUERY]\nUnder the executive change-in-control severance plan, what conditions trigger accelerated vesting of unvested PSUs?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 8-K Ex 10.1: PSUs do not accelerate solely upon Change in Control. Acceleration requires involuntary termination without Cause or resignation for Good Reason within 24 months.\nChunk 2: Form 8-K Ex 10.1 Sec 3(b): Upon qualifying double-trigger termination, PSUs vest at greater of target performance (100%) or actual performance extrapolated through termination date.\nChunk 3: Form 10-K Item 11: Base salaries for named executive officers increased by 3.5% across the board effective January 1, 2025.\n\n[ASSISTANT ANSWER]\nAccelerated PSU vesting operates strictly on a double trigger: Change in Control plus involuntary termination without Cause/Good Reason within 24 months, vesting at greater of target or actual. Single trigger is barred."
+  },
+  {
+    "id": "executive_severance_trigger_obvious_fail",
+    "quad_id": "executive_severance_trigger",
+    "domain": "rag_sec_filing",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the summary accurately capture the double-trigger equity vesting conditions without misstating single-trigger vs double-trigger requirements?",
+    "candidate": "[QUERY]\nUnder the executive change-in-control severance plan, what conditions trigger accelerated vesting of unvested PSUs?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 8-K Ex 10.1: PSUs do not accelerate solely upon Change in Control. Acceleration requires involuntary termination without Cause or resignation for Good Reason within 24 months.\nChunk 2: Form 8-K Ex 10.1 Sec 3(b): Upon qualifying double-trigger termination, PSUs vest at greater of target performance (100%) or actual performance extrapolated through termination date.\nChunk 3: Form 10-K Item 11: Base salaries for named executive officers increased by 3.5% across the board effective January 1, 2025.\n\n[ASSISTANT ANSWER]\nAll PSUs accelerate automatically and vest at 200% immediately upon announcement of any merger negotiation (single trigger), regardless of whether executive continues employment or is ever terminated."
+  },
+  {
+    "id": "executive_severance_trigger_hard_negative",
+    "quad_id": "executive_severance_trigger",
+    "domain": "rag_sec_filing",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the summary accurately capture the double-trigger equity vesting conditions without misstating single-trigger vs double-trigger requirements?",
+    "candidate": "[QUERY]\nUnder the executive change-in-control severance plan, what conditions trigger accelerated vesting of unvested PSUs?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 8-K Ex 10.1: PSUs do not accelerate solely upon Change in Control. Acceleration requires involuntary termination without Cause or resignation for Good Reason within 24 months.\nChunk 2: Form 8-K Ex 10.1 Sec 3(b): Upon qualifying double-trigger termination, PSUs vest at greater of target performance (100%) or actual performance extrapolated through termination date.\nChunk 3: Form 10-K Item 11: Base salaries for named executive officers increased by 3.5% across the board effective January 1, 2025.\n\n[ASSISTANT ANSWER]\nUnder the plan, unvested PSUs accelerate automatically upon the closing of a Change in Control on a single-trigger basis, requiring no termination of employment or Good Reason resignation within 24 months."
+  },
+  {
+    "id": "asc606_revenue_allocation_clean_pass",
+    "quad_id": "asc606_revenue_allocation",
+    "domain": "rag_sec_filing",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response accurately describe transaction price allocation across distinct performance obligations under ASC 606 based on the filing chunks?",
+    "candidate": "[QUERY]\nHow does the company allocate transaction price across multi-element contracts containing term software licenses and maintenance under ASC 606?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 2: The company allocates transaction price to each distinct performance obligation (term licenses, software maintenance, services) based on relative standalone selling prices (SSP).\nChunk 2: Form 10-K Note 2.2: Term license revenue is recognized upfront at delivery, whereas software maintenance is recognized ratably over the contract service period as access is provided.\nChunk 3: Form 10-K Note 14: Patent litigation in District of Delaware carries estimated potential exposure between $12M and $25M.\n\n[ASSISTANT ANSWER]\nUnder ASC 606, transaction price is allocated based on relative standalone selling price (SSP). Term license revenue is recognized upfront at delivery, while maintenance is recognized ratably over time."
+  },
+  {
+    "id": "asc606_revenue_allocation_hard_positive",
+    "quad_id": "asc606_revenue_allocation",
+    "domain": "rag_sec_filing",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response accurately describe transaction price allocation across distinct performance obligations under ASC 606 based on the filing chunks?",
+    "candidate": "[QUERY]\nHow does the company allocate transaction price across multi-element contracts containing term software licenses and maintenance under ASC 606?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 2: The company allocates transaction price to each distinct performance obligation (term licenses, software maintenance, services) based on relative standalone selling prices (SSP).\nChunk 2: Form 10-K Note 2.2: Term license revenue is recognized upfront at delivery, whereas software maintenance is recognized ratably over the contract service period as access is provided.\nChunk 3: Form 10-K Note 14: Patent litigation in District of Delaware carries estimated potential exposure between $12M and $25M.\n\n[ASSISTANT ANSWER]\nThe company allocates contract transaction price according to relative standalone selling prices (SSP). Term licenses are recognized upfront upon delivery, whereas software maintenance is recognized ratably."
+  },
+  {
+    "id": "asc606_revenue_allocation_obvious_fail",
+    "quad_id": "asc606_revenue_allocation",
+    "domain": "rag_sec_filing",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response accurately describe transaction price allocation across distinct performance obligations under ASC 606 based on the filing chunks?",
+    "candidate": "[QUERY]\nHow does the company allocate transaction price across multi-element contracts containing term software licenses and maintenance under ASC 606?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 2: The company allocates transaction price to each distinct performance obligation (term licenses, software maintenance, services) based on relative standalone selling prices (SSP).\nChunk 2: Form 10-K Note 2.2: Term license revenue is recognized upfront at delivery, whereas software maintenance is recognized ratably over the contract service period as access is provided.\nChunk 3: Form 10-K Note 14: Patent litigation in District of Delaware carries estimated potential exposure between $12M and $25M.\n\n[ASSISTANT ANSWER]\nThe company recognizes all software license, maintenance, and professional services revenue immediately on day one of signing using completed contract accounting, ignoring standalone selling price allocations."
+  },
+  {
+    "id": "asc606_revenue_allocation_hard_negative",
+    "quad_id": "asc606_revenue_allocation",
+    "domain": "rag_sec_filing",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response accurately describe transaction price allocation across distinct performance obligations under ASC 606 based on the filing chunks?",
+    "candidate": "[QUERY]\nHow does the company allocate transaction price across multi-element contracts containing term software licenses and maintenance under ASC 606?\n\n[RETRIEVED CHUNKS]\nChunk 1: Form 10-K Note 2: The company allocates transaction price to each distinct performance obligation (term licenses, software maintenance, services) based on relative standalone selling prices (SSP).\nChunk 2: Form 10-K Note 2.2: Term license revenue is recognized upfront at delivery, whereas software maintenance is recognized ratably over the contract service period as access is provided.\nChunk 3: Form 10-K Note 14: Patent litigation in District of Delaware carries estimated potential exposure between $12M and $25M.\n\n[ASSISTANT ANSWER]\nUnder ASC 606, transaction price is allocated equally across obligations regardless of standalone selling price, recognizing term software license revenue ratably over time and maintenance upfront."
+  },
+  {
+    "id": "schedule_13d_disclosure_clean_pass",
+    "quad_id": "schedule_13d_disclosure",
+    "domain": "rag_sec_filing",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the summary faithfully report beneficial ownership filing thresholds and deadlines under SEC Rule 13d-1 without confusing amended filing windows?",
+    "candidate": "[QUERY]\nWhat are the SEC beneficial ownership reporting deadlines and percentage thresholds for filing an initial Schedule 13D?\n\n[RETRIEVED CHUNKS]\nChunk 1: SEC Manual Sec 3.1: Under Rule 13d-1(a), any person acquiring beneficial ownership of >5% of covered voting equity must file Schedule 13D within 5 business days after acquisition.\nChunk 2: SEC Manual Sec 3.4: Amendment on Schedule 13D must be filed within 2 business days after any material change in facts disclosed, including acquisition or disposition of 1% or more.\nChunk 3: Exchange Act Sec 16(a): Officers, directors, and 10% owners must report initial ownership on Form 3 within 10 days and transactions on Form 4 within 2 business days.\n\n[ASSISTANT ANSWER]\nAn initial Schedule 13D must be filed within 5 business days after acquiring beneficial ownership of more than 5% of voting equity. Material changes of 1% or more require an amendment within 2 business days."
+  },
+  {
+    "id": "schedule_13d_disclosure_hard_positive",
+    "quad_id": "schedule_13d_disclosure",
+    "domain": "rag_sec_filing",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the summary faithfully report beneficial ownership filing thresholds and deadlines under SEC Rule 13d-1 without confusing amended filing windows?",
+    "candidate": "[QUERY]\nWhat are the SEC beneficial ownership reporting deadlines and percentage thresholds for filing an initial Schedule 13D?\n\n[RETRIEVED CHUNKS]\nChunk 1: SEC Manual Sec 3.1: Under Rule 13d-1(a), any person acquiring beneficial ownership of >5% of covered voting equity must file Schedule 13D within 5 business days after acquisition.\nChunk 2: SEC Manual Sec 3.4: Amendment on Schedule 13D must be filed within 2 business days after any material change in facts disclosed, including acquisition or disposition of 1% or more.\nChunk 3: Exchange Act Sec 16(a): Officers, directors, and 10% owners must report initial ownership on Form 3 within 10 days and transactions on Form 4 within 2 business days.\n\n[ASSISTANT ANSWER]\nInitial Schedule 13D filing is triggered at >5% beneficial ownership and must be submitted within 5 business days. Form 3/4 rules apply to Section 16 insiders (10% owners), distinct from the 5% 13D rule."
+  },
+  {
+    "id": "schedule_13d_disclosure_obvious_fail",
+    "quad_id": "schedule_13d_disclosure",
+    "domain": "rag_sec_filing",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the summary faithfully report beneficial ownership filing thresholds and deadlines under SEC Rule 13d-1 without confusing amended filing windows?",
+    "candidate": "[QUERY]\nWhat are the SEC beneficial ownership reporting deadlines and percentage thresholds for filing an initial Schedule 13D?\n\n[RETRIEVED CHUNKS]\nChunk 1: SEC Manual Sec 3.1: Under Rule 13d-1(a), any person acquiring beneficial ownership of >5% of covered voting equity must file Schedule 13D within 5 business days after acquisition.\nChunk 2: SEC Manual Sec 3.4: Amendment on Schedule 13D must be filed within 2 business days after any material change in facts disclosed, including acquisition or disposition of 1% or more.\nChunk 3: Exchange Act Sec 16(a): Officers, directors, and 10% owners must report initial ownership on Form 3 within 10 days and transactions on Form 4 within 2 business days.\n\n[ASSISTANT ANSWER]\nSchedule 13D is only required when ownership exceeds 25% of common stock and must be filed annually within 90 days after calendar year end, with no requirement for amendments upon ownership changes."
+  },
+  {
+    "id": "schedule_13d_disclosure_hard_negative",
+    "quad_id": "schedule_13d_disclosure",
+    "domain": "rag_sec_filing",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the summary faithfully report beneficial ownership filing thresholds and deadlines under SEC Rule 13d-1 without confusing amended filing windows?",
+    "candidate": "[QUERY]\nWhat are the SEC beneficial ownership reporting deadlines and percentage thresholds for filing an initial Schedule 13D?\n\n[RETRIEVED CHUNKS]\nChunk 1: SEC Manual Sec 3.1: Under Rule 13d-1(a), any person acquiring beneficial ownership of >5% of covered voting equity must file Schedule 13D within 5 business days after acquisition.\nChunk 2: SEC Manual Sec 3.4: Amendment on Schedule 13D must be filed within 2 business days after any material change in facts disclosed, including acquisition or disposition of 1% or more.\nChunk 3: Exchange Act Sec 16(a): Officers, directors, and 10% owners must report initial ownership on Form 3 within 10 days and transactions on Form 4 within 2 business days.\n\n[ASSISTANT ANSWER]\nAn initial Schedule 13D must be filed within 10 business days after acquiring beneficial ownership of more than 10% of voting equity, with material amendments permitted up to 30 calendar days thereafter."
+  },
+  {
+    "id": "postgres_failover_promotion_clean_pass",
+    "quad_id": "postgres_failover_promotion",
+    "domain": "rag_cloud_runbook",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the answer adhere to the documented Postgres failover procedure without skipping health checks or issuing unsafe kill commands?",
+    "candidate": "[QUERY]\nWhat steps must an on-call SRE execute to promote standby-02 to primary during an unrecoverable primary failure?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook DB-04: Confirm primary unreachable with pg_isready -h primary-01. Confirm standby-02 replication lag is under 1MB using pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()).\nChunk 2: Runbook DB-04 Sec 3: Execute `patroni_ctl switchover --candidate standby-02` or `pg_ctl promote -D /var/lib/postgresql/data`. Update DNS CNAME db-primary.internal to standby-02.\nChunk 3: Runbook DB-09: Automated autovacuum freeze occurs when txid reaches 200M transactions. Do not interrupt vacuum workers without consulting DB lead.\n\n[ASSISTANT ANSWER]\nConfirm primary is down with pg_isready, verify standby-02 lag is under 1MB, then execute patroni_ctl switchover or pg_ctl promote, and finally repoint db-primary.internal DNS record to standby-02."
+  },
+  {
+    "id": "postgres_failover_promotion_hard_positive",
+    "quad_id": "postgres_failover_promotion",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the answer adhere to the documented Postgres failover procedure without skipping health checks or issuing unsafe kill commands?",
+    "candidate": "[QUERY]\nWhat steps must an on-call SRE execute to promote standby-02 to primary during an unrecoverable primary failure?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook DB-04: Confirm primary unreachable with pg_isready -h primary-01. Confirm standby-02 replication lag is under 1MB using pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()).\nChunk 2: Runbook DB-04 Sec 3: Execute `patroni_ctl switchover --candidate standby-02` or `pg_ctl promote -D /var/lib/postgresql/data`. Update DNS CNAME db-primary.internal to standby-02.\nChunk 3: Runbook DB-09: Automated autovacuum freeze occurs when txid reaches 200M transactions. Do not interrupt vacuum workers without consulting DB lead.\n\n[ASSISTANT ANSWER]\nVerify primary unreachable with pg_isready and confirm standby-02 lag <1MB. Promote standby-02 via patroni_ctl switchover or pg_ctl promote, and update DNS. The DB-09 autovacuum runbook is not applicable."
+  },
+  {
+    "id": "postgres_failover_promotion_obvious_fail",
+    "quad_id": "postgres_failover_promotion",
+    "domain": "rag_cloud_runbook",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the answer adhere to the documented Postgres failover procedure without skipping health checks or issuing unsafe kill commands?",
+    "candidate": "[QUERY]\nWhat steps must an on-call SRE execute to promote standby-02 to primary during an unrecoverable primary failure?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook DB-04: Confirm primary unreachable with pg_isready -h primary-01. Confirm standby-02 replication lag is under 1MB using pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()).\nChunk 2: Runbook DB-04 Sec 3: Execute `patroni_ctl switchover --candidate standby-02` or `pg_ctl promote -D /var/lib/postgresql/data`. Update DNS CNAME db-primary.internal to standby-02.\nChunk 3: Runbook DB-09: Automated autovacuum freeze occurs when txid reaches 200M transactions. Do not interrupt vacuum workers without consulting DB lead.\n\n[ASSISTANT ANSWER]\nImmediately run kill -9 on all postgres processes across every cluster host, delete /var/lib/postgresql/data on standby-02, and leave the DNS CNAME record pointed permanently to the failed primary."
+  },
+  {
+    "id": "postgres_failover_promotion_hard_negative",
+    "quad_id": "postgres_failover_promotion",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the answer adhere to the documented Postgres failover procedure without skipping health checks or issuing unsafe kill commands?",
+    "candidate": "[QUERY]\nWhat steps must an on-call SRE execute to promote standby-02 to primary during an unrecoverable primary failure?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook DB-04: Confirm primary unreachable with pg_isready -h primary-01. Confirm standby-02 replication lag is under 1MB using pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()).\nChunk 2: Runbook DB-04 Sec 3: Execute `patroni_ctl switchover --candidate standby-02` or `pg_ctl promote -D /var/lib/postgresql/data`. Update DNS CNAME db-primary.internal to standby-02.\nChunk 3: Runbook DB-09: Automated autovacuum freeze occurs when txid reaches 200M transactions. Do not interrupt vacuum workers without consulting DB lead.\n\n[ASSISTANT ANSWER]\nFirst execute kill -9 on standby-02 to reset WAL state, skip checking replication lag or primary reachability, and run patroni_ctl teardown without promoting the replica or updating internal DNS records."
+  },
+  {
+    "id": "ingress_certmanager_deadlock_clean_pass",
+    "quad_id": "ingress_certmanager_deadlock",
+    "domain": "rag_cloud_runbook",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response correctly follow the runbook for resolving cert-manager admission webhook timeouts causing ingress deployment rollout hangs?",
+    "candidate": "[QUERY]\nHow do you recover an ingress-nginx deployment stuck in CrashLoopBackOff due to cert-manager webhook admission timeouts?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook K8S-12: If ingress pods cannot start because cert-manager validating webhook times out, temporarily patch ValidatingWebhookConfiguration to `failurePolicy: Ignore`.\nChunk 2: Runbook K8S-12 Sec 3: Restart cert-manager pods via `kubectl rollout restart deployment/cert-manager -n cert-manager`. Verify webhook endpoint health before restoring `failurePolicy: Fail`.\nChunk 3: Runbook K8S-18: Execute `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data` with timeout 300s to prevent stateful volume detachment errors.\n\n[ASSISTANT ANSWER]\nTemporarily patch ValidatingWebhookConfiguration to failurePolicy: Ignore, restart cert-manager via kubectl rollout restart deployment/cert-manager, confirm webhook health, then restore failurePolicy: Fail."
+  },
+  {
+    "id": "ingress_certmanager_deadlock_hard_positive",
+    "quad_id": "ingress_certmanager_deadlock",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response correctly follow the runbook for resolving cert-manager admission webhook timeouts causing ingress deployment rollout hangs?",
+    "candidate": "[QUERY]\nHow do you recover an ingress-nginx deployment stuck in CrashLoopBackOff due to cert-manager webhook admission timeouts?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook K8S-12: If ingress pods cannot start because cert-manager validating webhook times out, temporarily patch ValidatingWebhookConfiguration to `failurePolicy: Ignore`.\nChunk 2: Runbook K8S-12 Sec 3: Restart cert-manager pods via `kubectl rollout restart deployment/cert-manager -n cert-manager`. Verify webhook endpoint health before restoring `failurePolicy: Fail`.\nChunk 3: Runbook K8S-18: Execute `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data` with timeout 300s to prevent stateful volume detachment errors.\n\n[ASSISTANT ANSWER]\nPatch ValidatingWebhookConfiguration to failurePolicy: Ignore so ingress can initialize. Restart cert-manager deployment in cert-manager namespace, verify health, and restore Fail policy. Drain is not needed."
+  },
+  {
+    "id": "ingress_certmanager_deadlock_obvious_fail",
+    "quad_id": "ingress_certmanager_deadlock",
+    "domain": "rag_cloud_runbook",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response correctly follow the runbook for resolving cert-manager admission webhook timeouts causing ingress deployment rollout hangs?",
+    "candidate": "[QUERY]\nHow do you recover an ingress-nginx deployment stuck in CrashLoopBackOff due to cert-manager webhook admission timeouts?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook K8S-12: If ingress pods cannot start because cert-manager validating webhook times out, temporarily patch ValidatingWebhookConfiguration to `failurePolicy: Ignore`.\nChunk 2: Runbook K8S-12 Sec 3: Restart cert-manager pods via `kubectl rollout restart deployment/cert-manager -n cert-manager`. Verify webhook endpoint health before restoring `failurePolicy: Fail`.\nChunk 3: Runbook K8S-18: Execute `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data` with timeout 300s to prevent stateful volume detachment errors.\n\n[ASSISTANT ANSWER]\nDelete all namespaces including kube-system and default, wipe the Kubernetes control plane etcd database completely, and restart all worker kubelets without saving cluster manifests or certificates."
+  },
+  {
+    "id": "ingress_certmanager_deadlock_hard_negative",
+    "quad_id": "ingress_certmanager_deadlock",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response correctly follow the runbook for resolving cert-manager admission webhook timeouts causing ingress deployment rollout hangs?",
+    "candidate": "[QUERY]\nHow do you recover an ingress-nginx deployment stuck in CrashLoopBackOff due to cert-manager webhook admission timeouts?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook K8S-12: If ingress pods cannot start because cert-manager validating webhook times out, temporarily patch ValidatingWebhookConfiguration to `failurePolicy: Ignore`.\nChunk 2: Runbook K8S-12 Sec 3: Restart cert-manager pods via `kubectl rollout restart deployment/cert-manager -n cert-manager`. Verify webhook endpoint health before restoring `failurePolicy: Fail`.\nChunk 3: Runbook K8S-18: Execute `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data` with timeout 300s to prevent stateful volume detachment errors.\n\n[ASSISTANT ANSWER]\nPermanently delete the ValidatingWebhookConfiguration without restarting cert-manager, set failurePolicy to Fail on ingress resources, and drain all control plane nodes without restoring the webhook."
+  },
+  {
+    "id": "kms_cross_account_s3_clean_pass",
+    "quad_id": "kms_cross_account_s3",
+    "domain": "rag_cloud_runbook",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Are the required AWS KMS and S3 bucket policy permissions accurately stated according to the cross-account runbook?",
+    "candidate": "[QUERY]\nWhat permissions must be granted to allow Account B to read KMS-encrypted objects from Account A's S3 bucket?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook SEC-08: Cross-account KMS access requires: (1) Account A's KMS key policy must grant kms:Decrypt to Account B, AND (2) Account A's S3 bucket policy must allow s3:GetObject to Account B.\nChunk 2: Runbook SEC-08 Sec 2: Account B's IAM policy attached to consumer role must grant both s3:GetObject on bucket ARN and kms:Decrypt on Account A's KMS key ARN.\nChunk 3: Runbook SEC-03: MTU for cross-account VPC peering connections must be set to 1500 bytes for standard traffic or 9001 bytes for jumbo frames.\n\n[ASSISTANT ANSWER]\nAccount A must grant kms:Decrypt in KMS key policy and s3:GetObject in S3 bucket policy to Account B. Account B's IAM role must also have policies granting s3:GetObject and kms:Decrypt on those ARNs."
+  },
+  {
+    "id": "kms_cross_account_s3_hard_positive",
+    "quad_id": "kms_cross_account_s3",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Are the required AWS KMS and S3 bucket policy permissions accurately stated according to the cross-account runbook?",
+    "candidate": "[QUERY]\nWhat permissions must be granted to allow Account B to read KMS-encrypted objects from Account A's S3 bucket?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook SEC-08: Cross-account KMS access requires: (1) Account A's KMS key policy must grant kms:Decrypt to Account B, AND (2) Account A's S3 bucket policy must allow s3:GetObject to Account B.\nChunk 2: Runbook SEC-08 Sec 2: Account B's IAM policy attached to consumer role must grant both s3:GetObject on bucket ARN and kms:Decrypt on Account A's KMS key ARN.\nChunk 3: Runbook SEC-03: MTU for cross-account VPC peering connections must be set to 1500 bytes for standard traffic or 9001 bytes for jumbo frames.\n\n[ASSISTANT ANSWER]\nAccess requires key policy kms:Decrypt and S3 bucket policy s3:GetObject in Account A, plus IAM permissions for s3:GetObject and kms:Decrypt in Account B. VPC peering MTU settings are unrelated to IAM."
+  },
+  {
+    "id": "kms_cross_account_s3_obvious_fail",
+    "quad_id": "kms_cross_account_s3",
+    "domain": "rag_cloud_runbook",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Are the required AWS KMS and S3 bucket policy permissions accurately stated according to the cross-account runbook?",
+    "candidate": "[QUERY]\nWhat permissions must be granted to allow Account B to read KMS-encrypted objects from Account A's S3 bucket?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook SEC-08: Cross-account KMS access requires: (1) Account A's KMS key policy must grant kms:Decrypt to Account B, AND (2) Account A's S3 bucket policy must allow s3:GetObject to Account B.\nChunk 2: Runbook SEC-08 Sec 2: Account B's IAM policy attached to consumer role must grant both s3:GetObject on bucket ARN and kms:Decrypt on Account A's KMS key ARN.\nChunk 3: Runbook SEC-03: MTU for cross-account VPC peering connections must be set to 1500 bytes for standard traffic or 9001 bytes for jumbo frames.\n\n[ASSISTANT ANSWER]\nMake Account A's S3 bucket completely public with Principal: '*' and disable all KMS encryption across the account, allowing unauthenticated public internet downloads without IAM roles or KMS keys."
+  },
+  {
+    "id": "kms_cross_account_s3_hard_negative",
+    "quad_id": "kms_cross_account_s3",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Are the required AWS KMS and S3 bucket policy permissions accurately stated according to the cross-account runbook?",
+    "candidate": "[QUERY]\nWhat permissions must be granted to allow Account B to read KMS-encrypted objects from Account A's S3 bucket?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook SEC-08: Cross-account KMS access requires: (1) Account A's KMS key policy must grant kms:Decrypt to Account B, AND (2) Account A's S3 bucket policy must allow s3:GetObject to Account B.\nChunk 2: Runbook SEC-08 Sec 2: Account B's IAM policy attached to consumer role must grant both s3:GetObject on bucket ARN and kms:Decrypt on Account A's KMS key ARN.\nChunk 3: Runbook SEC-03: MTU for cross-account VPC peering connections must be set to 1500 bytes for standard traffic or 9001 bytes for jumbo frames.\n\n[ASSISTANT ANSWER]\nOnly Account B needs IAM policy configuration; Account A's KMS key policy and S3 bucket policy do not require any cross-account grants or kms:Decrypt permissions for Account B roles to read objects."
+  },
+  {
+    "id": "redis_cluster_slot_migration_clean_pass",
+    "quad_id": "redis_cluster_slot_migration",
+    "domain": "rag_cloud_runbook",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response accurately detail the redis-cli cluster resharding protocol and MOVED/ASK redirection handling without corrupting hash slots?",
+    "candidate": "[QUERY]\nHow should an operator safely migrate hash slot 5461 from node-01 to node-02 in a live Redis 7 cluster?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook REDIS-05: To migrate slot 5461: (1) Set target node-02 to importing: `SETSLOT 5461 IMPORTING <node-01>`. (2) Set source node-01 to migrating: `SETSLOT 5461 MIGRATING <node-02>`.\nChunk 2: Runbook REDIS-05 Sec 5: (3) Batch-migrate keys using `CLUSTER GETKEYSINSLOT 5461 <count>` and `MIGRATE <node-02-ip> <port> \"\" 0 5000 KEYS <keys...>`. (4) Broadcast `CLUSTER SETSLOT 5461 NODE <node-02-id>` to all nodes.\nChunk 3: Runbook REDIS-02: Configure appendfsync everysec in redis.conf to balance throughput and durability. Avoid appendfsync always in high-throughput workloads.\n\n[ASSISTANT ANSWER]\nSet node-02 to IMPORTING node-01-id, set node-01 to MIGRATING node-02-id, migrate keys with CLUSTER GETKEYSINSLOT and MIGRATE, then broadcast CLUSTER SETSLOT 5461 NODE node-02-id across all cluster nodes."
+  },
+  {
+    "id": "redis_cluster_slot_migration_hard_positive",
+    "quad_id": "redis_cluster_slot_migration",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response accurately detail the redis-cli cluster resharding protocol and MOVED/ASK redirection handling without corrupting hash slots?",
+    "candidate": "[QUERY]\nHow should an operator safely migrate hash slot 5461 from node-01 to node-02 in a live Redis 7 cluster?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook REDIS-05: To migrate slot 5461: (1) Set target node-02 to importing: `SETSLOT 5461 IMPORTING <node-01>`. (2) Set source node-01 to migrating: `SETSLOT 5461 MIGRATING <node-02>`.\nChunk 2: Runbook REDIS-05 Sec 5: (3) Batch-migrate keys using `CLUSTER GETKEYSINSLOT 5461 <count>` and `MIGRATE <node-02-ip> <port> \"\" 0 5000 KEYS <keys...>`. (4) Broadcast `CLUSTER SETSLOT 5461 NODE <node-02-id>` to all nodes.\nChunk 3: Runbook REDIS-02: Configure appendfsync everysec in redis.conf to balance throughput and durability. Avoid appendfsync always in high-throughput workloads.\n\n[ASSISTANT ANSWER]\nExecute CLUSTER SETSLOT 5461 IMPORTING on node-02, MIGRATING on node-01, move keys using MIGRATE batches, and broadcast SETSLOT NODE node-02-id. The REDIS-02 AOF persistence configuration is unrelated."
+  },
+  {
+    "id": "redis_cluster_slot_migration_obvious_fail",
+    "quad_id": "redis_cluster_slot_migration",
+    "domain": "rag_cloud_runbook",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response accurately detail the redis-cli cluster resharding protocol and MOVED/ASK redirection handling without corrupting hash slots?",
+    "candidate": "[QUERY]\nHow should an operator safely migrate hash slot 5461 from node-01 to node-02 in a live Redis 7 cluster?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook REDIS-05: To migrate slot 5461: (1) Set target node-02 to importing: `SETSLOT 5461 IMPORTING <node-01>`. (2) Set source node-01 to migrating: `SETSLOT 5461 MIGRATING <node-02>`.\nChunk 2: Runbook REDIS-05 Sec 5: (3) Batch-migrate keys using `CLUSTER GETKEYSINSLOT 5461 <count>` and `MIGRATE <node-02-ip> <port> \"\" 0 5000 KEYS <keys...>`. (4) Broadcast `CLUSTER SETSLOT 5461 NODE <node-02-id>` to all nodes.\nChunk 3: Runbook REDIS-02: Configure appendfsync everysec in redis.conf to balance throughput and durability. Avoid appendfsync always in high-throughput workloads.\n\n[ASSISTANT ANSWER]\nExecute FLUSHALL on both nodes simultaneously, stop the redis-server service without saving state to disk, and restart node-01 with a wiped appendonly.aof file to clear the hash slot instantly."
+  },
+  {
+    "id": "redis_cluster_slot_migration_hard_negative",
+    "quad_id": "redis_cluster_slot_migration",
+    "domain": "rag_cloud_runbook",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response accurately detail the redis-cli cluster resharding protocol and MOVED/ASK redirection handling without corrupting hash slots?",
+    "candidate": "[QUERY]\nHow should an operator safely migrate hash slot 5461 from node-01 to node-02 in a live Redis 7 cluster?\n\n[RETRIEVED CHUNKS]\nChunk 1: Runbook REDIS-05: To migrate slot 5461: (1) Set target node-02 to importing: `SETSLOT 5461 IMPORTING <node-01>`. (2) Set source node-01 to migrating: `SETSLOT 5461 MIGRATING <node-02>`.\nChunk 2: Runbook REDIS-05 Sec 5: (3) Batch-migrate keys using `CLUSTER GETKEYSINSLOT 5461 <count>` and `MIGRATE <node-02-ip> <port> \"\" 0 5000 KEYS <keys...>`. (4) Broadcast `CLUSTER SETSLOT 5461 NODE <node-02-id>` to all nodes.\nChunk 3: Runbook REDIS-02: Configure appendfsync everysec in redis.conf to balance throughput and durability. Avoid appendfsync always in high-throughput workloads.\n\n[ASSISTANT ANSWER]\nSet node-01 to IMPORTING and node-02 to MIGRATING, execute FLUSHDB on node-02 before migrating keys, and do not broadcast CLUSTER SETSLOT NODE to the remaining nodes in the Redis cluster topology."
+  },
+  {
+    "id": "limitation_of_liability_carveouts_clean_pass",
+    "quad_id": "limitation_of_liability_carveouts",
+    "domain": "rag_contract_clause",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Are the limitation of liability carve-outs and liability caps described strictly in conformance with the agreement clauses?",
+    "candidate": "[QUERY]\nWhat claims are carved out from the aggregate liability cap in Section 11 of the Enterprise Master Services Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: MSA Sec 11.1: Except for Excluded Claims, each party's maximum aggregate liability shall be capped at total fees paid by Customer in the 12 months preceding the incident.\nChunk 2: MSA Sec 11.2: 'Excluded Claims' means: (a) breach of Section 7 (Confidentiality), (b) indemnification obligations under Section 12, and (c) damages caused by gross negligence or willful misconduct.\nChunk 3: MSA Sec 14.3: This Agreement shall be governed by Delaware law without regard to conflict of laws principles. Venue lies in New Castle County.\n\n[ASSISTANT ANSWER]\nUnder Section 11.2, Excluded Claims exempt from the 12-month fee liability cap are: (a) breaches of confidentiality (Sec 7), (b) indemnity obligations (Sec 12), and (c) gross negligence or willful misconduct."
+  },
+  {
+    "id": "limitation_of_liability_carveouts_hard_positive",
+    "quad_id": "limitation_of_liability_carveouts",
+    "domain": "rag_contract_clause",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Are the limitation of liability carve-outs and liability caps described strictly in conformance with the agreement clauses?",
+    "candidate": "[QUERY]\nWhat claims are carved out from the aggregate liability cap in Section 11 of the Enterprise Master Services Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: MSA Sec 11.1: Except for Excluded Claims, each party's maximum aggregate liability shall be capped at total fees paid by Customer in the 12 months preceding the incident.\nChunk 2: MSA Sec 11.2: 'Excluded Claims' means: (a) breach of Section 7 (Confidentiality), (b) indemnification obligations under Section 12, and (c) damages caused by gross negligence or willful misconduct.\nChunk 3: MSA Sec 14.3: This Agreement shall be governed by Delaware law without regard to conflict of laws principles. Venue lies in New Castle County.\n\n[ASSISTANT ANSWER]\nThe 12-month fee cap excludes confidentiality breaches under Section 7, indemnification obligations under Section 12, and gross negligence or willful misconduct. Delaware governing law is not a carve-out."
+  },
+  {
+    "id": "limitation_of_liability_carveouts_obvious_fail",
+    "quad_id": "limitation_of_liability_carveouts",
+    "domain": "rag_contract_clause",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Are the limitation of liability carve-outs and liability caps described strictly in conformance with the agreement clauses?",
+    "candidate": "[QUERY]\nWhat claims are carved out from the aggregate liability cap in Section 11 of the Enterprise Master Services Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: MSA Sec 11.1: Except for Excluded Claims, each party's maximum aggregate liability shall be capped at total fees paid by Customer in the 12 months preceding the incident.\nChunk 2: MSA Sec 11.2: 'Excluded Claims' means: (a) breach of Section 7 (Confidentiality), (b) indemnification obligations under Section 12, and (c) damages caused by gross negligence or willful misconduct.\nChunk 3: MSA Sec 14.3: This Agreement shall be governed by Delaware law without regard to conflict of laws principles. Venue lies in New Castle County.\n\n[ASSISTANT ANSWER]\nAll liability is completely uncapped for routine non-material contract delays, while gross negligence, willful misconduct, and confidentiality breaches are strictly subject to a $100 maximum total cap."
+  },
+  {
+    "id": "limitation_of_liability_carveouts_hard_negative",
+    "quad_id": "limitation_of_liability_carveouts",
+    "domain": "rag_contract_clause",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Are the limitation of liability carve-outs and liability caps described strictly in conformance with the agreement clauses?",
+    "candidate": "[QUERY]\nWhat claims are carved out from the aggregate liability cap in Section 11 of the Enterprise Master Services Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: MSA Sec 11.1: Except for Excluded Claims, each party's maximum aggregate liability shall be capped at total fees paid by Customer in the 12 months preceding the incident.\nChunk 2: MSA Sec 11.2: 'Excluded Claims' means: (a) breach of Section 7 (Confidentiality), (b) indemnification obligations under Section 12, and (c) damages caused by gross negligence or willful misconduct.\nChunk 3: MSA Sec 14.3: This Agreement shall be governed by Delaware law without regard to conflict of laws principles. Venue lies in New Castle County.\n\n[ASSISTANT ANSWER]\nThe 12-month fee liability cap applies strictly to all claims without exception, specifically including confidentiality breaches, third-party indemnity, and gross negligence under the aggregate limit."
+  },
+  {
+    "id": "sla_uptime_exclusions_clean_pass",
+    "quad_id": "sla_uptime_exclusions",
+    "domain": "rag_contract_clause",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response accurately state the SLA uptime exclusions and maintenance notification windows without contradicting the contract text?",
+    "candidate": "[QUERY]\nWhat events are excluded from the calculation of monthly service downtime under the Cloud Service Level Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: SLA Sec 2.1: Monthly Uptime Percentage excludes downtime from: (i) scheduled maintenance announced >=5 business days in advance (Sundays 01:00-05:00 UTC), (ii) Customer network or hardware failures.\nChunk 2: SLA Sec 2.2: Downtime also excludes Force Majeure events (acts of war, natural disasters, national power grid failures) and emergency security maintenance <=2 hours per calendar month.\nChunk 3: SLA Sec 4.1: If Monthly Uptime falls below 99.9% but >=99.0%, Customer gets 10% credit; below 99.0%, Customer gets 25% service credit.\n\n[ASSISTANT ANSWER]\nExcluded from downtime: scheduled maintenance announced 5 days in advance (Sundays 01:00-05:00 UTC), customer network/hardware failures, Force Majeure events, and emergency security maintenance up to 2 hours."
+  },
+  {
+    "id": "sla_uptime_exclusions_hard_positive",
+    "quad_id": "sla_uptime_exclusions",
+    "domain": "rag_contract_clause",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response accurately state the SLA uptime exclusions and maintenance notification windows without contradicting the contract text?",
+    "candidate": "[QUERY]\nWhat events are excluded from the calculation of monthly service downtime under the Cloud Service Level Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: SLA Sec 2.1: Monthly Uptime Percentage excludes downtime from: (i) scheduled maintenance announced >=5 business days in advance (Sundays 01:00-05:00 UTC), (ii) Customer network or hardware failures.\nChunk 2: SLA Sec 2.2: Downtime also excludes Force Majeure events (acts of war, natural disasters, national power grid failures) and emergency security maintenance <=2 hours per calendar month.\nChunk 3: SLA Sec 4.1: If Monthly Uptime falls below 99.9% but >=99.0%, Customer gets 10% credit; below 99.0%, Customer gets 25% service credit.\n\n[ASSISTANT ANSWER]\nDowntime excludes scheduled maintenance (5-day notice, Sunday 01:00-05:00 UTC), customer equipment failures, Force Majeure, and emergency security maintenance up to 2 hours. Service credits apply below 99.9%."
+  },
+  {
+    "id": "sla_uptime_exclusions_obvious_fail",
+    "quad_id": "sla_uptime_exclusions",
+    "domain": "rag_contract_clause",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response accurately state the SLA uptime exclusions and maintenance notification windows without contradicting the contract text?",
+    "candidate": "[QUERY]\nWhat events are excluded from the calculation of monthly service downtime under the Cloud Service Level Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: SLA Sec 2.1: Monthly Uptime Percentage excludes downtime from: (i) scheduled maintenance announced >=5 business days in advance (Sundays 01:00-05:00 UTC), (ii) Customer network or hardware failures.\nChunk 2: SLA Sec 2.2: Downtime also excludes Force Majeure events (acts of war, natural disasters, national power grid failures) and emergency security maintenance <=2 hours per calendar month.\nChunk 3: SLA Sec 4.1: If Monthly Uptime falls below 99.9% but >=99.0%, Customer gets 10% credit; below 99.0%, Customer gets 25% service credit.\n\n[ASSISTANT ANSWER]\nScheduled maintenance and customer power outages count as 10x downtime penalties, while catastrophic national cloud data center outages are completely immune from SLA measurements under all tiers and schedules."
+  },
+  {
+    "id": "sla_uptime_exclusions_hard_negative",
+    "quad_id": "sla_uptime_exclusions",
+    "domain": "rag_contract_clause",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response accurately state the SLA uptime exclusions and maintenance notification windows without contradicting the contract text?",
+    "candidate": "[QUERY]\nWhat events are excluded from the calculation of monthly service downtime under the Cloud Service Level Agreement?\n\n[RETRIEVED CHUNKS]\nChunk 1: SLA Sec 2.1: Monthly Uptime Percentage excludes downtime from: (i) scheduled maintenance announced >=5 business days in advance (Sundays 01:00-05:00 UTC), (ii) Customer network or hardware failures.\nChunk 2: SLA Sec 2.2: Downtime also excludes Force Majeure events (acts of war, natural disasters, national power grid failures) and emergency security maintenance <=2 hours per calendar month.\nChunk 3: SLA Sec 4.1: If Monthly Uptime falls below 99.9% but >=99.0%, Customer gets 10% credit; below 99.0%, Customer gets 25% service credit.\n\n[ASSISTANT ANSWER]\nDowntime calculations include all scheduled maintenance regardless of advance notice, but exclude any downtime caused by internal cloud provider server crashes, disk failures, or software release bugs on hosts."
+  },
+  {
+    "id": "ip_background_vs_deliverables_clean_pass",
+    "quad_id": "ip_background_vs_deliverables",
+    "domain": "rag_contract_clause",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response accurately differentiate pre-existing Background IP from newly created Customer Deliverables under the IP clause?",
+    "candidate": "[QUERY]\nWho owns intellectual property rights in pre-existing tooling versus bespoke custom deliverables created under a Statement of Work?\n\n[RETRIEVED CHUNKS]\nChunk 1: SOW Sec 8.1: Provider retains exclusive ownership of all right, title, and interest in its pre-existing tools, algorithms, libraries, and proprietary software ('Background Technology').\nChunk 2: SOW Sec 8.2: Customer shall exclusively own all right, title, and interest (including copyright and patent rights) in bespoke custom deliverables developed for Customer under an SOW.\nChunk 3: SOW Sec 10.1: Neither party shall solicit for employment any employee of other party directly involved in SOW during term and for 12 months post-termination.\n\n[ASSISTANT ANSWER]\nProvider retains exclusive ownership of pre-existing Background Technology (tools, algorithms, libraries). Customer exclusively owns all rights, title, and interest in bespoke custom deliverables under the SOW."
+  },
+  {
+    "id": "ip_background_vs_deliverables_hard_positive",
+    "quad_id": "ip_background_vs_deliverables",
+    "domain": "rag_contract_clause",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response accurately differentiate pre-existing Background IP from newly created Customer Deliverables under the IP clause?",
+    "candidate": "[QUERY]\nWho owns intellectual property rights in pre-existing tooling versus bespoke custom deliverables created under a Statement of Work?\n\n[RETRIEVED CHUNKS]\nChunk 1: SOW Sec 8.1: Provider retains exclusive ownership of all right, title, and interest in its pre-existing tools, algorithms, libraries, and proprietary software ('Background Technology').\nChunk 2: SOW Sec 8.2: Customer shall exclusively own all right, title, and interest (including copyright and patent rights) in bespoke custom deliverables developed for Customer under an SOW.\nChunk 3: SOW Sec 10.1: Neither party shall solicit for employment any employee of other party directly involved in SOW during term and for 12 months post-termination.\n\n[ASSISTANT ANSWER]\nUnder Section 8, Provider owns all pre-existing Background Technology (tools, algorithms, libraries), while Customer owns bespoke custom deliverables developed under the SOW. Section 10 covers non-solicitation."
+  },
+  {
+    "id": "ip_background_vs_deliverables_obvious_fail",
+    "quad_id": "ip_background_vs_deliverables",
+    "domain": "rag_contract_clause",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response accurately differentiate pre-existing Background IP from newly created Customer Deliverables under the IP clause?",
+    "candidate": "[QUERY]\nWho owns intellectual property rights in pre-existing tooling versus bespoke custom deliverables created under a Statement of Work?\n\n[RETRIEVED CHUNKS]\nChunk 1: SOW Sec 8.1: Provider retains exclusive ownership of all right, title, and interest in its pre-existing tools, algorithms, libraries, and proprietary software ('Background Technology').\nChunk 2: SOW Sec 8.2: Customer shall exclusively own all right, title, and interest (including copyright and patent rights) in bespoke custom deliverables developed for Customer under an SOW.\nChunk 3: SOW Sec 10.1: Neither party shall solicit for employment any employee of other party directly involved in SOW during term and for 12 months post-termination.\n\n[ASSISTANT ANSWER]\nCustomer owns all of Provider's pre-existing corporate software, patents, and source code worldwide, while Provider receives exclusive ownership of Customer's proprietary trade secrets and client list."
+  },
+  {
+    "id": "ip_background_vs_deliverables_hard_negative",
+    "quad_id": "ip_background_vs_deliverables",
+    "domain": "rag_contract_clause",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response accurately differentiate pre-existing Background IP from newly created Customer Deliverables under the IP clause?",
+    "candidate": "[QUERY]\nWho owns intellectual property rights in pre-existing tooling versus bespoke custom deliverables created under a Statement of Work?\n\n[RETRIEVED CHUNKS]\nChunk 1: SOW Sec 8.1: Provider retains exclusive ownership of all right, title, and interest in its pre-existing tools, algorithms, libraries, and proprietary software ('Background Technology').\nChunk 2: SOW Sec 8.2: Customer shall exclusively own all right, title, and interest (including copyright and patent rights) in bespoke custom deliverables developed for Customer under an SOW.\nChunk 3: SOW Sec 10.1: Neither party shall solicit for employment any employee of other party directly involved in SOW during term and for 12 months post-termination.\n\n[ASSISTANT ANSWER]\nCustomer exclusively owns all pre-existing Background Technology, tools, and proprietary software of the Provider, while Provider acquires exclusive copyright and patent ownership in all SOW Deliverables."
+  },
+  {
+    "id": "confidentiality_destruction_term_clean_pass",
+    "quad_id": "confidentiality_destruction_term",
+    "domain": "rag_contract_clause",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Are the post-termination confidentiality obligations and document destruction/retention rules faithfully described?",
+    "candidate": "[QUERY]\nUpon termination of the agreement, what are the receiving party's obligations regarding the disclosing party's Confidential Information?\n\n[RETRIEVED CHUNKS]\nChunk 1: NDA Sec 5.1: Within 30 days of written request upon termination, receiving party must return or certify destruction of Confidential Information and all copies.\nChunk 2: NDA Sec 5.2: Receiving party may retain one archival copy for legal compliance and routine electronic backups, provided such copies remain subject to confidentiality for 5 years.\nChunk 3: NDA Sec 7.2: Any breach of confidentiality may cause irreparable harm for which monetary damages are inadequate, entitling disclosing party to seek injunctive relief.\n\n[ASSISTANT ANSWER]\nWithin 30 days of written request upon termination, receiving party must return or certify destruction of Confidential Information. One archival copy may be kept for legal compliance and backups, bound for 5 years."
+  },
+  {
+    "id": "confidentiality_destruction_term_hard_positive",
+    "quad_id": "confidentiality_destruction_term",
+    "domain": "rag_contract_clause",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Are the post-termination confidentiality obligations and document destruction/retention rules faithfully described?",
+    "candidate": "[QUERY]\nUpon termination of the agreement, what are the receiving party's obligations regarding the disclosing party's Confidential Information?\n\n[RETRIEVED CHUNKS]\nChunk 1: NDA Sec 5.1: Within 30 days of written request upon termination, receiving party must return or certify destruction of Confidential Information and all copies.\nChunk 2: NDA Sec 5.2: Receiving party may retain one archival copy for legal compliance and routine electronic backups, provided such copies remain subject to confidentiality for 5 years.\nChunk 3: NDA Sec 7.2: Any breach of confidentiality may cause irreparable harm for which monetary damages are inadequate, entitling disclosing party to seek injunctive relief.\n\n[ASSISTANT ANSWER]\nThe receiving party must return or destroy all Confidential Information within 30 days upon request, with exceptions for legal archival and automated backups remaining protected for 5 years. Section 7 covers injunctions."
+  },
+  {
+    "id": "confidentiality_destruction_term_obvious_fail",
+    "quad_id": "confidentiality_destruction_term",
+    "domain": "rag_contract_clause",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Are the post-termination confidentiality obligations and document destruction/retention rules faithfully described?",
+    "candidate": "[QUERY]\nUpon termination of the agreement, what are the receiving party's obligations regarding the disclosing party's Confidential Information?\n\n[RETRIEVED CHUNKS]\nChunk 1: NDA Sec 5.1: Within 30 days of written request upon termination, receiving party must return or certify destruction of Confidential Information and all copies.\nChunk 2: NDA Sec 5.2: Receiving party may retain one archival copy for legal compliance and routine electronic backups, provided such copies remain subject to confidentiality for 5 years.\nChunk 3: NDA Sec 7.2: Any breach of confidentiality may cause irreparable harm for which monetary damages are inadequate, entitling disclosing party to seek injunctive relief.\n\n[ASSISTANT ANSWER]\nThe receiving party is legally mandated to publish all confidential trade secrets and source code to public internet repositories immediately upon agreement termination to ensure full public transparency."
+  },
+  {
+    "id": "confidentiality_destruction_term_hard_negative",
+    "quad_id": "confidentiality_destruction_term",
+    "domain": "rag_contract_clause",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Are the post-termination confidentiality obligations and document destruction/retention rules faithfully described?",
+    "candidate": "[QUERY]\nUpon termination of the agreement, what are the receiving party's obligations regarding the disclosing party's Confidential Information?\n\n[RETRIEVED CHUNKS]\nChunk 1: NDA Sec 5.1: Within 30 days of written request upon termination, receiving party must return or certify destruction of Confidential Information and all copies.\nChunk 2: NDA Sec 5.2: Receiving party may retain one archival copy for legal compliance and routine electronic backups, provided such copies remain subject to confidentiality for 5 years.\nChunk 3: NDA Sec 7.2: Any breach of confidentiality may cause irreparable harm for which monetary damages are inadequate, entitling disclosing party to seek injunctive relief.\n\n[ASSISTANT ANSWER]\nThe receiving party is required to immediately destroy all electronic backup media within 24 hours with no legal archival exceptions permitted, and confidentiality obligations terminate completely upon contract end."
+  },
+  {
+    "id": "bgp_route_flap_postmortem_clean_pass",
+    "quad_id": "bgp_route_flap_postmortem",
+    "domain": "rag_incident_postmortem",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response accurately report root cause, trigger, and remediation from the network incident postmortem chunks?",
+    "candidate": "[QUERY]\nWhat was the root cause and primary remediation for the March 14 multi-region BGP route flapping incident?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-882: During spine upgrade in DC-West, BFD timers were 50ms x3. CPU throttling caused BFD keepalive drops, tearing down BGP peering sessions every 150ms.\nChunk 2: INC-882 Sec 4: Remediation 1: Increased BFD interval to 300ms with multiplier 3 on leaf-spine links. Remediation 2: Implemented BGP route flap dampening with 15-minute penalty half-life.\nChunk 3: INC-879: GlusterFS split-brain on brick-04 resolved by rebuilding quorum metadata on February 28. No packet drops or network degradation observed.\n\n[ASSISTANT ANSWER]\nRoot cause was aggressive BFD timers (50ms x3) dropping keepalives during spine switch CPU throttling, flapping BGP sessions. Remediation increased BFD interval to 300ms and added BGP route flap dampening."
+  },
+  {
+    "id": "bgp_route_flap_postmortem_hard_positive",
+    "quad_id": "bgp_route_flap_postmortem",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response accurately report root cause, trigger, and remediation from the network incident postmortem chunks?",
+    "candidate": "[QUERY]\nWhat was the root cause and primary remediation for the March 14 multi-region BGP route flapping incident?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-882: During spine upgrade in DC-West, BFD timers were 50ms x3. CPU throttling caused BFD keepalive drops, tearing down BGP peering sessions every 150ms.\nChunk 2: INC-882 Sec 4: Remediation 1: Increased BFD interval to 300ms with multiplier 3 on leaf-spine links. Remediation 2: Implemented BGP route flap dampening with 15-minute penalty half-life.\nChunk 3: INC-879: GlusterFS split-brain on brick-04 resolved by rebuilding quorum metadata on February 28. No packet drops or network degradation observed.\n\n[ASSISTANT ANSWER]\nRoot cause: 50ms BFD timers caused peer teardown under spine CPU throttling during firmware upgrade. Remediated by increasing BFD to 300ms and enabling route flap dampening. INC-879 storage issue was unrelated."
+  },
+  {
+    "id": "bgp_route_flap_postmortem_obvious_fail",
+    "quad_id": "bgp_route_flap_postmortem",
+    "domain": "rag_incident_postmortem",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response accurately report root cause, trigger, and remediation from the network incident postmortem chunks?",
+    "candidate": "[QUERY]\nWhat was the root cause and primary remediation for the March 14 multi-region BGP route flapping incident?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-882: During spine upgrade in DC-West, BFD timers were 50ms x3. CPU throttling caused BFD keepalive drops, tearing down BGP peering sessions every 150ms.\nChunk 2: INC-882 Sec 4: Remediation 1: Increased BFD interval to 300ms with multiplier 3 on leaf-spine links. Remediation 2: Implemented BGP route flap dampening with 15-minute penalty half-life.\nChunk 3: INC-879: GlusterFS split-brain on brick-04 resolved by rebuilding quorum metadata on February 28. No packet drops or network degradation observed.\n\n[ASSISTANT ANSWER]\nThe outage was caused by a meteor strike on the primary datacenter fiber trunk, and the team resolved it by rewiring the building with copper telephone wires and disabling BGP routing permanently in DC-West."
+  },
+  {
+    "id": "bgp_route_flap_postmortem_hard_negative",
+    "quad_id": "bgp_route_flap_postmortem",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response accurately report root cause, trigger, and remediation from the network incident postmortem chunks?",
+    "candidate": "[QUERY]\nWhat was the root cause and primary remediation for the March 14 multi-region BGP route flapping incident?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-882: During spine upgrade in DC-West, BFD timers were 50ms x3. CPU throttling caused BFD keepalive drops, tearing down BGP peering sessions every 150ms.\nChunk 2: INC-882 Sec 4: Remediation 1: Increased BFD interval to 300ms with multiplier 3 on leaf-spine links. Remediation 2: Implemented BGP route flap dampening with 15-minute penalty half-life.\nChunk 3: INC-879: GlusterFS split-brain on brick-04 resolved by rebuilding quorum metadata on February 28. No packet drops or network degradation observed.\n\n[ASSISTANT ANSWER]\nRoot cause was GlusterFS storage split-brain on brick-04 causing packet drops, and remediation consisted of downgrading spine switch BFD timers from 300ms down to 10ms to speed up failover detection in switches."
+  },
+  {
+    "id": "ddos_syncookie_mitigation_clean_pass",
+    "quad_id": "ddos_syncookie_mitigation",
+    "domain": "rag_incident_postmortem",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Are the DDoS attack vector, volumetric magnitude, and eBPF mitigation details reported accurately from the postmortem chunks?",
+    "candidate": "[QUERY]\nWhat attack vector was used in the July 22 edge service disruption and what edge mitigation successfully restored service?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-941: The edge network experienced a 450 Gbps / 120 Mpps SYN flood targeting port 443 across three Anycast POPs (Frankfurt, Ashburn, Singapore), saturating Linux conntrack tables.\nChunk 2: INC-941 Sec 3: Service restored within 8 minutes by deploying an eBPF XDP filter enabling SYN cookies and dropping invalid ACK packets before kernel conntrack allocation.\nChunk 3: INC-930: Read replica promotion on July 10 experienced a 45-second stall due to unpurged replication slots. Resolved by dropping obsolete replication slots.\n\n[ASSISTANT ANSWER]\nThe incident involved a 450 Gbps / 120 Mpps SYN flood on port 443 saturating conntrack tables. Service was restored by an eBPF XDP filter enforcing SYN cookies and dropping invalid ACKs before conntrack."
+  },
+  {
+    "id": "ddos_syncookie_mitigation_hard_positive",
+    "quad_id": "ddos_syncookie_mitigation",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Are the DDoS attack vector, volumetric magnitude, and eBPF mitigation details reported accurately from the postmortem chunks?",
+    "candidate": "[QUERY]\nWhat attack vector was used in the July 22 edge service disruption and what edge mitigation successfully restored service?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-941: The edge network experienced a 450 Gbps / 120 Mpps SYN flood targeting port 443 across three Anycast POPs (Frankfurt, Ashburn, Singapore), saturating Linux conntrack tables.\nChunk 2: INC-941 Sec 3: Service restored within 8 minutes by deploying an eBPF XDP filter enabling SYN cookies and dropping invalid ACK packets before kernel conntrack allocation.\nChunk 3: INC-930: Read replica promotion on July 10 experienced a 45-second stall due to unpurged replication slots. Resolved by dropping obsolete replication slots.\n\n[ASSISTANT ANSWER]\nThe attack was a 450 Gbps/120 Mpps SYN flood saturating Linux conntrack across 3 POPs. Deployed eBPF XDP SYN cookies and dropped invalid ACKs prior to conntrack allocation. INC-930 DB failover was unrelated."
+  },
+  {
+    "id": "ddos_syncookie_mitigation_obvious_fail",
+    "quad_id": "ddos_syncookie_mitigation",
+    "domain": "rag_incident_postmortem",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Are the DDoS attack vector, volumetric magnitude, and eBPF mitigation details reported accurately from the postmortem chunks?",
+    "candidate": "[QUERY]\nWhat attack vector was used in the July 22 edge service disruption and what edge mitigation successfully restored service?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-941: The edge network experienced a 450 Gbps / 120 Mpps SYN flood targeting port 443 across three Anycast POPs (Frankfurt, Ashburn, Singapore), saturating Linux conntrack tables.\nChunk 2: INC-941 Sec 3: Service restored within 8 minutes by deploying an eBPF XDP filter enabling SYN cookies and dropping invalid ACK packets before kernel conntrack allocation.\nChunk 3: INC-930: Read replica promotion on July 10 experienced a 45-second stall due to unpurged replication slots. Resolved by dropping obsolete replication slots.\n\n[ASSISTANT ANSWER]\nThe incident was an internal employee accidentally deleting the primary DNS zone file, which was fixed by rolling back git commits and rebooting developer laptops across the marketing department floor."
+  },
+  {
+    "id": "ddos_syncookie_mitigation_hard_negative",
+    "quad_id": "ddos_syncookie_mitigation",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Are the DDoS attack vector, volumetric magnitude, and eBPF mitigation details reported accurately from the postmortem chunks?",
+    "candidate": "[QUERY]\nWhat attack vector was used in the July 22 edge service disruption and what edge mitigation successfully restored service?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-941: The edge network experienced a 450 Gbps / 120 Mpps SYN flood targeting port 443 across three Anycast POPs (Frankfurt, Ashburn, Singapore), saturating Linux conntrack tables.\nChunk 2: INC-941 Sec 3: Service restored within 8 minutes by deploying an eBPF XDP filter enabling SYN cookies and dropping invalid ACK packets before kernel conntrack allocation.\nChunk 3: INC-930: Read replica promotion on July 10 experienced a 45-second stall due to unpurged replication slots. Resolved by dropping obsolete replication slots.\n\n[ASSISTANT ANSWER]\nThe disruption was caused by an unpurged database replication slot stalling reads, which was mitigated by disabling SYN cookies and increasing the Linux conntrack table timeout from 300s to 3600s globally."
+  },
+  {
+    "id": "payment_deadlock_unindexed_fk_clean_pass",
+    "quad_id": "payment_deadlock_unindexed_fk",
+    "domain": "rag_incident_postmortem",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response accurately identify the database deadlock mechanism and schema fix from the incident postmortem?",
+    "candidate": "[QUERY]\nWhy did concurrent checkout transactions deadlock during Black Friday peak, and what was the definitive database fix?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1044: Unindexed foreign key `order_items.order_id` caused PostgreSQL to escalate row locks to table-level ShareLocks on `order_items`, deadlocking concurrent orders workers.\nChunk 2: INC-1044 Sec 4: The database engineering team deployed a hotfix migration: `CREATE INDEX CONCURRENTLY idx_order_items_order_id ON order_items (order_id)`. Zero deadlocks occurred post-deployment.\nChunk 3: INC-1012: Memcached node-03 suffered memory fragmentation. Resolved by adjusting slab allocation factor from 1.25 to 1.15 on October 14.\n\n[ASSISTANT ANSWER]\nMissing index on foreign key order_items.order_id caused table-level ShareLock escalation during concurrent orders updates, producing deadlocks. The fix was CREATE INDEX CONCURRENTLY on order_items(order_id)."
+  },
+  {
+    "id": "payment_deadlock_unindexed_fk_hard_positive",
+    "quad_id": "payment_deadlock_unindexed_fk",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response accurately identify the database deadlock mechanism and schema fix from the incident postmortem?",
+    "candidate": "[QUERY]\nWhy did concurrent checkout transactions deadlock during Black Friday peak, and what was the definitive database fix?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1044: Unindexed foreign key `order_items.order_id` caused PostgreSQL to escalate row locks to table-level ShareLocks on `order_items`, deadlocking concurrent orders workers.\nChunk 2: INC-1044 Sec 4: The database engineering team deployed a hotfix migration: `CREATE INDEX CONCURRENTLY idx_order_items_order_id ON order_items (order_id)`. Zero deadlocks occurred post-deployment.\nChunk 3: INC-1012: Memcached node-03 suffered memory fragmentation. Resolved by adjusting slab allocation factor from 1.25 to 1.15 on October 14.\n\n[ASSISTANT ANSWER]\nDeadlocks arose because unindexed foreign key order_items.order_id caused PostgreSQL to acquire table-level ShareLocks on order_items during order updates. Fixed by adding an index concurrently on order_id."
+  },
+  {
+    "id": "payment_deadlock_unindexed_fk_obvious_fail",
+    "quad_id": "payment_deadlock_unindexed_fk",
+    "domain": "rag_incident_postmortem",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response accurately identify the database deadlock mechanism and schema fix from the incident postmortem?",
+    "candidate": "[QUERY]\nWhy did concurrent checkout transactions deadlock during Black Friday peak, and what was the definitive database fix?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1044: Unindexed foreign key `order_items.order_id` caused PostgreSQL to escalate row locks to table-level ShareLocks on `order_items`, deadlocking concurrent orders workers.\nChunk 2: INC-1044 Sec 4: The database engineering team deployed a hotfix migration: `CREATE INDEX CONCURRENTLY idx_order_items_order_id ON order_items (order_id)`. Zero deadlocks occurred post-deployment.\nChunk 3: INC-1012: Memcached node-03 suffered memory fragmentation. Resolved by adjusting slab allocation factor from 1.25 to 1.15 on October 14.\n\n[ASSISTANT ANSWER]\nThe deadlocks occurred because Python 2 was deprecated, and the issue was permanently fixed by rewriting the entire checkout service in assembly code and replacing PostgreSQL with flat text files."
+  },
+  {
+    "id": "payment_deadlock_unindexed_fk_hard_negative",
+    "quad_id": "payment_deadlock_unindexed_fk",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response accurately identify the database deadlock mechanism and schema fix from the incident postmortem?",
+    "candidate": "[QUERY]\nWhy did concurrent checkout transactions deadlock during Black Friday peak, and what was the definitive database fix?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1044: Unindexed foreign key `order_items.order_id` caused PostgreSQL to escalate row locks to table-level ShareLocks on `order_items`, deadlocking concurrent orders workers.\nChunk 2: INC-1044 Sec 4: The database engineering team deployed a hotfix migration: `CREATE INDEX CONCURRENTLY idx_order_items_order_id ON order_items (order_id)`. Zero deadlocks occurred post-deployment.\nChunk 3: INC-1012: Memcached node-03 suffered memory fragmentation. Resolved by adjusting slab allocation factor from 1.25 to 1.15 on October 14.\n\n[ASSISTANT ANSWER]\nDeadlocks were caused by Memcached slab fragmentation on node-03, and the fix was altering slab allocation from 1.25 to 1.15 while dropping all foreign key indexes on order_items to reduce write overhead."
+  },
+  {
+    "id": "systemd_resolved_dns_exhaustion_clean_pass",
+    "quad_id": "systemd_resolved_dns_exhaustion",
+    "domain": "rag_incident_postmortem",
+    "variant": "clean_pass",
+    "expected": true,
+    "rubric": "Does the response correctly state the DNS failure mode and configuration change from the resolver incident postmortem?",
+    "candidate": "[QUERY]\nWhat caused the DNS resolution timeouts on Kubernetes worker nodes on October 5, and how was the resolver reconfigured?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1102: Bursts of UDP DNS lookups from batch workloads exceeded default systemd-resolved limit of 64 concurrent queries. Subsequent queries timed out after 5000ms, failing service discovery.\nChunk 2: INC-1102 Sec 3: Resolution: disabled local systemd-resolved stub listener, deployed NodeLocal DNSCache DaemonSet with unbound query caching, and set resolv.conf single-request-reopen with 2s timeout.\nChunk 3: INC-1088: Internal mTLS certificate for grpc-gateway expired on September 22. Automated renewal cron was restored with Cert-Manager v1.12.\n\n[ASSISTANT ANSWER]\nBurst UDP DNS lookups overwhelmed the systemd-resolved 64-query queue limit, causing 5-second timeouts. Reconfigured by disabling systemd-resolved stub, deploying NodeLocal DNSCache, and setting single-request-reopen."
+  },
+  {
+    "id": "systemd_resolved_dns_exhaustion_hard_positive",
+    "quad_id": "systemd_resolved_dns_exhaustion",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_positive",
+    "expected": true,
+    "rubric": "Does the response correctly state the DNS failure mode and configuration change from the resolver incident postmortem?",
+    "candidate": "[QUERY]\nWhat caused the DNS resolution timeouts on Kubernetes worker nodes on October 5, and how was the resolver reconfigured?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1102: Bursts of UDP DNS lookups from batch workloads exceeded default systemd-resolved limit of 64 concurrent queries. Subsequent queries timed out after 5000ms, failing service discovery.\nChunk 2: INC-1102 Sec 3: Resolution: disabled local systemd-resolved stub listener, deployed NodeLocal DNSCache DaemonSet with unbound query caching, and set resolv.conf single-request-reopen with 2s timeout.\nChunk 3: INC-1088: Internal mTLS certificate for grpc-gateway expired on September 22. Automated renewal cron was restored with Cert-Manager v1.12.\n\n[ASSISTANT ANSWER]\nUDP lookups exceeded systemd-resolved 64 concurrent transaction queue, producing 5s timeouts. Fixed by deploying NodeLocal DNSCache DaemonSet, disabling local stub, and configuring single-request-reopen. mTLS was separate."
+  },
+  {
+    "id": "systemd_resolved_dns_exhaustion_obvious_fail",
+    "quad_id": "systemd_resolved_dns_exhaustion",
+    "domain": "rag_incident_postmortem",
+    "variant": "obvious_fail",
+    "expected": false,
+    "rubric": "Does the response correctly state the DNS failure mode and configuration change from the resolver incident postmortem?",
+    "candidate": "[QUERY]\nWhat caused the DNS resolution timeouts on Kubernetes worker nodes on October 5, and how was the resolver reconfigured?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1102: Bursts of UDP DNS lookups from batch workloads exceeded default systemd-resolved limit of 64 concurrent queries. Subsequent queries timed out after 5000ms, failing service discovery.\nChunk 2: INC-1102 Sec 3: Resolution: disabled local systemd-resolved stub listener, deployed NodeLocal DNSCache DaemonSet with unbound query caching, and set resolv.conf single-request-reopen with 2s timeout.\nChunk 3: INC-1088: Internal mTLS certificate for grpc-gateway expired on September 22. Automated renewal cron was restored with Cert-Manager v1.12.\n\n[ASSISTANT ANSWER]\nThe DNS outage occurred because the internet root name servers were shut down for scheduled maintenance, and the issue was fixed by changing all external domain names to hardcoded IPv6 addresses across nodes."
+  },
+  {
+    "id": "systemd_resolved_dns_exhaustion_hard_negative",
+    "quad_id": "systemd_resolved_dns_exhaustion",
+    "domain": "rag_incident_postmortem",
+    "variant": "hard_negative",
+    "expected": false,
+    "rubric": "Does the response correctly state the DNS failure mode and configuration change from the resolver incident postmortem?",
+    "candidate": "[QUERY]\nWhat caused the DNS resolution timeouts on Kubernetes worker nodes on October 5, and how was the resolver reconfigured?\n\n[RETRIEVED CHUNKS]\nChunk 1: INC-1102: Bursts of UDP DNS lookups from batch workloads exceeded default systemd-resolved limit of 64 concurrent queries. Subsequent queries timed out after 5000ms, failing service discovery.\nChunk 2: INC-1102 Sec 3: Resolution: disabled local systemd-resolved stub listener, deployed NodeLocal DNSCache DaemonSet with unbound query caching, and set resolv.conf single-request-reopen with 2s timeout.\nChunk 3: INC-1088: Internal mTLS certificate for grpc-gateway expired on September 22. Automated renewal cron was restored with Cert-Manager v1.12.\n\n[ASSISTANT ANSWER]\nDNS failures were caused by expired mTLS certificates on grpc-gateway, and the fix was increasing the systemd-resolved query queue limit to 5000 while disabling NodeLocal DNSCache across the cluster workers."
+  }
+]
