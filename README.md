@@ -270,7 +270,7 @@ logitgate distill --dataset pairs.json --student-model qwen2.5:3b --output bundl
   author = {Bradley, Jason},
   title = {LogitGate: Fast, Calibrated First-Token Logit Evaluation and Cascaded Routing for LLMs},
   year = {2026},
-  version = {0.16.1},
+  version = {0.16.2},
   url = {https://github.com/jasonbdly/LogitGate},
   license = {Apache-2.0}
 }

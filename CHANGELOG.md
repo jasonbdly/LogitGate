@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.16.2] - 2026-11-16
+
+### Added
+- **Foundational End-to-End Logit & Wire Primer (`docs/assets/logit_vs_text.svg`):** Added `logit_vs_text.svg` and opening wire-level walkthroughs in `README.md`, `docs/eli5/how_logitgate_works.md`, and `docs/architecture.md` illustrating prompt prefill, `lm_head` vocabulary logits, system/user prompt structure with reasoning suppression, and the operational contrast against both generative Chain-of-Thought judges and naive 1-token categorical prompts.
+
+### Changed
+- **Mobile-First Conceptual SVG Visuals & Holistic Documentation Pass (`scripts/generate_visuals.py`, `docs/`):** Redesigned all 7 architecture SVGs to mobile-friendly `540px` vertical `viewBox` layouts (`>= 11.5px` typography) using conceptual geometry (funnels, opposing vector balance beams, empirical density curves, pinned KV-cache timelines, concentric defense domes, and live circuit-breaker waveforms), clarified RAG `context` vs. `candidate` examples, grounded analogies, and added explicit problem/payoff framing across all 16 documentation files.
+
 ## [0.16.1] - 2026-11-16
 
 ### Changed
