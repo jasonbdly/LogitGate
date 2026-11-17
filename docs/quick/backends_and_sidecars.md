@@ -1,12 +1,12 @@
 # Backends & Sidecars (⚡ Quick Notes)
 
-Complete provider configuration matrix, HTTP retry tuning, and sidecar routing for models that do not return token log-probabilities.
+Provider configuration matrix, HTTP retry tuning, and sidecar routing for models that do not expose token log-probabilities.
 
 ---
 
 ## 1. Provider Configuration Matrix
 
-LogitGate supports local, self-hosted, and cloud inference endpoints via unified URI strings or direct backend class instantiation.
+**Problem & deployment**: Decouples your evaluation rubrics from inference infrastructure so the exact same gate code runs against local laptops (`OllamaBackend`, `LlamaCppBackend`), GPU serving clusters (`OpenAICompatBackend` with vLLM/SGLang), cloud logprob APIs (`GeminiBackend`, OpenAI), and offline CI (`StubBackend`).
 
 | Provider | URI Scheme | Class Name | Logprobs Supported | Best For |
 | :--- | :--- | :--- | :---: | :--- |
@@ -71,7 +71,9 @@ LogitGate speaks the native logprob format of each engine (Ollama's top_logprobs
 
 ## 2. HTTP Lifecycle, Transient Retries & Rate Limits
 
-All HTTP-backed inference engines inherit robust lifecycle and transient retry mechanics (`_HTTPClientMixin`).
+**Problem & deployment**: Keeps high-throughput batch evaluation and live guardrail services resilient against transient `429`/`503` rate limits and brief network blips without retrying permanent `4xx` configuration or auth errors.
+
+All HTTP-backed inference engines share transient retry and client-pooling lifecycle mechanics (`_HTTPClientMixin`).
 
 ### Transient Retries & Exponential Backoff
 
@@ -100,39 +102,50 @@ When sharing a backend across sequential `asyncio.run(...)` calls, internal asyn
 
 ---
 
-## 3. Solving No-Logprob Models (Sidecar & Escalation Routing)
+## 3. Solving No-Logprob Models (`sidecar_backend`, `GeminiBackend` & Escalation)
 
-Several popular commercial models do not expose token log-probabilities via their public APIs:
+**Problem & deployment**: Lets teams running frontier models without public logprobs (Anthropic Claude, OpenAI `o1`/`o3-mini`, Groq, Amazon Bedrock) keep sub-100ms Layer 1 gating in CI suites and live apps by delegating first-token scoring to a fast logprob-capable sidecar (`OllamaBackend`, vLLM, or `GeminiBackend`).
+
+Several popular commercial APIs do not expose token log-probabilities:
 - **Anthropic Claude** (Claude 3.5 Sonnet, Claude 3.7 Sonnet)
 - **OpenAI Reasoning Models** (`o1`, `o3-mini`)
 - **Groq Hosted Endpoints**
 - **Amazon Bedrock Converse API**
 
-LogitGate resolves this with two zero-compromise architectural strategies:
+LogitGate resolves this with two explicit routing strategies:
 
 ### Strategy A: Sidecar Evaluation (`on_unsupported_logprobs="sidecar"`)
 
-Use the primary frontier model to generate the candidate response, but delegate the Layer 1 first-token logit evaluation to a fast, local sidecar model (e.g. `qwen2.5:3b` or `gemma4:e4b` on GPU).
+Keep the primary frontier model for candidate generation or Layer 2 escalation, and delegate Layer 1 first-token logit evaluation via `sidecar_backend` to either a local GPU model (e.g., `ollama://localhost:11434/qwen2.5:3b`) or a cloud logprob backend such as `GeminiBackend` (`gemini://gemini-2.5-flash`).
 
 ```python
 from logitgate import LogitGate
+from logitgate.backends import GeminiBackend
 
-# Primary model generates candidate; sidecar evaluates first-token logits in ~20ms
-gate = LogitGate(
+# Option 1: Local GPU sidecar (zero cloud logprob cost, ~20ms per check)
+gate_local_sidecar = LogitGate(
     rubric="Is the answer concise and strictly factual?",
-    backend="openai://o1-preview",  # Primary model lacks logprobs
+    backend="openai://o3-mini",  # Primary model lacks logprobs
     on_unsupported_logprobs="sidecar",
-    sidecar_backend="ollama://localhost:11434/qwen2.5:3b",  # Local fast evaluator
+    sidecar_backend="ollama://localhost:11434/qwen2.5:3b",
+)
+
+# Option 2: Cloud GeminiBackend sidecar when no local GPU is available
+gate_cloud_sidecar = LogitGate(
+    rubric="Is the answer concise and strictly factual?",
+    backend="openai://o3-mini",
+    on_unsupported_logprobs="sidecar",
+    sidecar_backend=GeminiBackend(model="gemini-2.5-flash"),
 )
 
 candidate = "The transaction completed on Tuesday."
-verdict = gate.evaluate(candidate)
+verdict = gate_local_sidecar.evaluate(candidate)
 print(f"Passed: {verdict.passed} via sidecar: {verdict.triggered_layer}")
 ```
 
 ### Strategy B: Escalation Routing (`on_unsupported_logprobs="escalate"`)
 
-When no local sidecar model is available, LogitGate skips the Layer 1 logit probe and escalates directly to Layer 2 (`JudgeGate`), prompting the primary model to generate a structured text critique and verdict.
+When no logprob sidecar is available, LogitGate skips the Layer 1 logit probe and escalates directly to Layer 2 (`JudgeGate`), prompting the primary model to generate a structured text critique and verdict.
 
 ```python
 from logitgate import LogitGate
@@ -151,7 +164,7 @@ print(f"Passed: {verdict.passed} via escalated critique")
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Frontier models like o1 or Claude are great at generating code, but their cloud APIs do not tell us their internal token probabilities. A sidecar pattern lets an ultra-fast 3B local model check the output in 20 ms, keeping your test suite fast without needing logprobs from the closed provider.
+Frontier models like o3 or Claude excel at complex generation, but their APIs do not return internal token probabilities. A sidecar lets a compact 3B local model or `GeminiBackend` score the candidate's first-token logits quickly, keeping your test suite fast without needing logprobs from the closed provider.
 </details>
 
 [🔬 Production Use Cases & Sidecar Deployments](../use_cases.md)

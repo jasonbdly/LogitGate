@@ -1,70 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 420" width="100%" height="100%" role="img" aria-label="StreamGuard Mid-Stream Early Halt Architecture">
-  <title>StreamGuard Mid-Stream Early Halt Architecture</title>
-  <desc>Streaming LLM tokens checked per sentence; halt triggered immediately when ungrounded claim is detected</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="500" viewBox="0 0 540 500" role="img" aria-label="StreamGuard Mid-Stream Circuit Breaker">
+  <title>StreamGuard Mid-Stream Circuit Breaker</title>
+  <desc>Live grounding confidence waveform over tokens 0 to 500: Clauses 1 and 2 stay above P=0.90, then Clause 3 plunges below the 0.15 trip line at Token 45, opening the circuit breaker and saving 455 downstream tokens.</desc>
   <defs>
     <style>
     :root {
       --canvas-bg: #f8fafc;
-      --card-bg: #ffffff;
-      --card-border: #cbd5e1;
-      --card-subtle: #f1f5f9;
+      --surface-bg: #ffffff;
+      --surface-subtle: #f1f5f9;
+      --border-muted: #cbd5e1;
       --text-primary: #0f172a;
       --text-secondary: #334155;
-      --text-muted: #64748b;
-      --text-inverse: #ffffff;
+      --text-muted: #475569;
       --accent-emerald: #059669;
       --accent-emerald-bg: #ecfdf5;
-      --accent-emerald-border: #a7f3d0;
+      --accent-emerald-border: #6ee7b7;
       --accent-rose: #dc2626;
       --accent-rose-bg: #fef2f2;
-      --accent-rose-border: #fecaca;
+      --accent-rose-border: #fca5a5;
       --accent-amber: #d97706;
       --accent-amber-bg: #fffbeb;
-      --accent-amber-border: #fde68a;
+      --accent-amber-border: #fcd34d;
       --accent-sky: #0284c7;
       --accent-sky-bg: #f0f9ff;
-      --accent-sky-border: #bae6fd;
+      --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
       --accent-indigo-bg: #eef2ff;
-      --accent-indigo-border: #c7d2fe;
+      --accent-indigo-border: #a5b4fc;
       --accent-purple: #7c3aed;
       --accent-purple-bg: #f5f3ff;
-      --accent-purple-border: #ddd6fe;
-      --flow-line: #94a3b8;
-      --flow-arrow: #64748b;
-      --glow-fast: rgba(16, 185, 129, 0.25);
+      --accent-purple-border: #c4b5fd;
+      --flow-line: #64748b;
+      --grid-line: #e2e8f0;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --canvas-bg: #0b1120;
-        --card-bg: #1e293b;
-        --card-border: #334155;
-        --card-subtle: #0f172a;
+        --surface-bg: #1e293b;
+        --surface-subtle: #0f172a;
+        --border-muted: #334155;
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --text-inverse: #0f172a;
         --accent-emerald: #10b981;
         --accent-emerald-bg: #064e3b;
-        --accent-emerald-border: #047857;
+        --accent-emerald-border: #059669;
         --accent-rose: #f43f5e;
         --accent-rose-bg: #4c0519;
-        --accent-rose-border: #be123c;
+        --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
         --accent-amber-bg: #451a03;
-        --accent-amber-border: #b45309;
+        --accent-amber-border: #d97706;
         --accent-sky: #38bdf8;
         --accent-sky-bg: #082f49;
-        --accent-sky-border: #0369a1;
+        --accent-sky-border: #0284c7;
         --accent-indigo: #818cf8;
         --accent-indigo-bg: #1e1b4b;
-        --accent-indigo-border: #4338ca;
+        --accent-indigo-border: #4f46e5;
         --accent-purple: #a78bfa;
         --accent-purple-bg: #2e1065;
-        --accent-purple-border: #6d28d9;
-        --flow-line: #475569;
-        --flow-arrow: #94a3b8;
-        --glow-fast: rgba(16, 185, 129, 0.45);
+        --accent-purple-border: #7c3aed;
+        --flow-line: #94a3b8;
+        --grid-line: #1e293b;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -82,10 +78,10 @@
     }
     .anim-dash {
       stroke-dasharray: 6 5;
-      animation: dashMove 2.5s linear infinite;
+      animation: dashMove 2.4s linear infinite;
     }
     .anim-pulse {
-      animation: pulseGlow 2.5s ease-in-out infinite;
+      animation: pulseGlow 2.4s ease-in-out infinite;
     }
     .anim-probe {
       animation: probeSweep 3s ease-in-out infinite alternate;
@@ -100,20 +96,20 @@
         opacity: 0.95;
       }
       50% {
-        opacity: 0.45;
+        opacity: 0.4;
       }
     }
     @keyframes probeSweep {
       0% {
-        transform: translateX(0px);
+        transform: translateX(-8px);
       }
       100% {
-        transform: translateX(18px);
+        transform: translateX(8px);
       }
     }
 </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-arrow)" />
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-line)" />
     </marker>
     <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
@@ -125,107 +121,83 @@
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
     </marker>
   </defs>
-  <rect width="920" height="420" fill="var(--canvas-bg)" rx="12" />
+  <rect width="540" height="500" fill="var(--canvas-bg)" rx="12" />
 
-  <!-- Header Bar -->
-  <rect x="40" y="24" width="225" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <text x="48" y="39" font-size="10" font-weight="700" fill="var(--accent-rose)" class="mono">STREAMGUARD RUNTIME SHIELD</text>
-  <text x="40" y="68" font-size="18" font-weight="700" fill="var(--text-primary)">Mid-Stream Early Halt: Stop Hallucinations Mid-Sentence</text>
-  <text x="40" y="86" font-size="12" fill="var(--text-secondary)">Clause-by-clause logit verification halts bad generation instantly, saving 75%+ downstream tokens</text>
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">StreamGuard: Mid-Stream Circuit Breaker</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Trips immediately when a clause drops below the confidence floor</text>
 
-  <!-- Timeline Cards -->
-  <!-- Chunk 1: Grounded Sentence -->
-  <rect x="40" y="105" width="180" height="150" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="40" y="105" width="5" height="150" rx="2" fill="var(--accent-emerald)" />
-  <rect x="52" y="116" width="115" height="18" rx="3" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
-  <text x="58" y="129" font-size="9" font-weight="700" fill="var(--accent-emerald)" class="mono">CHUNK 1 (TOKENS 1-18)</text>
-  <text x="52" y="152" font-size="11" font-weight="600" fill="var(--text-primary)">"Acme Corp was founded</text>
-  <text x="52" y="168" font-size="11" font-weight="600" fill="var(--text-primary)">in 2012 by two alumni."</text>
+  <!-- Plot Grid (x=66..506, width=440; y=90..310, height=220) -->
+  <!-- Y mapping: P=1.0 -> y=96, P=0.5 -> y=200, P=0.15 -> y=273, P=0.0 -> y=304 -->
+  <line x1="66" y1="90" x2="66" y2="306" stroke="var(--text-muted)" stroke-width="1.5" />
+  <line x1="66" y1="304" x2="508" y2="304" stroke="var(--text-muted)" stroke-width="1.5" />
 
-  <rect x="52" y="180" width="156" height="30" rx="4" fill="var(--card-subtle)" />
-  <text x="58" y="195" font-size="9" fill="var(--text-muted)">Clause Verification:</text>
-  <text x="58" y="206" font-size="10" font-weight="700" fill="var(--accent-emerald)" class="mono">P = 0.95 &gt;= 0.85 (PASS)</text>
+  <!-- Gridlines & Y Labels -->
+  <line x1="66" y1="96" x2="506" y2="96" stroke="var(--grid-line)" stroke-width="1" />
+  <text x="58" y="100" text-anchor="end" font-size="11.5" fill="var(--text-muted)" class="mono">1.0</text>
 
-  <text x="52" y="235" font-size="10" font-weight="600" fill="var(--accent-emerald)">&#x2713; Stream Continues</text>
+  <line x1="66" y1="200" x2="506" y2="200" stroke="var(--grid-line)" stroke-width="1" />
+  <text x="58" y="204" text-anchor="end" font-size="11.5" fill="var(--text-muted)" class="mono">0.5</text>
 
-  <!-- Flow to Chunk 2 -->
-  <path d="M 220 180 L 245 180" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
+  <!-- Trip Line at P = 0.15 (y=273) -->
+  <line x1="66" y1="273" x2="506" y2="273" stroke="var(--accent-rose)" stroke-width="2" stroke-dasharray="6 4" />
+  <text x="58" y="277" text-anchor="end" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">0.15</text>
+  <text x="380" y="266" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)">Trip Threshold (P &lt;= 0.15)</text>
 
-  <!-- Chunk 2: Grounded Sentence -->
-  <rect x="250" y="105" width="180" height="150" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="250" y="105" width="5" height="150" rx="2" fill="var(--accent-emerald)" />
-  <rect x="262" y="116" width="125" height="18" rx="3" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
-  <text x="268" y="129" font-size="9" font-weight="700" fill="var(--accent-emerald)" class="mono">CHUNK 2 (TOKENS 19-36)</text>
-  <text x="262" y="152" font-size="11" font-weight="600" fill="var(--text-primary)">"The firm specializes in</text>
-  <text x="262" y="168" font-size="11" font-weight="600" fill="var(--text-primary)">autonomous robotics."</text>
+  <text x="58" y="308" text-anchor="end" font-size="11.5" fill="var(--text-muted)" class="mono">0.0</text>
 
-  <rect x="262" y="180" width="156" height="30" rx="4" fill="var(--card-subtle)" />
-  <text x="268" y="195" font-size="9" fill="var(--text-muted)">Clause Verification:</text>
-  <text x="268" y="206" font-size="10" font-weight="700" fill="var(--accent-emerald)" class="mono">P = 0.92 &gt;= 0.85 (PASS)</text>
+  <!-- X-Axis Labels (Tok 0=66, Tok 18=126, Tok 36=186, Tok 45=216, Tok 500=500) -->
+  <text x="66" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">0</text>
+  <text x="216" y="324" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">Tok 45</text>
+  <text x="358" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Tok 250</text>
+  <text x="494" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Tok 500</text>
 
-  <text x="262" y="235" font-size="10" font-weight="600" fill="var(--accent-emerald)">&#x2713; Stream Continues</text>
+  <!-- Ghosted Ungenerated Zone (Tok 45..500) -->
+  <rect x="216" y="96" width="290" height="208" fill="var(--surface-subtle)" opacity="0.65" />
+  <path d="M 216 293 C 268 296, 330 288, 396 294 C 446 298, 476 290, 502 296"
+        fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-dasharray="4 5" opacity="0.6" />
+  <text x="364" y="160" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">455 Tokens Prevented</text>
+  <text x="364" y="180" text-anchor="middle" font-size="12" fill="var(--text-secondary)">91% GPU decode saved</text>
 
-  <!-- Flow to Chunk 3 -->
-  <path d="M 430 180 L 455 180" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
+  <!-- Live Confidence Waveform (Tok 0..45) -->
+  <path d="M 66 112 L 126 108 L 186 115 L 204 185 L 216 293"
+        fill="none" stroke="var(--accent-emerald)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- Final plunging red segment -->
+  <line x1="198" y1="160" x2="216" y2="293" stroke="var(--accent-rose)" stroke-width="3.5" stroke-linecap="round" />
 
-  <!-- Chunk 3: Hallucination Detected -->
-  <rect x="460" y="105" width="195" height="150" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="460" y="105" width="5" height="150" rx="2" fill="var(--accent-rose)" />
-  <rect x="472" y="116" width="135" height="18" rx="3" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <text x="478" y="129" font-size="9" font-weight="700" fill="var(--accent-rose)" class="mono">CHUNK 3 (TOKENS 37-45)</text>
-  <text x="472" y="152" font-size="11" font-weight="600" fill="var(--accent-rose)">"In 2023, it acquired Apple</text>
-  <text x="472" y="168" font-size="11" font-weight="600" fill="var(--accent-rose)">Computer for $900B."</text>
+  <!-- Clause Markers -->
+  <circle cx="126" cy="108" r="5" fill="var(--accent-emerald)" stroke="#ffffff" stroke-width="1.5" />
+  <text x="126" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)" class="mono">C1: 0.94</text>
 
-  <rect x="472" y="180" width="170" height="30" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <text x="478" y="195" font-size="9" fill="var(--accent-rose)">UNGROUNDED CLAIM DETECTED:</text>
-  <text x="478" y="206" font-size="10" font-weight="700" fill="var(--accent-rose)" class="mono">P = 0.05 &lt;= 0.15 (ABORT)</text>
+  <circle cx="186" cy="115" r="5" fill="var(--accent-emerald)" stroke="#ffffff" stroke-width="1.5" />
+  <text x="192" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)" class="mono">C2: 0.91</text>
 
-  <text x="472" y="235" font-size="11" font-weight="700" fill="var(--accent-rose)">&#x2717; EMERGENCY HALT</text>
+  <!-- Trip Point Pulse -->
+  <circle cx="216" cy="293" r="10" fill="var(--accent-rose)" opacity="0.25" class="anim-pulse" />
+  <circle cx="216" cy="293" r="5" fill="var(--accent-rose)" stroke="#ffffff" stroke-width="1.5" />
+  <text x="226" y="242" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">C3: P=0.05</text>
 
-  <!-- Emergency Barrier -->
-  <line x1="665" y1="100" x2="665" y2="265" stroke="var(--accent-rose)" stroke-width="4" stroke-dasharray="8 4" />
-  <rect x="655" y="165" width="20" height="30" rx="3" fill="var(--accent-rose)" />
-  <text x="659" y="185" font-size="14" fill="#ffffff" font-weight="700">!</text>
+  <!-- Circuit Breaker Open Switch Graphic at x=216 -->
+  <line x1="216" y1="334" x2="216" y2="352" stroke="var(--accent-rose)" stroke-width="2.5" />
+  <circle cx="216" cy="356" r="4" fill="var(--accent-rose)" />
+  <line x1="216" y1="356" x2="246" y2="338" stroke="var(--accent-rose)" stroke-width="3" stroke-linecap="round" />
+  <circle cx="252" cy="356" r="4" fill="var(--border-muted)" />
+  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER OPEN -&gt; StreamAbortedError</text>
 
-  <!-- Phantom Saved Tokens Box -->
-  <rect x="685" y="105" width="195" height="150" rx="8" fill="var(--card-subtle)" stroke="var(--card-border)" stroke-width="1.5" stroke-dasharray="6 4" />
-  <rect x="697" y="116" width="145" height="18" rx="3" fill="var(--card-bg)" />
-  <text x="703" y="129" font-size="9" font-weight="700" fill="var(--text-muted)" class="mono">UNGENERATED (TOKENS 46-500)</text>
+  <!-- Bottom 3 Outcome Summaries -->
+  <line x1="24" y1="386" x2="174" y2="386" stroke="var(--accent-rose)" stroke-width="3" />
+  <text x="24" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">Instant Halt</text>
+  <text x="24" y="428" font-size="12" fill="var(--text-secondary)">Aborts at clause 3</text>
+  <text x="24" y="446" font-size="12" fill="var(--text-muted)">Token 45 of 500</text>
 
-  <text x="697" y="152" font-size="11" fill="var(--text-muted)" font-style="italic">"The deal was approved by</text>
-  <text x="697" y="168" font-size="11" fill="var(--text-muted)" font-style="italic">antitrust authorities and..."</text>
+  <line x1="194" y1="386" x2="346" y2="386" stroke="var(--accent-emerald)" stroke-width="3" />
+  <text x="194" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">Clean UX</text>
+  <text x="194" y="428" font-size="12" fill="var(--text-secondary)">Halts before claim</text>
+  <text x="194" y="446" font-size="12" fill="var(--text-muted)">Zero context poison</text>
 
-  <rect x="697" y="185" width="170" height="55" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
-  <text x="705" y="202" font-size="10" font-weight="700" fill="var(--accent-emerald)">SAVED 455 TOKENS</text>
-  <text x="705" y="217" font-size="9" fill="var(--accent-emerald)">91% cost &amp; GPU time preserved</text>
-  <text x="705" y="231" font-size="9" fill="var(--accent-emerald)">Hallucination never reached user</text>
-
-  <!-- Bottom Explanatory Row -->
-  <rect x="40" y="275" width="265" height="120" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="40" y="275" width="4" height="120" rx="2" fill="var(--accent-rose)" />
-  <text x="55" y="296" font-size="12" font-weight="700" fill="var(--text-primary)">StreamAbortedError</text>
-  <text x="55" y="314" font-size="10" fill="var(--text-secondary)">StreamGuard raises immediate exception:</text>
-  <text x="55" y="332" font-size="9" fill="var(--accent-rose)" class="mono">clause_index=2, tokens_seen=45</text>
-  <text x="55" y="348" font-size="9" fill="var(--accent-rose)" class="mono">p_grounded=0.05, threshold=0.15</text>
-  <text x="55" y="366" font-size="10" fill="var(--text-muted)">Upstream caller catches &amp; recovers</text>
-  <text x="55" y="382" font-size="10" fill="var(--text-muted)">Fallback response dispatched</text>
-
-  <rect x="325" y="275" width="270" height="120" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="325" y="275" width="4" height="120" rx="2" fill="var(--accent-emerald)" />
-  <text x="340" y="296" font-size="12" font-weight="700" fill="var(--text-primary)">User Protection Guarantee</text>
-  <text x="340" y="314" font-size="10" fill="var(--text-secondary)">End-users never read hallucinated facts</text>
-  <text x="340" y="332" font-size="10" fill="var(--text-muted)">Halts before misleading numbers or</text>
-  <text x="340" y="348" font-size="10" fill="var(--text-muted)">fabricated citations can spread.</text>
-  <text x="340" y="366" font-size="10" font-weight="600" fill="var(--accent-emerald)">Zero poisoning of user context</text>
-  <text x="340" y="382" font-size="10" fill="var(--text-muted)">Client receives clean partial stream</text>
-
-  <rect x="615" y="275" width="265" height="120" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="615" y="275" width="4" height="120" rx="2" fill="var(--accent-sky)" />
-  <text x="630" y="296" font-size="12" font-weight="700" fill="var(--text-primary)">GPU Resource Recovery</text>
-  <text x="630" y="314" font-size="10" fill="var(--text-secondary)">KV-cache freed for other active streams</text>
-  <text x="630" y="332" font-size="10" fill="var(--text-muted)">Avoids queue starvation from runaway</text>
-  <text x="630" y="348" font-size="10" fill="var(--text-muted)">hallucinatory generation loops.</text>
-  <text x="630" y="366" font-size="10" font-weight="600" fill="var(--accent-sky)">455 decode steps saved</text>
-  <text x="630" y="382" font-size="10" fill="var(--text-muted)">GPU decode capacity preserved</text>
+  <line x1="366" y1="386" x2="516" y2="386" stroke="var(--accent-sky)" stroke-width="3" />
+  <text x="366" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">GPU Recovery</text>
+  <text x="366" y="428" font-size="12" fill="var(--text-secondary)">Frees KV-cache early</text>
+  <text x="366" y="446" font-size="12" fill="var(--text-muted)">455 steps saved</text>
 
 </svg>

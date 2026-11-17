@@ -1,11 +1,17 @@
 # LogitGate Documentation Portal
 
-Welcome to the LogitGate documentation. This portal is organized into **three distinct tiers** to match your technical needs and workflow:
+LogitGate replaces slow generative LLM-as-a-Judge calls with calibrated first-token log-probability gating (`max_tokens=1`, `0` generated reasoning tokens) and deterministic Layer 0 validation, cutting evaluation latency by 4.6x to 17.0x across CI suites, live RAG chatbots, and MCP agent pipelines.
 
-- **⚡ Quick Notes**: Zero-fluff, copy-paste recipes with exact constructor parameters, default values, and error-handling patterns for experienced engineers.
-- **🔬 Deep Notes**: Comprehensive architectural blueprints, mathematical proofs, adversarial security threat models, and empirical benchmark sweeps.
-- **🌱 Visual ELI5**: High-level intuitive mental models with animated SVG diagrams and visual walkthroughs of log-odds cancellation and cascading.
-- **🚀 Power-User & Research**: Specialized research guides for student distillation, PEFT LoRA training, online drift monitoring, and recurrent hardware.
+**Asking *"How does first-token logit evaluation actually work?"*** Start with the foundational end-to-end walkthroughs:
+- **[How LogitGate Works (Visual ELI5)](./eli5/how_logitgate_works.md)**: Plain-language walkthrough of prompt prefill, 2-pass log-odds bias cancellation, split-conformal bands, and cascade routing.
+- **[Systems Architecture & Execution Mechanics](./architecture.md)**: Deep engineering blueprint of trait-based routing, KV-cache prefix retention, client pooling, and fault-isolated lifecycles.
+
+This portal organizes all guides into **three depth tiers** plus specialized research references:
+
+- **⚡ Quick Notes**: Direct, copy-paste recipes with exact constructor parameters, defaults, and production deployment patterns.
+- **🔬 Deep Notes**: Systems architecture blueprints, mathematical proofs, adversarial security threat models, and empirical benchmark sweeps.
+- **🌱 Visual ELI5**: Step-by-step mental models with animated SVG diagrams illustrating log-odds cancellation and cascading.
+- **🚀 Power-User & Research**: Specialized guides for student distillation, PEFT LoRA training, online drift monitoring, and recurrent hardware.
 
 ![LogitGate 3-Layer Cascade Flow](./assets/cascade_flow.svg)
 

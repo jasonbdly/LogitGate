@@ -46,20 +46,22 @@ The calibrated probability of passing is computed via the standard logistic sigm
 $$P(\text{Pass}) = \sigma(\bar{L}) = \frac{1}{1 + e^{-\bar{L}}}$$
 
 <details>
-<summary>🌱 <b>ELI5: Intuitive example without equations</b></summary>
+<summary>🌱 <b>Plain-Language Intuition: Taring a biased balance scale by swapping pans</b></summary>
 <blockquote>
-Imagine a judge who always leans toward picking option "A" by 5 points, no matter what the contest is.
+Consider a two-pan analytical balance whose left arm is slightly longer than its right arm, adding an unknown mechanical offset $+b$ to whatever sits on the left pan.
 
-If you bring them a great candidate (true score: +2 points):
-1. **First Round**: You label your candidate "A". The biased judge gives them $2 + 5 = +7$ points.
-2. **Second Round**: You swap the labels and label your candidate "B". The judge still favors "A", so your candidate gets $2 - 5 = -3$ points.
+To weigh an object whose true mass differential is $s = +2$ units against a $b = +5$ scale offset:
+1. **Pass 1 (Object on Left Pan / Option A)**: The scale reads $2 + 5 = +7$.
+2. **Pass 2 (Object on Right Pan / Option B)**: You swap the sample and reference weights. The mechanical asymmetry still favors the left pan, so the reading relative to the object is $2 - 5 = -3$.
 
-If you simply look at the scores separately, the judge looks wildly inconsistent (+7 vs -3). But if you average the two rounds together in score space:
+Looking at either pass alone gives a distorted reading ($+7$ vs. $-3$). Averaging the two measurements in linear scale space gives:
 $$\frac{+7 + (-3)}{2} = \frac{4}{2} = +2$$
 
-The judge's personal +5 bias completely vanished, and the exact true quality of your candidate (+2) is revealed!
+This classical double-weighing trick (Gauss transposition) cancels the unknown instrument offset $b$ analytically without needing to measure $b$ beforehand.
 </blockquote>
 </details>
+
+**Operational Impact (Why This Matters in Production):** Without symmetric swap debiasing, compact 3B-14B models commonly exhibit `15-35 pp` label or slot preference (e.g., favoring `'A'` regardless of content). On a security or RAG gate, that bias silently shifts your effective threshold, causing unacceptable false-pass rates or false-reject storms whenever rubric phrasing changes.
 
 ---
 
@@ -71,12 +73,12 @@ $$\bar{P}_{\text{naive}} = \frac{P_1 + P_2}{2} = \frac{\sigma(s + b) + \sigma(s 
 
 By **Jensen's inequality**, for any non-linear function $f$, $\mathbb{E}[f(X)] \ne f(\mathbb{E}[X])$. The logistic function $\sigma(z) = \frac{1}{1 + e^{-z}}$ is strictly convex for $z < 0$ and strictly concave for $z > 0$, with inflection point at $z = 0$.
 
-Under severe token prior or positional bias ($|b| \gg 0$), naive probability averaging suffers catastrophic **saturation collapse**:
+Under strong token prior or positional bias ($|b| \gg 0$), naive probability averaging causes **saturation collapse**:
 
 $$\lim_{b \to \infty} \sigma(s + b) = 1.0, \qquad \lim_{b \to \infty} \sigma(s - b) = 0.0$$
 $$\lim_{b \to \infty} \bar{P}_{\text{naive}} = \frac{1.0 + 0.0}{2} = \mathbf{0.50} \quad (\text{Coin Flip / False Ambiguity})$$
 
-Regardless of whether the true latent signal $s$ is $+10.0$ (flawless code) or $-10.0$ (blatant security vulnerability), naive probability averaging collapses toward $0.50$. In contrast, LogitGate's log-odds combination preserves linear additivity across the entire real number line:
+Whether the true latent signal $s$ is $+10.0$ (clean code) or $-10.0$ (blatant security defect), naive probability averaging collapses toward $0.50$. In production cascades, that false ambiguity forces clear passes and clear fails to escalate unnecessarily to Layer-2 generative judges, erasing latency and cost savings. In contrast, LogitGate's log-odds combination preserves linear additivity across the entire real number line:
 
 ```python
 import math
@@ -123,7 +125,7 @@ $$\log P(\mathcal{V}) = \ln \sum_{v \in \mathcal{V}} \exp(\text{logprob}(v)) = \
 
 ### Conservative Unobserved Probability Floor
 
-Inference APIs (vLLM, Ollama, OpenAI) return top-$K$ log-probabilities ($K \in [5, 20]$). When a target decision token does not appear in the top-$K$ response, naive evaluators frequently assign an arbitrary constant such as $-99.0$ or $-100.0$. This creates massive numerical cliffs in log-odds space ($\Delta L \approx 100$), yielding false $0.0000$ or $1.0000$ probabilities.
+Inference APIs (vLLM, Ollama, OpenAI) return top-$K$ log-probabilities ($K \in [5, 20]$). When a target decision token does not appear in the top-$K$ response, naive evaluators frequently assign an arbitrary constant such as $-99.0$ or $-100.0$. That creates artificial numerical cliffs in log-odds space ($\Delta L \approx 100$), turning a genuinely uncertain or malformed output into a false $0.0000$ or $1.0000$ certainty.
 
 LogitGate analytically bounds missing tokens to the theoretical maximum residual probability mass unobserved by top-$K$:
 
@@ -135,7 +137,9 @@ The conservative bounded floor for any unobserved target token is:
 
 $$\text{floor} = \min\left( \min_{i=1..K} \text{logprob}_i, \; \ln(P_{\text{residual}}) \right)$$
 
-This guarantees that unobserved tokens are treated conservatively as having probability no greater than the least likely observed token or the remaining probability tail, preventing catastrophic log-odds divergence.
+This guarantees that unobserved tokens are treated conservatively as having probability no greater than the least likely observed token or the remaining probability tail, preventing log-odds divergence.
+
+**Operational Impact (Why BPE Marginalization & Abstention Matter):** Without surface-variant `logsumexp`, different chat templates (e.g., models emitting `" A"` with a leading space vs. `"A"`) drop silent probability mass, producing unpredictable score shifts across model upgrades. Without the `no_target_tokens` abstention invariant below, a reasoning model that emits `<think>` at Token 1 would default to $P = 0.50$ without warning instead of surfacing an explicit `AMBIGUOUS` escalation.
 
 ### Target-Token Abstention Invariant
 
@@ -183,6 +187,8 @@ $$\mathbb{E}[S] = \sum_{s=1}^K s \cdot \bar{P}(s), \qquad \operatorname{Var}[S] 
 
 When the standard deviation $\sigma_S = \sqrt{\operatorname{Var}[S]}$ exceeds `max_score_std` (indicating high model discordance or a bimodal distribution), `ScoreGate` abstains with `DecisionStatus.AMBIGUOUS`.
 
+**Operational Impact (Why Derangement & Variance Guardrails Matter):** In 3-way intent routing (`K=3`), simple list reversal leaves the middle route stuck in position 1 on both passes, biasing multi-agent dispatch toward or away from that route. Likewise, in 1-to-5 scoring, a candidate that splits the model `50%` at `1` and `50%` at `5` averages to `3.0`: without log-linear pooling and `max_score_std` abstention, a polarized failure looks indistinguishable from a mediocre pass.
+
 ---
 
 ## 4. Combinatorial Hodge Ranking & Condorcet Cycle Diagnostics (`RankGate`)
@@ -219,7 +225,7 @@ The orthogonal non-transitive component represents voting paradoxes or cyclical 
 $$r_{\text{cycle}} = \sqrt{\frac{1}{\binom{N}{2}} \sum_{1 \le i < j \le N} \left( Z_{ij} - (w_i - w_j) \right)^2}$$
 
 - If $r_{\text{cycle}} \approx 0.0$: The candidate pool admits a globally consistent, transitive linear ordering.
-- If $r_{\text{cycle}} \gg 0.0$: The candidates exhibit intransitive circular trade-offs, surfaced in trace metadata to alert agent orchestrators.
+- If $r_{\text{cycle}} \gg 0.0$: The candidates exhibit intransitive circular trade-offs, surfaced in trace metadata to alert agent orchestrators instead of silently breaking ties by input order.
 
 ---
 
@@ -264,6 +270,8 @@ Any sample falling in the ambiguity band $\tau_{\text{reject}} < P < \tau_{\text
 ### Post-Temperature Monotone Rank Invariance
 
 Because the temperature transform $z \mapsto \sigma(z / T^*)$ is strictly monotonic for any $T^* > 0$, the relative order of calibration points is invariant under scaling. Fitting temperature first on the full $2N$-pass log-odds sweep and subsequently setting conformal cutoffs directly on $p(T^*)$ preserves sample efficiency without requiring separate holdout splits.
+
+**Operational Impact (Why Temperature + Conformal Bounds Matter):** Raw logit magnitudes vary substantially across model families and quantization levels (e.g., an 8B Q4 checkpoint vs. a 32B FP16 model). Without temperature scaling, a static `0.85` cutoff can be overly permissive on an overconfident checkpoint and overly conservative on an underconfident one. Combining Brier temperature fitting with split-conformal cutoffs replaces hand-tuned heuristic thresholds with an explicit, auditable error-rate target $\alpha$.
 
 ---
 

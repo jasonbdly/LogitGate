@@ -1,12 +1,12 @@
 # Framework Integrations & OpenTelemetry (⚡ Quick Notes)
 
-Copy-paste integration recipes for `pytest` testing, `LangGraph` agent workflows, `DeepEval` metrics, `OpenTelemetry` tracing, and the complete CLI reference.
+Copy-paste integration recipes for `pytest` regression suites, `LangGraph` agent workflows, `DeepEval` pipelines, `OpenTelemetry` tracing, and the CLI.
 
 ---
 
 ## 1. Pytest Assertions (`@check`)
 
-Turn any natural language rubric into an automated unit test assertion running in ~16-90 ms without writing manual regexes or parsing multi-token model outputs.
+**Problem & deployment**: Turns natural-language rubrics into deterministic CI merge gates and regression tests running in `~16-90 ms` without fragile regexes or manual prompt parsing, with optional failure snapshots for offline `logitgate explain` triage.
 
 ### Copy-Paste Recipes
 
@@ -84,7 +84,7 @@ Instead of writing 50 lines of flaky regexes to test model outputs, @check runs 
 
 ## 2. LangGraph Conditional Edge Routing
 
-Routes state between agent nodes based on semantic intent, security verification, or tool safety.
+**Problem & deployment**: Prevents unsafe or off-policy tool plans from reaching execution nodes in stateful LangGraph agents by routing graph edges on calibrated Layer 1 probabilities and escalating ambiguous steps to human review.
 
 ### Copy-Paste Recipe
 
@@ -121,7 +121,7 @@ print(f"Routing target: {next_node}")  # 'execute_action'
 
 ## 3. DeepEval System-1 Adapter
 
-Integrate LogitGate directly into DeepEval evaluation pipelines as a fast first-token metric or System-1 model provider.
+**Problem & deployment**: Accelerates existing DeepEval evaluation suites without rewriting test cases by substituting slow generative judges with `LogitGateMetric` and `LogitGateSystemOneModel`.
 
 ### Copy-Paste Recipe
 
@@ -156,7 +156,7 @@ system_one_model = LogitGateSystemOneModel(
 
 ## 4. OpenTelemetry Tracing & Telemetry Sinks
 
-Record evaluation traces, latencies, layer triggers, and confidence probabilities into OpenTelemetry distributed spans or local JSONL audit logs.
+**Problem & deployment**: Gives SRE and ML platform teams per-layer latency histograms, escalation rates, and PII-safe audit logs (`omit_candidate` / `hash_candidate`) in Datadog, Jaeger, Grafana Tempo, or rotating local JSONL files.
 
 ### Copy-Paste Recipe
 
@@ -195,9 +195,9 @@ gate = LogitGate(
 
 ---
 
-## 5. Complete CLI Quick-Reference
+## 5. CLI Quick-Reference
 
-LogitGate includes 8 dedicated CLI subcommands for offline evaluation, calibration, and analysis.
+**Problem & deployment**: Runs ad-hoc rubric checks, failure triage, split-conformal calibration, stream guarding, and hardware sweeps directly from shell scripts and CI jobs without writing Python boilerplate.
 
 | Command | Primary Use Case | Key Options | Example Invocations |
 | :--- | :--- | :--- | :--- |

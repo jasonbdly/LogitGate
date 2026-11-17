@@ -5,28 +5,25 @@
 # Online Drift Detection & Gibbs-Candès Adaptive Conformal Control
 
 > [!NOTE]
-> **When You Need This vs. When Standard LogitGate / Cascade Is Enough**
+> **When You Need This vs. When Standard LogitGate Is Enough**
 >
-> In standard production environments, static split conformal calibration (`fit_calibration_profile` with target error rate $\alpha^*$, e.g. $\alpha^* = 0.05$) provides rigorous mathematical coverage guarantees ($P(\text{error}) \le \alpha^*$). If your query distribution is stationary, static calibration is 100% sufficient and adds zero runtime tracking overhead.
+> **Concrete Bottleneck**: Static split-conformal calibration (`fit_calibration_profile` targeting $\alpha^* = 0.05$ or $0.10$) relies on exchangeability between your calibration split and live traffic. When production prompts drift into unseen domains (covariate shift) or face borderline adversarial inputs, fixed thresholds ($\tau_{\text{rej}}, \tau_{\text{acc}}$) silently exceed your target Layer-1 error rate.
 >
-> You only need online drift monitoring and adaptive conformal control when:
-> 1. **Non-Stationary Production Traffic**: User prompt styles, document lengths, or topic distributions shift over time (covariate shift), invalidating static exchangeability assumptions.
-> 2. **Adversarial / Evasion Surges**: Malicious actors deliberately submit borderline prompts designed to exploit fixed confidence thresholds ($\tau_{\text{rej}}, \tau_{\text{acc}}$).
-> 3. **Autonomous Zero-Human-in-the-Loop Self-Healing**: You want long-running microservices to automatically widen safety margins and escalate ambiguous traffic to Tier-2 `JudgeGate` during distribution shifts without human intervention.
-> 4. **Zero-Human-Label Feedback (`cascade_audit`)**: You want to calibrate against Tier-2 `JudgeGate` shadow audits using unbiased Horvitz-Thompson inverse-propensity reweighting with zero manual labeling.
+> **Quantified Payoff**: Coupling `RollingDriftMonitor` and `AdaptiveConformalController` with `cascade_audit` automatically widens the ambiguous escalation band during distribution shifts and relaxes it back down once traffic recovers. Across the 120-step 4-regime shift benchmark with **`0` human labels**, `cascade_audit` (`p = 0.25`) cuts Layer-1 selective risk from `9.2% -> 4.2%` on `gemma4:e4b`, `5.8% -> 3.3%` on `qwen2.5-coder:3b`, and `4.2% -> 1.7%` on `qwen2.5:14b` (reducing Regime-3 adversarial L1 errors to `0.0%` on all three `3B`/`4B` models).
+>
+> **When to Skip It**: If your traffic distribution is stationary (same domain, prompt format, and error profile as your calibration holdout), static `Cascade` + `CalibrationProfile` handles ~90% of workloads with finite-sample coverage guarantees and zero runtime tracking overhead. Only enable online drift monitoring and adaptive control for non-stationary streams, adversarial exposure, or long-running services needing autonomous margin control without manual relabeling.
 
 ---
 
 <details>
-<summary>🌱 <b>ELI5: Self-Adjusting Thermostat When Traffic Changes</b></summary>
+<summary>💡 <b>Intuition: A Feedback Control Loop That Widens Margins in Heavy Rain</b></summary>
 
-> Imagine setting your home thermostat to 72°F once in spring. As long as mild spring weather continues (stationary data), your house remains comfortable.
+> Think of static conformal thresholds like cruise control calibrated for dry pavement: as long as road conditions match calibration, a fixed following distance holds safely.
 >
-> But what happens during a sudden blizzard or an extreme summer heatwave (distribution shift or adversarial attack)? A static dial cannot adapt. The room becomes freezing or boiling.
->
-> - **`RollingDriftMonitor`** is the outdoor weather station. It continuously checks whether the temperature, humidity, and barometric pressure of incoming traffic have shifted compared to baseline history.
-> - **`AdaptiveConformalController`** is the smart thermostat. When it detects an error or an alert from the weather station, it immediately nudges its safety setpoint ($\theta_t$) wider. When incoming traffic settles back into a calm baseline, it slowly and smoothly relaxes the setpoint back down.
-> - **`cascade_audit` (Horvitz-Thompson)** is like having a master inspector randomly check 5% of rooms with a precision thermal probe. Even though 95% of rooms are unchecked, the mathematical multiplier ($1/p$) allows the thermostat to tune itself accurately with zero manual human audits.
+> When sudden rain or heavy traffic hits (covariate shift or adversarial evasion), a fixed distance is no longer safe:
+> - **`RollingDriftMonitor` (Road Sensor)**: Continuously compares rolling windows of incoming log-odds, positional bias, and escalation rate against your baseline distribution using quantile-binned PSI and two-sample KS tests.
+> - **`AdaptiveConformalController` (Feedback Controller)**: Maintains a dynamic log-odds offset $\theta_t$. Every time Layer 1 misses an item, $\theta_t$ steps up by $\eta(1 - \alpha^*)$, widening the ambiguous band so borderline items escalate to Layer 2 `JudgeGate`. When predictions hold steady, $\theta_t$ decays smoothly by $\eta \alpha^*$ back toward baseline throughput.
+> - **`cascade_audit` (Horvitz-Thompson Spot Checks)**: Ground-truth labels rarely exist in real time. Instead, the controller randomly audits a small fraction $p$ (e.g., `5%` to `25%`) of fast-path Layer-1 decisions with Layer-2 `JudgeGate` and scales any detected discrepancy by $1/p$, keeping the error estimator unbiased with zero human labeling.
 </details>
 
 ---
@@ -228,7 +225,7 @@ where:
 - $\alpha^* \in (0, 1)$ is the target selective risk bound (default `0.05`).
 - $\hat{\text{err}}_t$ is the evaluated loss.
 
-If Layer 1 commits an error ($\hat{\text{err}}_t = 1$), $\theta_{t+1}$ increases by $\eta (1 - \alpha^*)$, instantly widening the safety band.
+If Layer 1 commits an error ($\hat{\text{err}}_t = 1$), $\theta_{t+1}$ increases by $\eta (1 - \alpha^*)$, widening the safety band.
 If Layer 1 is correct ($\hat{\text{err}}_t = 0$), $\theta_{t+1}$ decreases by $\eta \alpha^*$, gradually recovering throughput.
 
 ### 3. Upper-Clip Bias Prevention via Forced Ambiguity (`theta_abstain`)
@@ -303,6 +300,7 @@ gate = LogitGate(
     backend=StubBackend(default_prob=0.86),
     adaptive_controller=controller,
     telemetry_sink=monitor,
+    save_on_fail=False,
 )
 
 # Initial state: passes because 0.86 >= 0.85
@@ -314,11 +312,13 @@ controller.observe(v1, ground_truth=False)
 controller.observe(v1, ground_truth=False)
 
 # Theta has expanded by 2 * (1.0 * (1 - 0.05)) = +1.90 log-odds units!
-print(f"After errors: theta={controller.theta:.2f}")
-print(f"Dynamic pass threshold is now: {controller.current_pass_threshold:.4f}")
+fail_t, pass_t, force_ambiguous = controller.current_thresholds()
+print(f"After errors: theta={controller.theta:.2f}, force_ambiguous={force_ambiguous}")
+print(f"Dynamic thresholds are now: fail={fail_t:.4f}, pass={pass_t:.4f}")
 
 # Re-evaluating same input: 0.86 is now below dynamic pass threshold -> AMBIGUOUS!
 v2 = gate.evaluate("harmless input")
+assert v2.status == DecisionStatus.AMBIGUOUS
 print(f"Step 2: status={v2.status.value} (safely escalated to Tier 2!)")
 ```
 

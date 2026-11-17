@@ -1,70 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 420" width="100%" height="100%" role="img" aria-label="Split-Conformal Traffic Light Calibration Bands">
-  <title>Split-Conformal Traffic Light Calibration Bands</title>
-  <desc>Distribution-free calibration dividing the probability line into Fast Reject, Escalation Band, and Fast Pass</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="480" viewBox="0 0 540 480" role="img" aria-label="Split-Conformal Calibration Bands">
+  <title>Split-Conformal Calibration Bands</title>
+  <desc>Overlapping empirical Fail and Pass probability density curves across 0.0 to 1.0, split by tau_reject = 0.20 and tau_accept = 0.85 with bounded 2.5% tail risks.</desc>
   <defs>
     <style>
     :root {
       --canvas-bg: #f8fafc;
-      --card-bg: #ffffff;
-      --card-border: #cbd5e1;
-      --card-subtle: #f1f5f9;
+      --surface-bg: #ffffff;
+      --surface-subtle: #f1f5f9;
+      --border-muted: #cbd5e1;
       --text-primary: #0f172a;
       --text-secondary: #334155;
-      --text-muted: #64748b;
-      --text-inverse: #ffffff;
+      --text-muted: #475569;
       --accent-emerald: #059669;
       --accent-emerald-bg: #ecfdf5;
-      --accent-emerald-border: #a7f3d0;
+      --accent-emerald-border: #6ee7b7;
       --accent-rose: #dc2626;
       --accent-rose-bg: #fef2f2;
-      --accent-rose-border: #fecaca;
+      --accent-rose-border: #fca5a5;
       --accent-amber: #d97706;
       --accent-amber-bg: #fffbeb;
-      --accent-amber-border: #fde68a;
+      --accent-amber-border: #fcd34d;
       --accent-sky: #0284c7;
       --accent-sky-bg: #f0f9ff;
-      --accent-sky-border: #bae6fd;
+      --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
       --accent-indigo-bg: #eef2ff;
-      --accent-indigo-border: #c7d2fe;
+      --accent-indigo-border: #a5b4fc;
       --accent-purple: #7c3aed;
       --accent-purple-bg: #f5f3ff;
-      --accent-purple-border: #ddd6fe;
-      --flow-line: #94a3b8;
-      --flow-arrow: #64748b;
-      --glow-fast: rgba(16, 185, 129, 0.25);
+      --accent-purple-border: #c4b5fd;
+      --flow-line: #64748b;
+      --grid-line: #e2e8f0;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --canvas-bg: #0b1120;
-        --card-bg: #1e293b;
-        --card-border: #334155;
-        --card-subtle: #0f172a;
+        --surface-bg: #1e293b;
+        --surface-subtle: #0f172a;
+        --border-muted: #334155;
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --text-inverse: #0f172a;
         --accent-emerald: #10b981;
         --accent-emerald-bg: #064e3b;
-        --accent-emerald-border: #047857;
+        --accent-emerald-border: #059669;
         --accent-rose: #f43f5e;
         --accent-rose-bg: #4c0519;
-        --accent-rose-border: #be123c;
+        --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
         --accent-amber-bg: #451a03;
-        --accent-amber-border: #b45309;
+        --accent-amber-border: #d97706;
         --accent-sky: #38bdf8;
         --accent-sky-bg: #082f49;
-        --accent-sky-border: #0369a1;
+        --accent-sky-border: #0284c7;
         --accent-indigo: #818cf8;
         --accent-indigo-bg: #1e1b4b;
-        --accent-indigo-border: #4338ca;
+        --accent-indigo-border: #4f46e5;
         --accent-purple: #a78bfa;
         --accent-purple-bg: #2e1065;
-        --accent-purple-border: #6d28d9;
-        --flow-line: #475569;
-        --flow-arrow: #94a3b8;
-        --glow-fast: rgba(16, 185, 129, 0.45);
+        --accent-purple-border: #7c3aed;
+        --flow-line: #94a3b8;
+        --grid-line: #1e293b;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -82,10 +78,10 @@
     }
     .anim-dash {
       stroke-dasharray: 6 5;
-      animation: dashMove 2.5s linear infinite;
+      animation: dashMove 2.4s linear infinite;
     }
     .anim-pulse {
-      animation: pulseGlow 2.5s ease-in-out infinite;
+      animation: pulseGlow 2.4s ease-in-out infinite;
     }
     .anim-probe {
       animation: probeSweep 3s ease-in-out infinite alternate;
@@ -100,20 +96,20 @@
         opacity: 0.95;
       }
       50% {
-        opacity: 0.45;
+        opacity: 0.4;
       }
     }
     @keyframes probeSweep {
       0% {
-        transform: translateX(0px);
+        transform: translateX(-8px);
       }
       100% {
-        transform: translateX(18px);
+        transform: translateX(8px);
       }
     }
 </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-arrow)" />
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-line)" />
     </marker>
     <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
@@ -125,82 +121,86 @@
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
     </marker>
   </defs>
-  <rect width="920" height="420" fill="var(--canvas-bg)" rx="12" />
+  <rect width="540" height="480" fill="var(--canvas-bg)" rx="12" />
 
-  <!-- Header Bar -->
-  <rect x="40" y="24" width="205" height="22" rx="4" fill="var(--accent-amber-bg)" stroke="var(--accent-amber-border)" stroke-width="1" />
-  <text x="48" y="39" font-size="10" font-weight="700" fill="var(--accent-amber)" class="mono">CONFORMAL CALIBRATION</text>
-  <text x="40" y="68" font-size="18" font-weight="700" fill="var(--text-primary)">Split-Conformal Calibration: Distribution-Free Risk Guarantees</text>
-  <text x="40" y="86" font-size="12" fill="var(--text-secondary)">Mathematical bounds: guaranteed false-pass and false-reject risk &lt;= 2.5% at alpha = 0.05</text>
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Calibrated Tolerance Bands (alpha = 0.05)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Empirical cutoffs from labeled samples bound false-pass and false-reject tails</text>
 
-  <!-- Main Spectrum Canvas -->
-  <rect x="40" y="105" width="840" height="165" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
+  <!-- Plot Background & Band Shading (x=46..494, width=448; P=0.20 -> x=136, P=0.85 -> x=427) -->
+  <rect x="46" y="84" width="90" height="190" fill="var(--accent-rose-bg)" opacity="0.7" />
+  <rect x="136" y="84" width="291" height="190" fill="var(--accent-amber-bg)" opacity="0.55" />
+  <rect x="427" y="84" width="67" height="190" fill="var(--accent-emerald-bg)" opacity="0.7" />
 
-  <!-- Spectrum Bar Track (width 740, x from 90 to 830) -->
-  <!-- Red Zone: x=90 to x=220 (width 130, ~0.00 to 0.18) -->
-  <rect x="90" y="150" width="130" height="34" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <!-- Yellow Zone: x=220 to x=690 (width 470, ~0.18 to 0.82) -->
-  <rect x="220" y="150" width="470" height="34" fill="var(--accent-amber-bg)" stroke="var(--accent-amber-border)" stroke-width="1" />
-  <!-- Green Zone: x=690 to x=830 (width 140, ~0.82 to 1.00) -->
-  <rect x="690" y="150" width="140" height="34" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
+  <!-- Zone Headers -->
+  <text x="91" y="104" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-rose)">REJECT</text>
+  <text x="281" y="104" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">ESCALATE TO JUDGE</text>
+  <text x="460" y="104" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">PASS</text>
 
-  <!-- Scale markings -->
-  <line x1="90" y1="184" x2="90" y2="194" stroke="var(--text-muted)" stroke-width="1.5" />
-  <text x="82" y="208" font-size="10" fill="var(--text-muted)" class="mono">0.0</text>
+  <!-- Density Curves (baseline y=274) -->
+  <!-- True Fail Density (peaking left around x=86) -->
+  <path d="M 46 274 C 58 215, 68 132, 86 132 C 106 132, 120 220, 170 260 C 220 272, 340 273, 494 274 Z"
+        fill="var(--accent-rose)" opacity="0.18" />
+  <path d="M 46 274 C 58 215, 68 132, 86 132 C 106 132, 120 220, 170 260 C 220 272, 340 273, 494 274"
+        fill="none" stroke="var(--accent-rose)" stroke-width="2.5" />
 
-  <line x1="220" y1="184" x2="220" y2="194" stroke="var(--accent-rose)" stroke-width="2" />
-  <text x="200" y="208" font-size="10" font-weight="700" fill="var(--accent-rose)" class="mono">tau_reject = 0.18</text>
+  <!-- True Pass Density (peaking right around x=454) -->
+  <path d="M 46 274 C 180 273, 300 270, 365 256 C 414 220, 428 128, 454 128 C 474 128, 484 210, 494 274 Z"
+        fill="var(--accent-emerald)" opacity="0.18" />
+  <path d="M 46 274 C 180 273, 300 270, 365 256 C 414 220, 428 128, 454 128 C 474 128, 484 210, 494 274"
+        fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" />
 
-  <line x1="455" y1="184" x2="455" y2="194" stroke="var(--text-muted)" stroke-width="1.5" />
-  <text x="445" y="208" font-size="10" fill="var(--text-muted)" class="mono">0.50</text>
+  <!-- Curve Labels -->
+  <text x="90" y="124" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-rose)">True Fail</text>
+  <text x="450" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">True Pass</text>
 
-  <line x1="690" y1="184" x2="690" y2="194" stroke="var(--accent-emerald)" stroke-width="2" />
-  <text x="670" y="208" font-size="10" font-weight="700" fill="var(--accent-emerald)" class="mono">tau_accept = 0.82</text>
+  <!-- Vertical Dashed Quantile Cutoffs -->
+  <line x1="136" y1="84" x2="136" y2="296" stroke="var(--accent-rose)" stroke-width="2" stroke-dasharray="5 4" />
+  <line x1="427" y1="84" x2="427" y2="296" stroke="var(--accent-emerald)" stroke-width="2" stroke-dasharray="5 4" />
 
-  <line x1="830" y1="184" x2="830" y2="194" stroke="var(--text-muted)" stroke-width="1.5" />
-  <text x="820" y="208" font-size="10" fill="var(--text-muted)" class="mono">1.0</text>
+  <!-- Tail Risk Callouts -->
+  <text x="144" y="218" font-size="11.5" font-weight="600" fill="var(--accent-rose)">&lt;= 2.5% tail</text>
+  <text x="419" y="218" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)">&lt;= 2.5% tail</text>
 
-  <!-- Zone Badges and Labels -->
-  <text x="110" y="140" font-size="11" font-weight="700" fill="var(--accent-rose)">RED ZONE: REJECT</text>
-  <text x="100" y="171" font-size="10" font-weight="600" fill="var(--accent-rose)">Fast REJECT</text>
+  <!-- Horizontal Probability Gauge Track -->
+  <line x1="46" y1="274" x2="494" y2="274" stroke="var(--text-primary)" stroke-width="2" />
+  <rect x="46" y="284" width="90" height="14" rx="3" fill="var(--accent-rose)" />
+  <rect x="136" y="284" width="291" height="14" fill="var(--accent-amber)" />
+  <rect x="427" y="284" width="67" height="14" rx="3" fill="var(--accent-emerald)" />
 
-  <text x="370" y="140" font-size="11" font-weight="700" fill="var(--accent-amber)">YELLOW BAND: ESCALATE TO TEACHER</text>
-  <text x="385" y="171" font-size="10" font-weight="600" fill="var(--accent-amber)">Epistemic Uncertainty (~15% of traffic)</text>
-
-  <text x="705" y="140" font-size="11" font-weight="700" fill="var(--accent-emerald)">GREEN ZONE: PASS</text>
-  <text x="725" y="171" font-size="10" font-weight="600" fill="var(--accent-emerald)">Fast PASS</text>
-
-  <!-- Animated Live Probe -->
+  <!-- Animated Sweeping Marker at P = 0.92 (x=458) -->
   <g class="anim-probe">
-    <polygon points="760,118 768,132 752,132" fill="var(--accent-emerald)" />
-    <circle cx="760" cy="167" r="6" fill="var(--accent-emerald)" stroke="#ffffff" stroke-width="2" />
+    <polygon points="458,270 465,256 451,256" fill="var(--text-primary)" />
+    <circle cx="458" cy="291" r="6" fill="var(--accent-emerald)" stroke="#ffffff" stroke-width="2" />
   </g>
-  <rect x="705" y="222" width="150" height="26" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
-  <text x="712" y="239" font-size="10" font-weight="700" fill="var(--accent-emerald)">Sample Check: P = 0.94</text>
 
-  <!-- Three Explanatory Cards -->
-  <rect x="40" y="285" width="265" height="110" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="40" y="285" width="4" height="110" rx="2" fill="var(--accent-rose)" />
-  <text x="55" y="306" font-size="12" font-weight="700" fill="var(--text-primary)">False Reject Guarantee</text>
-  <text x="55" y="324" font-size="11" font-weight="600" fill="var(--accent-rose)" class="mono">P(Reject | True Good) &lt;= 2.5%</text>
-  <text x="55" y="342" font-size="10" fill="var(--text-secondary)">Strict finite-sample bound</text>
-  <text x="55" y="358" font-size="10" fill="var(--text-muted)">Valid without Gaussian assumptions</text>
-  <text x="55" y="374" font-size="10" fill="var(--text-muted)">0 tokens generated on reject</text>
+  <!-- Axis Ticks -->
+  <text x="46" y="316" text-anchor="middle" font-size="12" fill="var(--text-muted)" class="mono">0.0</text>
+  <text x="136" y="316" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-rose)" class="mono">0.20</text>
+  <text x="270" y="316" text-anchor="middle" font-size="12" fill="var(--text-muted)" class="mono">0.50</text>
+  <text x="427" y="316" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">0.85</text>
+  <text x="494" y="316" text-anchor="middle" font-size="12" fill="var(--text-muted)" class="mono">1.0</text>
 
-  <rect x="325" y="285" width="270" height="110" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="325" y="285" width="4" height="110" rx="2" fill="var(--accent-amber)" />
-  <text x="340" y="306" font-size="12" font-weight="700" fill="var(--text-primary)">Escalation Safety Net</text>
-  <text x="340" y="324" font-size="11" font-weight="600" fill="var(--accent-amber)" class="mono">0.18 &lt; P &lt; 0.82 &#x2192; JudgeGate</text>
-  <text x="340" y="342" font-size="10" fill="var(--text-secondary)">Routes ambiguous cases to CoT</text>
-  <text x="340" y="358" font-size="10" fill="var(--text-muted)">Preserves high accuracy on edge cases</text>
-  <text x="340" y="374" font-size="10" fill="var(--text-muted)">Protects safety while saving 85% cost</text>
+  <text x="136" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">tau_reject</text>
+  <text x="427" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-emerald)" class="mono">tau_accept</text>
 
-  <rect x="615" y="285" width="265" height="110" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="615" y="285" width="4" height="110" rx="2" fill="var(--accent-emerald)" />
-  <text x="630" y="306" font-size="12" font-weight="700" fill="var(--text-primary)">False Pass Guarantee</text>
-  <text x="630" y="324" font-size="11" font-weight="600" fill="var(--accent-emerald)" class="mono">P(Pass | True Bad) &lt;= 2.5%</text>
-  <text x="630" y="342" font-size="10" fill="var(--text-secondary)">Strict safety envelope</text>
-  <text x="630" y="358" font-size="10" fill="var(--text-muted)">Confidence calibrated via split-conformal</text>
-  <text x="630" y="374" font-size="10" fill="var(--text-muted)">Fast pass at ~45 ms response time</text>
+  <!-- Bottom 3 Summary Columns (clean top accent rules) -->
+  <line x1="24" y1="364" x2="174" y2="364" stroke="var(--accent-rose)" stroke-width="3" />
+  <text x="24" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Fast Reject</text>
+  <text x="24" y="406" font-size="12" font-weight="600" fill="var(--accent-rose)" class="mono">P &lt;= 0.20</text>
+  <text x="24" y="426" font-size="12" fill="var(--text-secondary)">False-reject &lt;= 2.5%</text>
+  <text x="24" y="444" font-size="12" fill="var(--text-muted)">0 tokens generated</text>
+
+  <line x1="194" y1="364" x2="346" y2="364" stroke="var(--accent-amber)" stroke-width="3" />
+  <text x="194" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Escalation Band</text>
+  <text x="194" y="406" font-size="12" font-weight="600" fill="var(--accent-amber)" class="mono">0.20 &lt; P &lt; 0.85</text>
+  <text x="194" y="426" font-size="12" fill="var(--text-secondary)">Routes to JudgeGate</text>
+  <text x="194" y="444" font-size="12" fill="var(--text-muted)">Preserves edge accuracy</text>
+
+  <line x1="366" y1="364" x2="516" y2="364" stroke="var(--accent-emerald)" stroke-width="3" />
+  <text x="366" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Fast Pass</text>
+  <text x="366" y="406" font-size="12" font-weight="600" fill="var(--accent-emerald)" class="mono">P &gt;= 0.85</text>
+  <text x="366" y="426" font-size="12" fill="var(--text-secondary)">False-pass &lt;= 2.5%</text>
+  <text x="366" y="444" font-size="12" fill="var(--text-muted)">~45 ms turnaround</text>
 
 </svg>

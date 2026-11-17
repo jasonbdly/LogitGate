@@ -1,58 +1,84 @@
 # RAG & Agent Tool Safety (⚡ Quick Notes)
 
-Zero-fluff recipes for prefix-cached Grounded RAG evaluation, deterministic `ToolCallGate` pre-execution shields, and mid-stream `StreamGuard` aborts.
+Production recipes for prefix-cached Grounded RAG evaluation, deterministic `ToolCallGate` pre-execution shields, and mid-stream `StreamGuard` aborts.
 
 ---
 
-## 1. Prefix-Cached Grounded RAG Evaluation
+## 1. Prefix-Cached Grounded RAG Evaluation (`context=` & `query=`)
 
-Evaluates whether model answers are faithful to retrieved passages and directly address user queries, without hallucinating external facts.
+**Problem & deployment**: Catches hallucinations in live RAG chatbots and knowledge-base QA pipelines before ungrounded claims reach users, evaluating multi-chunk evidence in `~40-90 ms` with `0` generated tokens.
 
 ![Prefix-Cached Grounded RAG Flow](../assets/rag_prefix_cache.svg)
 
-### Copy-Paste Recipe
+### Why `context=` and `query=` Exist
+
+Passing retrieved passages separately via `context=` and the user's question via `query=` solves three problems at once:
+
+1. **Verifying private facts absent from weights**: Evaluates claims against internal policies, account records, or recent retrieved documents the evaluator model never saw during pretraining.
+2. **Nonce-isolating trusted context from untrusted drafts**: Wraps `context=` and `candidate=` in distinct randomized boundary tags so prompt injections inside an untrusted LLM draft cannot spoof retrieved evidence or override the rubric.
+3. **Sharing the long document KV-cache prefix**: Places the static rubric, `query=`, and `context=` chunks at the prompt root while swapping only the terminal `A/B` answer mapping, yielding a **95% to 99% KV-cache hit rate** across Pass 2 and across `MultiRubricGate` checks (up to **2.51x speedup**).
+
+### Copy-Paste Recipe (Grounded vs. Hallucinated)
 
 ```python
 from logitgate import LogitGate, MultiRubricGate
 
 # 1. Single-rubric groundedness check
 rag_gate = LogitGate(
-    rubric="Is the generated answer strictly supported by the context without external claims?",
+    rubric="Is the generated answer strictly supported by the retrieved context without external claims?",
     pass_threshold=0.85,
     fail_threshold=0.20,
 )
 
-context = [
-    "Customer account #9102 registered on 2024-05-18 under the Enterprise tier.",
-    "Billing contact is admin@enterprise.com; invoices settle on net-30 terms.",
+# Trusted retrieved passages (prefilled once in KV-cache)
+retrieved_policy_chunks = [
+    "Standard tier: 14-day refund window.",
+    "Enterprise tier: 30-day refund window.",
 ]
-query = "What tier is account #9102 on and when was it registered?"
-candidate = "Account #9102 was registered on May 18, 2024 under the Enterprise tier."
+user_question = "Can I get a refund on my Standard plan after 20 days?"
 
-verdict = rag_gate.evaluate(candidate, context=context, query=query)
-print(f"Grounded: {verdict.passed} (P={verdict.probability:.4f})")
+# Example A: Grounded reply (passes with high calibrated probability, e.g. P >= 0.90)
+faithful_reply = (
+    "Standard plans only qualify for refunds within 14 days; "
+    "the 30-day window applies only to Enterprise."
+)
+v_grounded = rag_gate.evaluate(
+    candidate=faithful_reply,
+    context=retrieved_policy_chunks,
+    query=user_question,
+)
+print(f"Grounded: {v_grounded.passed} (P={v_grounded.probability:.4f})")
 
-# 2. Multi-rubric groundedness suite (shares 95%+ of KV-cache across checks)
+# Example B: Hallucinated reply (contradicts the 14-day Standard policy -> fails on live backend, P <= 0.20)
+hallucinated_reply = "Yes, Standard plans qualify for a 30-day refund window."
+v_hallucinated = rag_gate.evaluate(
+    candidate=hallucinated_reply,
+    context=retrieved_policy_chunks,
+    query=user_question,
+)
+print(
+    f"Hallucinated reply: passed={v_hallucinated.passed}, status={v_hallucinated.status.value}"
+)  # Live backend returns passed=False, status='failed'
+
+# 2. Multi-rubric groundedness suite (reuses the same KV-cache prefix across all 3 rubrics)
 rubrics = [
     "Is every claim in the response directly supported by the context?",
     "Does the response directly answer the user query?",
     "Does the response avoid ungrounded numeric figures or dates?",
 ]
-multi_rag = MultiRubricGate(rubrics, aggregation="all")
-suite_verdict = multi_rag.evaluate(candidate, context=context, query=query)
+multi_rag = MultiRubricGate(rubrics, fail_fast=False)
+suite_verdict = multi_rag.evaluate(
+    candidate=faithful_reply,
+    context=retrieved_policy_chunks,
+    query=user_question,
+)
 print(f"All RAG rubrics passed: {suite_verdict.passed}")
 ```
-
-### Why Prefix Caching Matters for RAG
-
-In standard RAG pipelines, retrieved context can span thousands of tokens. LogitGate places the static rubric, query, and retrieved context chunks at the **root** of the prompt, swapping only the terminal answer token mappings at the very end of the sequence.
-
-On local inference engines (`Ollama`, `vLLM`, `llama.cpp`), Pass 2 achieves a **95% to 99% KV-cache hit rate**, delivering up to **2.51x speedups** over uncached two-pass evaluation.
 
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Retrieved context is often large. Instead of re-reading the whole document twice, LogitGate keeps the document in the GPU's memory cache and only changes the two letters at the very end. The second pass evaluates almost instantaneously.
+Retrieved context is often large. Instead of re-reading the whole document twice, LogitGate keeps the trusted document in the GPU's memory cache and swaps only the answer-slot labels at the end of the prompt. The second pass and extra rubrics evaluate on the cached prefix.
 </details>
 
 [🔬 Mathematical Debiasing & Prefix Mechanics](../math_and_debiasing.md) · [🔬 Production RAG Architectures](../use_cases.md)
@@ -61,7 +87,7 @@ Retrieved context is often large. Instead of re-reading the whole document twice
 
 ## 2. `ToolCallGate` (Deterministic Agent Pre-Execution Shield)
 
-Intercepts agent tool calls before execution to block path traversal, SSRF, destructive shell/SQL commands, and schema violations at Layer 0 (<0.1 ms, 0 LLM calls).
+**Problem & deployment**: Protects MCP servers, coding agents, and database tool runners by blocking path traversal, SSRF metadata probes, and destructive shell/SQL arguments at Layer 0 (`<0.1 ms`, `0` LLM calls) before any runtime touches disk or network.
 
 ![ToolCallGate Structural Pre-Execution Shield](../assets/toolcall_shield.svg)
 
@@ -135,7 +161,7 @@ Never let an LLM directly execute file paths or shell commands. ToolCallGate ins
 
 ## 3. `StreamGuard` (Mid-Stream Generation Abort)
 
-Monitors Server-Sent Event (SSE) token generation mid-flight, aborting streams immediately when toxic output, security leaks, or jailbreak confabulations appear.
+**Problem & deployment**: Guards live SSE chat endpoints and streaming agent responses by checking token prefixes at sliding character strides and tearing down the upstream generator mid-flight if PII leaks, policy violations, or jailbreaks begin to emerge.
 
 ![StreamGuard Mid-Stream Abort](../assets/stream_guard_abort.svg)
 

@@ -1,70 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 420" width="100%" height="100%" role="img" aria-label="ToolCallGate Pre-Execution Agent Security Shield">
-  <title>ToolCallGate Pre-Execution Agent Security Shield</title>
-  <desc>Two-stage security firewall: Stage 0 deterministic AST/regex filters and Stage 1 logit intent verification</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="540" viewBox="0 0 540 540" role="img" aria-label="ToolCallGate Pre-Execution Defense Rings">
+  <title>ToolCallGate Pre-Execution Defense Rings</title>
+  <desc>Concentric defense rings protecting Filesystem, Network, and Database: Outer Ring blocks deterministic path, SSRF, CLI, and SQL threats in under 0.1 ms; Inner Ring verifies user intent in ~40 ms before execution.</desc>
   <defs>
     <style>
     :root {
       --canvas-bg: #f8fafc;
-      --card-bg: #ffffff;
-      --card-border: #cbd5e1;
-      --card-subtle: #f1f5f9;
+      --surface-bg: #ffffff;
+      --surface-subtle: #f1f5f9;
+      --border-muted: #cbd5e1;
       --text-primary: #0f172a;
       --text-secondary: #334155;
-      --text-muted: #64748b;
-      --text-inverse: #ffffff;
+      --text-muted: #475569;
       --accent-emerald: #059669;
       --accent-emerald-bg: #ecfdf5;
-      --accent-emerald-border: #a7f3d0;
+      --accent-emerald-border: #6ee7b7;
       --accent-rose: #dc2626;
       --accent-rose-bg: #fef2f2;
-      --accent-rose-border: #fecaca;
+      --accent-rose-border: #fca5a5;
       --accent-amber: #d97706;
       --accent-amber-bg: #fffbeb;
-      --accent-amber-border: #fde68a;
+      --accent-amber-border: #fcd34d;
       --accent-sky: #0284c7;
       --accent-sky-bg: #f0f9ff;
-      --accent-sky-border: #bae6fd;
+      --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
       --accent-indigo-bg: #eef2ff;
-      --accent-indigo-border: #c7d2fe;
+      --accent-indigo-border: #a5b4fc;
       --accent-purple: #7c3aed;
       --accent-purple-bg: #f5f3ff;
-      --accent-purple-border: #ddd6fe;
-      --flow-line: #94a3b8;
-      --flow-arrow: #64748b;
-      --glow-fast: rgba(16, 185, 129, 0.25);
+      --accent-purple-border: #c4b5fd;
+      --flow-line: #64748b;
+      --grid-line: #e2e8f0;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --canvas-bg: #0b1120;
-        --card-bg: #1e293b;
-        --card-border: #334155;
-        --card-subtle: #0f172a;
+        --surface-bg: #1e293b;
+        --surface-subtle: #0f172a;
+        --border-muted: #334155;
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --text-inverse: #0f172a;
         --accent-emerald: #10b981;
         --accent-emerald-bg: #064e3b;
-        --accent-emerald-border: #047857;
+        --accent-emerald-border: #059669;
         --accent-rose: #f43f5e;
         --accent-rose-bg: #4c0519;
-        --accent-rose-border: #be123c;
+        --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
         --accent-amber-bg: #451a03;
-        --accent-amber-border: #b45309;
+        --accent-amber-border: #d97706;
         --accent-sky: #38bdf8;
         --accent-sky-bg: #082f49;
-        --accent-sky-border: #0369a1;
+        --accent-sky-border: #0284c7;
         --accent-indigo: #818cf8;
         --accent-indigo-bg: #1e1b4b;
-        --accent-indigo-border: #4338ca;
+        --accent-indigo-border: #4f46e5;
         --accent-purple: #a78bfa;
         --accent-purple-bg: #2e1065;
-        --accent-purple-border: #6d28d9;
-        --flow-line: #475569;
-        --flow-arrow: #94a3b8;
-        --glow-fast: rgba(16, 185, 129, 0.45);
+        --accent-purple-border: #7c3aed;
+        --flow-line: #94a3b8;
+        --grid-line: #1e293b;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -82,10 +78,10 @@
     }
     .anim-dash {
       stroke-dasharray: 6 5;
-      animation: dashMove 2.5s linear infinite;
+      animation: dashMove 2.4s linear infinite;
     }
     .anim-pulse {
-      animation: pulseGlow 2.5s ease-in-out infinite;
+      animation: pulseGlow 2.4s ease-in-out infinite;
     }
     .anim-probe {
       animation: probeSweep 3s ease-in-out infinite alternate;
@@ -100,20 +96,20 @@
         opacity: 0.95;
       }
       50% {
-        opacity: 0.45;
+        opacity: 0.4;
       }
     }
     @keyframes probeSweep {
       0% {
-        transform: translateX(0px);
+        transform: translateX(-8px);
       }
       100% {
-        transform: translateX(18px);
+        transform: translateX(8px);
       }
     }
 </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-arrow)" />
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-line)" />
     </marker>
     <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
@@ -125,98 +121,56 @@
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
     </marker>
   </defs>
-  <rect width="920" height="420" fill="var(--canvas-bg)" rx="12" />
+  <rect width="540" height="540" fill="var(--canvas-bg)" rx="12" />
 
-  <!-- Header Bar -->
-  <rect x="40" y="24" width="200" height="22" rx="4" fill="var(--accent-sky-bg)" stroke="var(--accent-sky-border)" stroke-width="1" />
-  <text x="48" y="39" font-size="10" font-weight="700" fill="var(--accent-sky)" class="mono">PRE-EXECUTION TOOL SHIELD</text>
-  <text x="40" y="68" font-size="18" font-weight="700" fill="var(--text-primary)">ToolCallGate: Pre-Execution Agent &amp; MCP Defense</text>
-  <text x="40" y="86" font-size="12" fill="var(--text-secondary)">Sub-millisecond firewall + zero-generation intent verification before tool execution</text>
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">ToolCallGate: Concentric Tool Defense</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Two defense rings intercept unsafe or hijacked calls before execution</text>
 
-  <!-- Left: Inbound Agent Tool Call -->
-  <rect x="40" y="105" width="220" height="235" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="40" y="105" width="5" height="235" rx="2" fill="var(--accent-purple)" />
-  <rect x="55" y="118" width="115" height="18" rx="3" fill="var(--accent-purple-bg)" stroke="var(--accent-purple-border)" stroke-width="1" />
-  <text x="61" y="131" font-size="9" font-weight="700" fill="var(--accent-purple)" class="mono">INBOUND TOOL CALL</text>
-  <text x="55" y="154" font-size="13" font-weight="700" fill="var(--text-primary)">Agent Proposed Payload</text>
+  <!-- Concentric Defense Arcs centered at (270, 456) -->
+  <!-- Outer Ring: Stage 0 Deterministic Filter (radius 224) -->
+  <path d="M 46 456 A 224 224 0 0 1 494 456" fill="var(--accent-sky-bg)" opacity="0.55" stroke="var(--accent-sky)" stroke-width="3" />
+  <!-- Inner Ring: Stage 1 Intent Check (radius 144) -->
+  <path d="M 126 456 A 144 144 0 0 1 414 456" fill="var(--accent-indigo-bg)" opacity="0.7" stroke="var(--accent-indigo)" stroke-width="3" />
+  <!-- Core: Protected Resources (radius 72) -->
+  <path d="M 198 456 A 72 72 0 0 1 342 456 Z" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="2.5" />
 
-  <rect x="55" y="166" width="190" height="105" rx="4" fill="var(--card-subtle)" />
-  <text x="63" y="184" font-size="10" fill="var(--accent-indigo)" class="mono">tool: "bash_exec"</text>
-  <text x="63" y="200" font-size="10" fill="var(--text-primary)" class="mono">params: &#123;</text>
-  <text x="73" y="216" font-size="9" fill="var(--accent-rose)" class="mono">"cmd": "curl http://</text>
-  <text x="73" y="230" font-size="9" fill="var(--accent-rose)" class="mono">169.254.169.254/..."</text>
-  <text x="63" y="246" font-size="10" fill="var(--text-primary)" class="mono">&#125;</text>
-  <text x="63" y="262" font-size="9" fill="var(--text-muted)">SSRF credential theft</text>
+  <!-- THREAT 1 (Left): Deterministic Violation Strikes Outer Ring & Deflects -->
+  <text x="92" y="92" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-rose)" class="mono">../etc/passwd</text>
+  <text x="92" y="109" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">169.254.169.254</text>
+  <text x="92" y="126" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">rm -rf / DROP</text>
+  <path d="M 92 136 L 112 298 L 36 248" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
+  <circle cx="112" cy="298" r="5" fill="var(--accent-rose)" class="anim-pulse" />
+  <text x="36" y="236" font-size="12" font-weight="700" fill="var(--accent-rose)">BLOCKED</text>
 
-  <text x="55" y="292" font-size="10" fill="var(--text-muted)">Source: Autonomous Agent</text>
-  <text x="55" y="308" font-size="10" fill="var(--text-muted)">Protocol: MCP / OpenAI tools</text>
-  <text x="55" y="324" font-size="10" font-weight="600" fill="var(--accent-rose)">Untrusted Payload</text>
+  <!-- THREAT 2 (Right): Hijacked Intent Strikes Inner Ring & Deflects -->
+  <text x="444" y="92" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">User: "list files"</text>
+  <text x="444" y="110" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Call: delete_file</text>
+  <text x="444" y="126" text-anchor="middle" font-size="11.5" fill="var(--text-muted)">Valid schema, hijacked</text>
+  <path d="M 444 136 L 392 380 L 498 326" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
+  <circle cx="392" cy="380" r="5" fill="var(--accent-rose)" class="anim-pulse" />
+  <text x="504" y="314" text-anchor="end" font-size="12" font-weight="700" fill="var(--accent-rose)">BLOCKED</text>
 
-  <!-- Flow to Stage 0 -->
-  <path d="M 260 170 L 290 170" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
+  <!-- SAFE CALL (Center): Passes Both Rings -->
+  <text x="270" y="92" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">User: "read log"</text>
+  <text x="270" y="110" text-anchor="middle" font-size="11.5" fill="var(--accent-emerald)" class="mono">read_file("app.log")</text>
+  <line x1="270" y1="122" x2="270" y2="394" stroke="var(--accent-emerald)" stroke-width="2.5" class="anim-dash" marker-end="url(#arrow-emerald)" />
 
-  <!-- Center-Left: Stage 0 Firewall -->
-  <rect x="295" y="105" width="200" height="235" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="295" y="105" width="5" height="235" rx="2" fill="var(--accent-sky)" />
-  <rect x="310" y="118" width="125" height="18" rx="3" fill="var(--accent-sky-bg)" stroke="var(--accent-sky-border)" stroke-width="1" />
-  <text x="316" y="131" font-size="9" font-weight="700" fill="var(--accent-sky)" class="mono">STAGE 0: FIREWALL</text>
-  <text x="310" y="154" font-size="13" font-weight="700" fill="var(--text-primary)">Deterministic Rules</text>
-  <text x="310" y="170" font-size="10" fill="var(--text-muted)" class="mono">&lt; 0.08 ms | Pure CPU</text>
+  <!-- Ring Labels (rendered above rays with clean surface backing so arrows never cross text) -->
+  <rect x="142" y="241" width="256" height="40" rx="6" fill="var(--surface-bg)" opacity="0.94" />
+  <text x="270" y="258" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Stage 0: Sink Filter (&lt;0.1 ms, CPU)</text>
+  <text x="270" y="275" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Paths · SSRF · Destructive CLI · SQL</text>
 
-  <rect x="310" y="180" width="170" height="75" rx="4" fill="var(--card-subtle)" />
-  <text x="318" y="196" font-size="10" fill="var(--text-secondary)">&#x2022; Path traversal (../)</text>
-  <text x="318" y="212" font-size="10" fill="var(--text-secondary)">&#x2022; Cloud SSRF metadata</text>
-  <text x="318" y="228" font-size="10" fill="var(--text-secondary)">&#x2022; Destructive CLI commands</text>
-  <text x="318" y="244" font-size="10" fill="var(--text-secondary)">&#x2022; SQL injection patterns</text>
+  <rect x="158" y="323" width="224" height="40" rx="6" fill="var(--surface-bg)" opacity="0.94" />
+  <text x="270" y="340" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-indigo)">Stage 1: Logit Intent (~40 ms)</text>
+  <text x="270" y="357" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Did user authorize this call?</text>
 
-  <path d="M 395 258 L 395 285" stroke="var(--accent-rose)" stroke-width="2" marker-end="url(#arrow-rose)" />
-  <rect x="310" y="290" width="170" height="38" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <text x="318" y="305" font-size="10" font-weight="700" fill="var(--accent-rose)">BLOCK VIOLATIONS</text>
-  <text x="318" y="320" font-size="9" fill="var(--accent-rose)">Immediate halt (0 LLM cost)</text>
+  <!-- Core Label -->
+  <text x="270" y="424" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">SAFE CORE</text>
+  <text x="270" y="444" text-anchor="middle" font-size="11.5" fill="var(--text-primary)">FS · Net · DB</text>
 
-  <!-- Flow to Stage 1 -->
-  <path d="M 495 170 L 525 170" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
-  <text x="498" y="162" font-size="9" fill="var(--text-muted)">Clean</text>
-
-  <!-- Center-Right: Stage 1 Semantic Gate -->
-  <rect x="530" y="105" width="200" height="235" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="530" y="105" width="5" height="235" rx="2" fill="var(--accent-indigo)" />
-  <rect x="545" y="118" width="135" height="18" rx="3" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo-border)" stroke-width="1" />
-  <text x="551" y="131" font-size="9" font-weight="700" fill="var(--accent-indigo)" class="mono">STAGE 1: SEMANTIC</text>
-  <text x="545" y="154" font-size="13" font-weight="700" fill="var(--text-primary)">Intent Verification</text>
-  <text x="545" y="170" font-size="10" fill="var(--text-muted)" class="mono">~40 ms | 0 Tokens Gen</text>
-
-  <rect x="545" y="180" width="170" height="75" rx="4" fill="var(--card-subtle)" />
-  <text x="553" y="196" font-size="10" fill="var(--text-secondary)">&#x2022; Did user authorize this?</text>
-  <text x="553" y="212" font-size="10" fill="var(--text-secondary)">&#x2022; Context alignment</text>
-  <text x="553" y="228" font-size="10" fill="var(--text-secondary)">&#x2022; Prompt injection check</text>
-  <text x="553" y="244" font-size="10" fill="var(--text-secondary)">&#x2022; Deblended log-odds</text>
-
-  <path d="M 630 258 L 630 285" stroke="var(--accent-rose)" stroke-width="2" marker-end="url(#arrow-rose)" />
-  <rect x="545" y="290" width="170" height="38" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <text x="553" y="305" font-size="10" font-weight="700" fill="var(--accent-rose)">BLOCK UNGROUNDED</text>
-  <text x="553" y="320" font-size="9" fill="var(--accent-rose)">P &lt; 0.20 &#x2192; Abort call</text>
-
-  <!-- Right: Execution Outcomes -->
-  <path d="M 730 170 L 760 170" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
-
-  <rect x="765" y="115" width="115" height="95" rx="6" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1.5" />
-  <text x="775" y="138" font-size="11" font-weight="700" fill="var(--accent-emerald)">EXECUTE</text>
-  <text x="775" y="156" font-size="9" fill="var(--accent-emerald)">Authorized</text>
-  <text x="775" y="172" font-size="9" fill="var(--accent-emerald)">Verified params</text>
-  <text x="775" y="188" font-size="9" fill="var(--accent-emerald)">Safe to run</text>
-
-  <rect x="765" y="235" width="115" height="95" rx="6" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1.5" />
-  <text x="775" y="258" font-size="11" font-weight="700" fill="var(--accent-rose)">AUDIT LOG</text>
-  <text x="775" y="276" font-size="9" fill="var(--accent-rose)">Threat stopped</text>
-  <text x="775" y="292" font-size="9" fill="var(--accent-rose)">Zero side effects</text>
-  <text x="775" y="308" font-size="9" fill="var(--accent-rose)">Telemetry alert</text>
-
-  <!-- Bottom Metric Strip -->
-  <rect x="40" y="356" width="840" height="42" rx="6" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1" />
-  <text x="55" y="381" font-size="11" font-weight="600" fill="var(--text-primary)">Security Shield:</text>
-  <text x="170" y="381" font-size="11" fill="var(--accent-emerald)" font-weight="700">&#x2713; 99.8% safe tool latency: &lt;45 ms</text>
-  <text x="430" y="381" font-size="11" fill="var(--accent-rose)" font-weight="700">&#x2713; 0 malicious payloads touch shell or disk</text>
-  <text x="730" y="381" font-size="11" fill="var(--accent-sky)" font-weight="700">&#x2713; Pure CPU Stage 0</text>
+  <!-- Bottom Footer Strip -->
+  <rect x="24" y="476" width="492" height="44" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
+  <text x="270" y="503" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">OpenAI tools · Anthropic tool_use · MCP JSON-RPC (&lt;45 ms total)</text>
 
 </svg>

@@ -5,28 +5,29 @@
 # Elastic Recurrent Layer-Looping & PCIe Hardware Guardrails
 
 > [!NOTE]
-> **When You Need This vs. When Standard LogitGate / Cascade Is Enough**
+> **When You Need This vs. When Standard LogitGate Is Enough**
 >
-> In 90%+ of production deployments, standard causal feed-forward architectures (`qwen2.5-coder:3b`, `llama3.2:3b`, `gemma4:e4b`) evaluate rubrics in a single forward pass without custom hardware configurations. This provides optimal latency (~15 ms to ~45 ms on GPU) for classification, factual groundedness, and security boundaries.
+> **Concrete Bottlenecks**:
+> 1. **Single-Pass Circuit-Depth Ceiling**: Standard causal transformers execute one pass through $L$ layers (`O(1)` sequential depth), so multi-step deductive constraints or nested logic often fail unless the model generates 200+ Chain-of-Thought tokens.
+> 2. **Silent PCIe VRAM Paging**: When multi-model cascades or long-context KV-caches exceed physical VRAM on shared GPUs (e.g., 12 GB RTX 4070 or 24 GB RTX 3090/4090), CUDA Unified Memory silently pages allocations over PCIe (`32-64 GB/s` vs. `1,000-1,800 GB/s` VRAM) without throwing `CUDA OOM`, degrading latency by `10x-50x`.
 >
-> You only need this guide if you are dealing with:
-> 1. **Circuit-Depth Bottlenecks in Latent Space**: You have multi-step deductive constraints (nested logic, state-machine transitions, multi-hop reasoning) that cause standard models to fail unless they generate 200+ scratchpad tokens, but your SLA requires zero-token, sub-300 ms first-token verification.
-> 2. **Recurrent Architectures**: You are deploying recurrent transformer architectures such as NVIDIA-Nemotron-Labs Dory-4B (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`) or Universal Transformers.
-> 3. **PCIe Memory Spillover Protection**: You are serving multi-model cascades on shared consumer or workstation GPUs (e.g., 12 GB RTX 4070, 24 GB RTX 3090/4090) where sudden KV-cache expansion risks triggering silent CUDA Unified Memory paging over PCIe, degrading throughput by 10x-50x.
+> **Quantified Payoff**:
+> - **Elastic Recurrent Looping ($K=2$)**: Delivers a **`+12.5 pp` reasoning gain** on `NVIDIA-Nemotron-Labs Dory-4B` (`53.1% -> 65.6%` on RTX 5090; `50.0% -> 62.5%` on RTX 4070) and doubles `ScoreGate` monotonicity (`37.5% -> 75.0%`) at **`0` generated tokens** and a constant 4B VRAM footprint.
+> - **Proactive VRAM Guardrails (`PCIeSpilloverGuard`)**: Inspects physical free VRAM via `torch.cuda.mem_get_info()` and triggers `torch.cuda.empty_cache()` whenever headroom falls below `min_free_headroom_mb + estimated_kv_mb` (or reserved memory exceeds `96%`), preventing silent PCIe swap-thrashing.
+>
+> **When to Skip It**: In ~90% of deployments, standard feed-forward models (`qwen2.5-coder:3b`, `llama3.2:3b`, `gemma4:e4b`) behind `Cascade` + `CalibrationProfile` already evaluate classification, RAG groundedness, and policy rubrics in `15-45 ms` on GPU with zero custom PyTorch runtime setup.
 
 ---
 
 <details>
-<summary>🌱 <b>ELI5: Thinking Twice With the Same Weights Before Answering</b></summary>
+<summary>💡 <b>Intuition: Re-Reading Before Answering vs. Speaking Out Loud, and VRAM Headroom vs. Swap-Thrashing</b></summary>
 
-> Imagine someone asks you a tricky riddle. You have three ways to respond:
-> 1. **Feed-Forward Guess**: Blurt out the very first answer that pops into your head (standard 1-pass transformer). It is fast, but you miss subtle traps.
-> 2. **Talk Out Loud**: Spend two minutes talking out loud to yourself before giving the final answer (Chain-of-Thought generation). It is accurate, but slow and expensive.
-> 3. **Recurrent Thinking**: Pause silently for 200 milliseconds, looping the problem through your thought process twice using the exact same brain regions, and then deliver the correct answer on your very first word.
+> When evaluating a dense logical constraint, you have three execution options:
+> 1. **1-Pass Feed-Forward**: Answer immediately after a single read-through (`O(1)` circuit depth). Fast, but prone to missing multi-step dependencies.
+> 2. **Chain-of-Thought (`JudgeGate`)**: Talk through every intermediate step out loud token by token before answering. Accurate, but bound by autoregressive memory bandwidth.
+> 3. **Elastic Recurrent Looping (`RecurrentPyTorchBackend`)**: Re-read the passage silently $K$ times (looping hidden states through the same recurrent block) before emitting token 1. At $K=2$, a 4B model gets the effective depth of an 8B pass with a 4B memory footprint and `0` generated tokens.
 >
-> That is what **elastic recurrent looping** does: it re-uses the same neural layers $K$ times in hidden-state space before emitting token 1.
->
-> Meanwhile, **`PCIeSpilloverGuard`** is like a desk organizer. If your desk (fast GPU VRAM) gets too cluttered with papers, the computer silently shuffles files into a storage closet down the hall (slow system RAM over PCIe). `PCIeSpilloverGuard` proactively clears the desk before every new job arrives so your work never slows down.
+> Meanwhile, **`PCIeSpilloverGuard`** works like checking physical RAM before launching a heavy compiler job so the OS never starts swap-thrashing to disk: by verifying free physical VRAM (plus estimated KV-cache) and reclaiming fragmented PyTorch blocks beforehand, it keeps prefill inside high-bandwidth GPU memory rather than falling off the PCIe bus cliff.
 </details>
 
 ---
@@ -124,7 +125,7 @@ Not every input requires deep recurrent reasoning. Simple syntax checks or obvio
 
 $$\text{KL}\left(P^{(k)} \parallel P^{(k-1)}\right) = \sum_{v \in \mathcal{V}} P^{(k)}(v) \ln\left(\frac{P^{(k)}(v)}{P^{(k-1)}(v)}\right)$$
 
-If $k \ge \text{min\_loops}$ and $\text{KL} < \epsilon_{\text{KL}}$ (configured via `kl_threshold`, e.g. `0.02`), looping terminates early. This delivers optimal accuracy on difficult items while cutting prefill latency on routine cases.
+If $k \ge \text{min\_loops}$ and $\text{KL} < \epsilon_{\text{KL}}$ (configured via `kl_threshold`, e.g. `0.02`), looping terminates early. This preserves multi-loop accuracy on difficult items while cutting prefill latency on routine cases.
 
 ### 3. URI Parameter Reference
 
@@ -177,7 +178,7 @@ Evaluated across NVIDIA GeForce RTX 5090 (32 GB) and RTX 4070 (12 GB) on the 32-
 
 **Key Takeaways**:
 - **Sweet Spot at $K=2$**: Looping twice provides a **+12.5 percentage point accuracy jump** over $K=1$, outperforming standard feed-forward 4B models (56.2%) and approaching 14B feed-forward models (68.8%) with zero generated tokens.
-- **Diminishing Returns at $K=4$**: Deep latent looping without intermediate normalization can cause representation oversaturation on surface tasks. $K=2$ is the optimal operating point for latency and accuracy.
+- **Diminishing Returns at $K=4$**: Deep latent looping without intermediate normalization can cause representation oversaturation on surface tasks. $K=2$ is the best operating point for latency and accuracy.
 
 ---
 

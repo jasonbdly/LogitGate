@@ -25,6 +25,7 @@ CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
 VISUALS_SCRIPT = REPO_ROOT / "scripts" / "generate_visuals.py"
 
 EXPECTED_SVGS: tuple[str, ...] = (
+    "logit_vs_text.svg",
     "cascade_flow.svg",
     "symmetric_debiasing.svg",
     "conformal_bands.svg",
@@ -102,6 +103,18 @@ def test_animated_svgs_valid_xml_dark_light_accessible_and_script_free() -> None
         assert root.tag.endswith("svg")
         assert root.attrib.get("role") == "img"
 
+        # Mobile-friendly aspect ratio & legible font-size invariants
+        view_box = root.attrib.get("viewBox", "")
+        vb_parts = [float(p) for p in view_box.split()]
+        assert len(vb_parts) == 4, f"Missing/invalid viewBox on {svg_name}: {view_box!r}"
+        assert vb_parts[2] <= 600.0, (
+            f"SVG {svg_name} viewBox width {vb_parts[2]} > 600px shrinks too small on mobile"
+        )
+        font_sizes = [float(m) for m in re.findall(r'font-size="([0-9.]+)"', text)]
+        assert font_sizes and min(font_sizes) >= 11.0, (
+            f"SVG {svg_name} uses tiny font-size < 11px ({min(font_sizes) if font_sizes else 'none'})"
+        )
+
 
 def test_generate_visuals_script_is_byte_deterministic_and_enforces_guards(
     tmp_path: Path,
@@ -109,6 +122,7 @@ def test_generate_visuals_script_is_byte_deterministic_and_enforces_guards(
     """Running scripts/generate_visuals.py reproduces docs/assets/*.svg byte-for-byte."""
     mod = _load_visuals_module()
     generators: list[tuple[str, str]] = [
+        ("logit_vs_text.svg", mod.generate_logit_vs_text_svg()),
         ("cascade_flow.svg", mod.generate_cascade_flow_svg()),
         ("symmetric_debiasing.svg", mod.generate_symmetric_debiasing_svg()),
         ("conformal_bands.svg", mod.generate_conformal_bands_svg()),

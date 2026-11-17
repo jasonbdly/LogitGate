@@ -1,12 +1,12 @@
 # Quickstart Recipes (⚡ Quick Notes)
 
-Copy-paste recipes, exact constructor signatures, default parameters, and failure modes for core LogitGate primitives.
+Copy-paste recipes, constructor defaults, and production deployment patterns for core LogitGate primitives.
 
 ---
 
 ## 1. `LogitGate` (Binary First-Token Classifier)
 
-Evaluates whether a candidate string satisfies a natural language rubric using debiased first-token log-probabilities.
+**Problem & deployment**: Replaces slow generative yes/no judges in CI regression gates, live chatbot guardrails, and output validators by extracting a calibrated `0.0-1.0` pass probability in `~16-90 ms` with `0` generated tokens.
 
 ### Copy-Paste Recipe
 
@@ -57,7 +57,7 @@ Standard LLM evaluators generate 200+ tokens of critique before saying yes or no
 
 ## 2. `Cascade` (3-Layer Routing Pipeline)
 
-Chains deterministic validation (`Layer 0`), fast logit gating (`Layer 1`), and full step-by-step diagnostic critique (`Layer 2`).
+**Problem & deployment**: Cuts LLM verification cost and tail latency in code-generation pipelines and production APIs by failing malformed syntax at Layer 0 (`<0.1 ms`), fast-pathing clear passes/fails at Layer 1 (`~16-90 ms`), and escalating only uncertain edge cases (`0.20 < P < 0.85`) to a generative `JudgeGate`.
 
 ### Copy-Paste Recipe
 
@@ -96,7 +96,7 @@ with cascade:
 
 ## 3. `ChoiceGate` (Discrete Categorical Routing)
 
-Routes input text across multiple discrete categories without generating tokens, using a fixed-point-free derangement permutation to cancel letter bias.
+**Problem & deployment**: Routes support tickets, triage queues, and intent classifiers across discrete categories without token generation, eliminating alphabetical `"A"` slot bias via fixed-point-free derangement permutations.
 
 ### Copy-Paste Recipe
 
@@ -139,7 +139,7 @@ Models prefer option 'A' over 'B' simply because 'A' appears earlier in the alph
 
 ## 4. `ScoreGate` (Ordinal & Continuous Rubric Scoring)
 
-Computes continuous rubric scores on bounded numeric scales (e.g. 1 to 5) by pooling log-probabilities across both debiasing passes.
+**Problem & deployment**: Replaces noisy integer-only prompt grading in automated code review, essay/summary grading, and quality dashboards by computing an exact expected value ($\mathbb{E}[S]$) across discrete anchor logits.
 
 ### Copy-Paste Recipe
 
@@ -147,7 +147,7 @@ Computes continuous rubric scores on bounded numeric scales (e.g. 1 to 5) by poo
 from logitgate import ScoreGate
 
 scorer = ScoreGate(
-    rubric="Rate the architectural code quality from 1 (disastrous) to 5 (flawless):",
+    rubric="Rate code clarity and type safety from 1 (broken) to 5 (production-ready):",
     min_score=1,
     max_score=5,
     threshold=4.0,
@@ -170,7 +170,7 @@ print(f"Passed threshold (>=4.0): {verdict.passed}")
 
 ## 5. `MultiRubricGate` (Shared-Prefix Multi-Criterion Checks)
 
-Evaluates multiple distinct rubrics against a single candidate artifact in a single batch, maximizing KV-cache prefix hits across consecutive evaluations.
+**Problem & deployment**: Evaluates multiple policy, formatting, and correctness checks against a single long artifact (such as a PR diff, legal summary, or RAG response) in one batch, reusing the candidate KV-cache prefix across every criterion.
 
 ### Copy-Paste Recipe
 
@@ -183,24 +183,24 @@ rubrics = [
     "Does the function avoid catching bare Exception without re-raising?",
 ]
 
-gate = MultiRubricGate(rubrics, aggregation="all")
+gate = MultiRubricGate(rubrics, fail_fast=False)
 candidate = "def get_user(uid: int | None) -> dict | None: return {'id': uid} if uid else None"
 
-# Comprehensive pass/fail verdict
+# Aggregate pass/fail verdict
 verdict = gate.evaluate(candidate)
 print(f"Overall passed: {verdict.passed}")
 
 # Individual breakdown per rubric
-for rubric, v in zip(rubrics, gate.evaluate_each(candidate)):
+for rubric, v in zip(rubrics, gate.evaluate_each(candidate), strict=True):
     status = "PASS" if v.passed else "FAIL"
     print(f"[{status}] P={v.probability:.4f} | {rubric}")
 ```
 
-### Aggregation Modes
+### Weakest-Link Aggregation & `fail_fast`
 
-- `aggregation="all"`: Passes only if every individual rubric passes.
-- `aggregation="any"`: Passes if at least one individual rubric passes.
-- `aggregation="mean"`: Passes if the average probability across rubrics exceeds the threshold.
+- **Weakest-link verdict**: `MultiRubricGate` passes only when every criterion passes (`PASSED`); any `FAILED` rubric fails the overall verdict, any `AMBIGUOUS` rubric without failures marks it `AMBIGUOUS`, and `verdict.probability` equals the minimum probability across rubrics.
+- **`fail_fast=True`**: Stops sequential evaluation immediately on the first `FAILED` rubric instead of scoring remaining criteria.
+- **`**options`**: Forwards any `LogitGate` keyword argument (`pass_threshold`, `fail_threshold`, `backend`, `model`, `symmetric_debiasing`) to the shared evaluator.
 
 [🔬 Production Use Cases for Multi-Rubric Checks](../use_cases.md)
 
@@ -208,12 +208,12 @@ for rubric, v in zip(rubrics, gate.evaluate_each(candidate)):
 
 ## 6. `RankGate` & `BestOfNGate` (Candidate Ranking & Selection)
 
-Ranks $N$ competing candidate completions or selects the highest-scoring candidate under a unified rubric.
+**Problem & deployment**: Selects the strongest completion from N sampled LLM outputs in code synthesis, RAG reranking, and Best-of-N decoding while filtering out unsafe or malformed drafts before ranking via `pre_gate`.
 
 ### Copy-Paste Recipe
 
 ```python
-from logitgate import BestOfNGate, RankGate
+from logitgate import ASTGate, BestOfNGate, RankGate
 
 candidates = [
     "def sort_items(items): return sorted(items)",
@@ -224,22 +224,23 @@ candidates = [
 # Rank candidates from best to worst
 ranker = RankGate("Rate implementation quality and static typing", mode="auto")
 ranking = ranker.rank(candidates)
-print(f"Top candidate: {ranking.ranked_candidates[0]}")
+print(f"Top candidate: {ranking.winner}")
+print(f"Order: {ranking.ranking}")
 
-# Best-of-N selection with pre-execution safety filter
+# Best-of-N selection with Layer 0 pre-execution safety filter
 best_of_n = BestOfNGate(
     rubric="Pick the most production-ready implementation",
-    pre_gate=None,
+    pre_gate=ASTGate(syntax=True, forbidden_imports=["os", "subprocess"]),
 )
-selection = best_of_n.evaluate(candidates)
-print(f"Selected candidate: {selection.candidate}")
+selection = best_of_n.select(candidates)
+print(f"Selected candidate: {selection.winner}")
 ```
 
 ---
 
-## 7. Batch Evaluation & Fault Isolation
+## 7. Batch Evaluation (`evaluate_batch` & `aevaluate_batch`)
 
-Executes batches of evaluations synchronously or asynchronously with concurrency bounds and fault isolation.
+**Problem & deployment**: Evaluates hundreds or thousands of offline benchmark items or dataset rows in parallel with bounded concurrency, automatic prefix warmup, and per-item fault isolation (`on_error="abstain"`).
 
 ### Copy-Paste Recipe
 
@@ -253,11 +254,11 @@ async def run_batch():
 
     # Async batch evaluation with concurrency limit and error isolation
     verdicts = await gate.aevaluate_batch(
-        candidates,
+        candidates=candidates,
         max_concurrency=4,
         on_error="abstain",  # "raise" | "abstain" | "fail"
     )
-    for c, v in zip(candidates, verdicts):
+    for c, v in zip(candidates, verdicts, strict=True):
         print(f"Candidate: {c[:20]}... -> Passed: {v.passed}")
 
 asyncio.run(run_batch())
@@ -272,7 +273,7 @@ asyncio.run(run_batch())
 
 ## 8. `CalibrationProfile` & `VerdictCache`
 
-Applies empirical temperature scaling and split-conformal coverage guarantees, and accelerates repetitive checks with persistent SQLite caching.
+**Problem & deployment**: Bounds false-pass error rates via split-conformal calibration in regulated or high-stakes workflows, while `VerdictCache` eliminates redundant GPU calls on repeated CI fixtures and regression inputs with persistent SQLite caching (`<0.05 ms` cache hits).
 
 ### Copy-Paste Recipe
 

@@ -5,25 +5,24 @@
 # Tier-A Weight-Free & Tier-B PEFT LoRA Distillation
 
 > [!NOTE]
-> **When You Need This vs. When Standard LogitGate / Cascade Is Enough**
+> **When You Need This vs. When Standard LogitGate Is Enough**
 >
-> In the vast majority (90%+) of production use cases, standard `LogitGate` with an out-of-the-box compact model (`qwen2.5-coder:3b`, `llama3.2:3b`, `gemma4:e4b`) or an uncalibrated heterogeneous cascade (`3B >> 26B`) is all you need. You do **not** need model distillation to get sub-100 ms verification and 10x-20x token savings.
+> **Concrete Bottleneck**: Sub-3B edge and CPU models (`llama3.2:1b`, `qwen2.5-coder:1.5b`, `qwen2.5-coder:3b`) often suffer from polarity skew (systematic over-skepticism or sycophancy) and weak edge-case calibration when evaluating nuanced rubrics standalone, forcing expensive escalations to a larger teacher model.
 >
-> You only need this guide if you are in one of three specialized regimes:
-> 1. **Ultra-Compact Edge or CPU Deployment**: You want sub-2B or 1B models (`qwen2.5-coder:1.5b`, `llama3.2:1b`) to achieve 90%+ standalone accuracy with near-zero escalations to a teacher.
-> 2. **Zero-LLM-Call Weight-Free Calibration (Tier A)**: You want to compile self-distilling anchor banks and a lightweight (<1 KB) meta-calibrator from production telemetry logs without fine-tuning weights or calling a GPU training cluster.
-> 3. **Open-Weights PEFT LoRA SFT (Tier B)**: You have high evaluation volumes (millions of daily calls) and want to bake domain rubrics directly into student attention weights via symmetric first-token supervised fine-tuning.
+> **Quantified Payoff**:
+> - **Tier A (Weight-Free Bundle)**: Fits a `<1 KB` `LogitMetaCalibrator` (`621-627 B` JSON) and `<50 KB` `DistilledAnchorBank` in `<20 ms` on CPU with **`0` extra LLM calls** from existing teacher telemetry logs, lifting `qwen2.5-coder:3b` OOD `hard_positive` recall by `+29.2 pp` (`20.8% -> 50.0%`) and bringing `gemma4:e4b` OOD Layer-1 error within `alpha = 0.10` (`9.4% <= 10.0%`).
+> - **Tier B (PEFT LoRA)**: Compiles domain rubrics into a rank-8 LoRA adapter (`15-50 MB` at 3B scale) via 2x symmetric first-token SFT so the student requires zero anchor tokens in the prompt at runtime.
+>
+> **When to Skip It**: In ~90% of production workloads, standard `Cascade` + `CalibrationProfile` with a 3B-4B model already delivers sub-100 ms verification and 10x-20x token savings without distillation. Only reach for Tier A or Tier B when you must run sub-3B edge/CPU models standalone with minimal escalations, want zero-LLM-call recalibration from production telemetry logs, or serve high-volume fixed-domain traffic on dedicated GPUs.
 
 ---
 
 <details>
-<summary>🌱 <b>ELI5: Open-Book Cheat Sheet (Tier A) vs. Studying for the Exam (Tier B)</b></summary>
+<summary>💡 <b>Intuition: Worked Reference Examples (Tier A) vs. Fine-Tuning Muscle Memory (Tier B)</b></summary>
 
-> Imagine you have a junior assistant (a compact 3B model) who needs to evaluate complex technical documents as accurately as a senior partner (a 26B teacher model).
->
-> - **Standard LogitGate**: The junior assistant evaluates the document directly. If they feel uncertain (log-odds fall inside the ambiguous band), they escalate the case to the senior partner.
-> - **Tier A: Open-Book Cheat Sheet (`DistillationBundle`)**: You do not change how the assistant's brain works. Instead, you hand them a tiny 1-page cheat sheet containing two hand-picked contrastive examples from previous cases and a tiny mathematical scorecard that corrects for personal skepticism. The model weights remain 100% untouched. It works instantly across any runtime (Ollama, vLLM, llama.cpp, CPU).
-> - **Tier B: Studying for the Exam (`train_distillation_lora`)**: The junior assistant spends an evening studying thousands of past cases until their neural pathways absorb the evaluation criteria. Their weights update through a tiny LoRA adapter (Rank 8). When they take the exam, they no longer need the cheat sheet in their prompt.
+> - **Standard `LogitGate`**: Runs the base model against your rubric as-is and escalates uncertain log-odds to a Layer-2 judge.
+> - **Tier A (`DistillationBundle`, Worked Reference Examples)**: Leaves model weights untouched. Before scoring a new prompt, it prepends 1 matched pass/fail reference pair from past telemetry (`DistilledAnchorBank`, gated so off-domain examples never pollute unrelated prompts) and passes the raw log-odds through a `<1 KB` logistic bias-correction head (`LogitMetaCalibrator`) to cancel systematic skepticism or sycophancy. Because weights never change, the same JSON bundle runs on Ollama, vLLM, llama.cpp, or pure CPU.
+> - **Tier B (`train_distillation_lora`, Fine-Tuning Muscle Memory)**: Trains a lightweight rank-8 LoRA adapter on 2x symmetric (`A/B` and `B/A`) first-token examples so the model internalizes the domain boundary directly in its linear projections, removing the need for reference anchors in the prompt prefix.
 </details>
 
 ---
@@ -40,8 +39,8 @@ flowchart TD
         TS --> AC["compile_distillation_bundle()"]
         AC --> AB["DistilledAnchorBank\n(BM25 + Szymkiewicz-Simpson OOD Filter)"]
         AC --> MC["LogitMetaCalibrator\n(5-Feature Newton-Raphson L2 Head, <1 KB)"]
-        AB & MC --> DB["DistillationBundle (.json)\n100% Model-Agnostic, Portable"]
-        DB --> L1A["LogitGate(bundle=...)"]
+        AB & MC --> DB["DistillationBundle (.json)\nModel-Agnostic, Portable"]
+        DB --> L1A["LogitGate(distillation_bundle=...)"]
     end
 
     subgraph TIERB["Tier B: Open-Weights PEFT LoRA Compilation"]
@@ -61,14 +60,15 @@ flowchart TD
 
 ### Tier A: Compile a Portable Weight-Free Bundle (Zero LLM Calls)
 
-Tier A compiles a contrastive anchor bank and a 5-feature Newton-Raphson meta-calibrator directly from production JSONL logs in under 2 seconds on CPU:
+Tier A compiles a contrastive `DistilledAnchorBank` from a labeled split (`dataset=...`) or both an anchor bank and a 5-feature Newton-Raphson `LogitMetaCalibrator` directly from production `DistillationSink` JSONL logs (`telemetry=...`) with `0` extra LLM calls in under 20 ms on CPU:
 
 ```python
 from pathlib import Path
 from logitgate import LogitGate
-from logitgate.distill import DistillationBundle, compile_distillation_bundle
+from logitgate.distill import compile_distillation_bundle
 
-# 1. Compile bundle from telemetry logs or labeled calibration split
+# 1. Compile model-agnostic anchor bundle from labeled split (0 LLM calls)
+#    (Or pass telemetry="logs/distill_telemetry.jsonl" to also fit LogitMetaCalibrator in 0 LLM calls)
 bundle = compile_distillation_bundle(
     dataset="benchmarks/data/cal_distill_80.json",
     student_model="llama3.2:3b",
@@ -80,7 +80,7 @@ bundle = compile_distillation_bundle(
 bundle_path = Path("artifacts/llama3b_distill_bundle.json")
 bundle.save(bundle_path)
 
-# 3. Load into LogitGate (instant zero-shot transfer)
+# 3. Load into LogitGate (zero-shot transfer across any runtime)
 gate = LogitGate(
     rubric="Does the SQL query use parameterized statements without raw string interpolation?",
     backend="llama3.2:3b",
@@ -96,10 +96,8 @@ print(f"Passed: {verdict.passed} (Calibrated P: {verdict.probability:.4f})")
 Tier B compiles domain rubrics into low-rank adapter weights (`target_modules="all-linear"`) with 2x symmetric position-masked cross-entropy:
 
 ```python
-from pathlib import Path
 from logitgate.distill import (
     LoRADistillConfig,
-    emit_deployment_manifests,
     train_distillation_lora,
 )
 
@@ -196,7 +194,7 @@ The default configuration targets `target_modules="all-linear"`. This dynamicall
 - **Gemma 2 / 4**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`.
 - **Mistral**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`.
 
-### 3. Turnkey Multi-Runtime Deployment Manifests
+### 3. Multi-Runtime Deployment Manifests
 
 `emit_deployment_manifests` produces ready-to-deploy configurations for Ollama, vLLM, and llama.cpp:
 
@@ -237,13 +235,11 @@ The following self-contained script shows how to compile a Tier-A bundle, evalua
 
 ```python
 from pathlib import Path
-from logitgate import LogitGate
 from logitgate.distill import (
     DistillationBundle,
     DistilledAnchorBank,
     LogitFeatureVector,
     LogitMetaCalibrator,
-    compile_distillation_bundle,
     extract_logit_features,
 )
 
@@ -266,10 +262,24 @@ rev_logprobs = [
 features = extract_logit_features(fwd_logprobs, rev_logprobs)
 print(f"Extracted symmetric log-odds: {features.symmetric_log_odds:.4f}")
 
-# 3. Fit a lightweight meta-calibrator
+# 3. Fit a lightweight meta-calibrator (requires >= 10 samples)
+sample_features = [
+    features,
+    LogitFeatureVector(1.8, 0.1, 0.1, 0.18, 0.02),
+    LogitFeatureVector(1.2, -0.1, 0.1, 0.25, 0.03),
+    LogitFeatureVector(2.1, 0.0, 0.0, 0.12, 0.01),
+    LogitFeatureVector(0.9, 0.2, 0.2, 0.31, 0.04),
+    LogitFeatureVector(-1.5, 0.0, 0.0, 0.20, 0.05),
+    LogitFeatureVector(-2.0, -0.1, 0.1, 0.14, 0.02),
+    LogitFeatureVector(-1.1, 0.2, 0.2, 0.28, 0.04),
+    LogitFeatureVector(-1.7, 0.1, 0.1, 0.19, 0.03),
+    LogitFeatureVector(-0.8, -0.2, 0.2, 0.35, 0.06),
+]
+sample_labels = [True, True, True, True, True, False, False, False, False, False]
+
 calibrator = LogitMetaCalibrator.fit(
-    features=[features, LogitFeatureVector(-1.5, 0.0, 0.0, 0.2, 0.05)],
-    labels=[True, False],
+    features=sample_features,
+    labels=sample_labels,
     target_risk_alpha=0.10,
     model="llama3.2:3b",
 )
@@ -295,9 +305,9 @@ print(f"Bundle loaded successfully. Pairs: {len(reloaded.anchor_bank.pairs)}")
 
 | Dimension | Tier A: Weight-Free BYO Bundle | Tier B: Open-Weights PEFT LoRA |
 | :--- | :--- | :--- |
-| **GPU Compute Needed** | **0 GPU hours** (runs on laptop CPU in seconds) | 10-30 minutes on single consumer GPU (RTX 4070) |
+| **GPU Compute Needed** | **0 GPU hours** (runs on laptop CPU in milliseconds) | 10-30 minutes on single consumer GPU (RTX 4070) |
 | **Model Weights** | **Unmodified** (original GGUF / HF checkpoint) | Updated low-rank adapter weights (`adapter_model.safetensors`) |
 | **Artifact Size** | **< 50 KB JSON** (< 1 KB for calibrator alone) | 15 MB - 50 MB LoRA adapter safetensors |
-| **Runtime Portability** | Works instantly with any backend (Ollama, vLLM, llama.cpp, CPU) | Requires runtime with PEFT/LoRA support |
+| **Runtime Portability** | Works directly with any backend (Ollama, vLLM, llama.cpp, CPU) | Requires runtime with PEFT/LoRA support |
 | **OOD Safety** | Szymkiewicz-Simpson rubric gating rejects OOD prompts | Implicitly bounds activations; retains base model fallback |
 | **Recommended Use Case** | Fast iterations, multi-tenant setups, air-gapped CPU runners | Millions of daily queries on fixed domains with dedicated GPU |

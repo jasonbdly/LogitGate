@@ -1,70 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 420" width="100%" height="100%" role="img" aria-label="The 3-Layer Cascade Funnel Architecture">
-  <title>The 3-Layer Cascade Funnel Architecture</title>
-  <desc>Shows 100 candidate checks filtering through Layer 0, Layer 1, and Layer 2</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="600" viewBox="0 0 540 600" role="img" aria-label="The 3-Layer Cascade Triage Funnel">
+  <title>The 3-Layer Cascade Triage Funnel</title>
+  <desc>Vertical triage funnel showing 100 candidate outputs entering at the top: 15 fail Stage 0 deterministic rules, 60 pass and 12 fail Stage 1 logit checks, and only 13 borderline cases drop to Stage 2 JudgeGate.</desc>
   <defs>
     <style>
     :root {
       --canvas-bg: #f8fafc;
-      --card-bg: #ffffff;
-      --card-border: #cbd5e1;
-      --card-subtle: #f1f5f9;
+      --surface-bg: #ffffff;
+      --surface-subtle: #f1f5f9;
+      --border-muted: #cbd5e1;
       --text-primary: #0f172a;
       --text-secondary: #334155;
-      --text-muted: #64748b;
-      --text-inverse: #ffffff;
+      --text-muted: #475569;
       --accent-emerald: #059669;
       --accent-emerald-bg: #ecfdf5;
-      --accent-emerald-border: #a7f3d0;
+      --accent-emerald-border: #6ee7b7;
       --accent-rose: #dc2626;
       --accent-rose-bg: #fef2f2;
-      --accent-rose-border: #fecaca;
+      --accent-rose-border: #fca5a5;
       --accent-amber: #d97706;
       --accent-amber-bg: #fffbeb;
-      --accent-amber-border: #fde68a;
+      --accent-amber-border: #fcd34d;
       --accent-sky: #0284c7;
       --accent-sky-bg: #f0f9ff;
-      --accent-sky-border: #bae6fd;
+      --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
       --accent-indigo-bg: #eef2ff;
-      --accent-indigo-border: #c7d2fe;
+      --accent-indigo-border: #a5b4fc;
       --accent-purple: #7c3aed;
       --accent-purple-bg: #f5f3ff;
-      --accent-purple-border: #ddd6fe;
-      --flow-line: #94a3b8;
-      --flow-arrow: #64748b;
-      --glow-fast: rgba(16, 185, 129, 0.25);
+      --accent-purple-border: #c4b5fd;
+      --flow-line: #64748b;
+      --grid-line: #e2e8f0;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --canvas-bg: #0b1120;
-        --card-bg: #1e293b;
-        --card-border: #334155;
-        --card-subtle: #0f172a;
+        --surface-bg: #1e293b;
+        --surface-subtle: #0f172a;
+        --border-muted: #334155;
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --text-inverse: #0f172a;
         --accent-emerald: #10b981;
         --accent-emerald-bg: #064e3b;
-        --accent-emerald-border: #047857;
+        --accent-emerald-border: #059669;
         --accent-rose: #f43f5e;
         --accent-rose-bg: #4c0519;
-        --accent-rose-border: #be123c;
+        --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
         --accent-amber-bg: #451a03;
-        --accent-amber-border: #b45309;
+        --accent-amber-border: #d97706;
         --accent-sky: #38bdf8;
         --accent-sky-bg: #082f49;
-        --accent-sky-border: #0369a1;
+        --accent-sky-border: #0284c7;
         --accent-indigo: #818cf8;
         --accent-indigo-bg: #1e1b4b;
-        --accent-indigo-border: #4338ca;
+        --accent-indigo-border: #4f46e5;
         --accent-purple: #a78bfa;
         --accent-purple-bg: #2e1065;
-        --accent-purple-border: #6d28d9;
-        --flow-line: #475569;
-        --flow-arrow: #94a3b8;
-        --glow-fast: rgba(16, 185, 129, 0.45);
+        --accent-purple-border: #7c3aed;
+        --flow-line: #94a3b8;
+        --grid-line: #1e293b;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -82,10 +78,10 @@
     }
     .anim-dash {
       stroke-dasharray: 6 5;
-      animation: dashMove 2.5s linear infinite;
+      animation: dashMove 2.4s linear infinite;
     }
     .anim-pulse {
-      animation: pulseGlow 2.5s ease-in-out infinite;
+      animation: pulseGlow 2.4s ease-in-out infinite;
     }
     .anim-probe {
       animation: probeSweep 3s ease-in-out infinite alternate;
@@ -100,20 +96,20 @@
         opacity: 0.95;
       }
       50% {
-        opacity: 0.45;
+        opacity: 0.4;
       }
     }
     @keyframes probeSweep {
       0% {
-        transform: translateX(0px);
+        transform: translateX(-8px);
       }
       100% {
-        transform: translateX(18px);
+        transform: translateX(8px);
       }
     }
 </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-arrow)" />
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-line)" />
     </marker>
     <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
@@ -125,87 +121,74 @@
       <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
     </marker>
   </defs>
-  <rect width="920" height="420" fill="var(--canvas-bg)" rx="12" />
+  <rect width="540" height="600" fill="var(--canvas-bg)" rx="12" />
 
-  <!-- Header Bar -->
-  <rect x="40" y="24" width="225" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo-border)" stroke-width="1" />
-  <text x="48" y="39" font-size="10" font-weight="700" fill="var(--accent-indigo)" class="mono">CASCADE ROUTING ARCHITECTURE</text>
-  <text x="40" y="68" font-size="18" font-weight="700" fill="var(--text-primary)">The 3-Layer Cascade Funnel: High Throughput, Bounded Quality</text>
-  <text x="40" y="86" font-size="12" fill="var(--text-secondary)">Fast-pathing 85%+ of evaluations at zero generated tokens and sub-100ms latency</text>
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">3-Layer Triage Funnel: Bounded Quality at Speed</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">87% of evaluations exit before any multi-token reasoning judge is called</text>
 
-  <!-- Input Feed Badge -->
-  <rect x="40" y="112" width="105" height="54" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <text x="52" y="132" font-size="13" font-weight="700" fill="var(--text-primary)">100 Checks</text>
-  <text x="52" y="150" font-size="10" fill="var(--text-muted)">Inbound Drafts</text>
+  <!-- Input Stream Mouth -->
+  <text x="270" y="84" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text-primary)">100 Candidate Outputs</text>
+  <line x1="250" y1="92" x2="250" y2="118" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
+  <line x1="270" y1="92" x2="270" y2="118" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
+  <line x1="290" y1="92" x2="290" y2="118" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
 
-  <!-- Flow to Layer 0 -->
-  <line x1="145" y1="139" x2="175" y2="139" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
+  <!-- Funnel Outer Walls -->
+  <polygon points="136,124 404,124 316,420 224,420" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="2" />
 
-  <!-- Layer 0 Card -->
-  <rect x="180" y="105" width="200" height="235" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="180" y="105" width="5" height="235" rx="2" fill="var(--accent-sky)" />
-  <rect x="195" y="118" width="125" height="18" rx="3" fill="var(--accent-sky-bg)" stroke="var(--accent-sky-border)" stroke-width="1" />
-  <text x="201" y="131" font-size="9" font-weight="700" fill="var(--accent-sky)" class="mono">LAYER 0: DETERMINISTIC</text>
-  <text x="195" y="154" font-size="14" font-weight="700" fill="var(--text-primary)">AST &amp; Schema Gate</text>
-  <text x="195" y="171" font-size="11" fill="var(--text-muted)" class="mono">&lt; 0.1 ms | 0 Tokens | CPU</text>
+  <!-- Stage 0 Sieve Mesh (y=170..210) -->
+  <rect x="148" y="166" width="244" height="36" rx="4" fill="var(--accent-sky-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <line x1="154" y1="202" x2="386" y2="202" stroke="var(--accent-sky)" stroke-width="2.5" stroke-dasharray="6 4" />
+  <text x="270" y="183" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Stage 0: AST / Schema Sieve</text>
+  <text x="270" y="198" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt; 0.1 ms | CPU | 0 LLM calls</text>
 
-  <rect x="195" y="184" width="170" height="42" rx="4" fill="var(--card-subtle)" />
-  <text x="202" y="200" font-size="10" fill="var(--text-secondary)">- Schema &amp; JSON syntax</text>
-  <text x="202" y="215" font-size="10" fill="var(--text-secondary)">- Banned tokens / tools</text>
+  <!-- Stage 0 Left Chute (15 Blocked) -->
+  <path d="M 148 184 L 112 184 Q 82 184 82 214 L 82 228" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
+  <rect x="18" y="234" width="128" height="46" rx="6" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.5" />
+  <text x="82" y="254" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-rose)">15 Blocked</text>
+  <text x="82" y="271" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Bad syntax / rules</text>
 
-  <!-- Layer 0 Rejections -->
-  <path d="M 280 236 L 280 270" stroke="var(--accent-rose)" stroke-width="2" marker-end="url(#arrow-rose)" />
-  <rect x="205" y="278" width="150" height="48" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose-border)" stroke-width="1" />
-  <text x="215" y="296" font-size="11" font-weight="700" fill="var(--accent-rose)">15 Malformed Rejected</text>
-  <text x="215" y="312" font-size="9" fill="var(--accent-rose)">Fast REJECT (&lt;0.1 ms)</text>
+  <!-- Passing down to Stage 1 -->
+  <text x="270" y="238" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text-primary)">85 valid pass mesh</text>
+  <line x1="270" y1="244" x2="270" y2="266" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
 
-  <!-- Flow to Layer 1 -->
-  <path d="M 380 148 L 415 148" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
-  <text x="382" y="140" font-size="9" font-weight="600" fill="var(--text-muted)">85 Valid</text>
+  <!-- Stage 1 Optical Logit Gauge (y=272..326) -->
+  <rect x="182" y="272" width="176" height="54" rx="6" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="270" y="292" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">Stage 1: LogitGate</text>
+  <text x="270" y="309" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">~40-90 ms | 0 tok gen</text>
+  <line x1="194" y1="319" x2="346" y2="319" stroke="var(--accent-emerald)" stroke-width="2" class="anim-pulse" />
 
-  <!-- Layer 1 Card -->
-  <rect x="420" y="105" width="250" height="235" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="420" y="105" width="5" height="235" rx="2" fill="var(--accent-emerald)" />
-  <rect x="435" y="118" width="125" height="18" rx="3" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
-  <text x="441" y="131" font-size="9" font-weight="700" fill="var(--accent-emerald)" class="mono">LAYER 1: FIRST-TOKEN</text>
-  <text x="435" y="154" font-size="14" font-weight="700" fill="var(--text-primary)">LogitGate Evaluator</text>
-  <text x="435" y="171" font-size="11" fill="var(--text-muted)" class="mono">~40-90 ms | 0 Tokens Gen</text>
+  <!-- Stage 1 Left Chute (12 Clear Fails) -->
+  <path d="M 182 302 L 112 302 Q 82 302 82 332 L 82 346" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
+  <rect x="18" y="352" width="128" height="46" rx="6" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.5" />
+  <text x="82" y="372" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-rose)">12 Fast Fail</text>
+  <text x="82" y="389" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">P &lt;= 0.20</text>
 
-  <!-- Layer 1 Conformal Partition -->
-  <rect x="435" y="184" width="220" height="72" rx="4" fill="var(--card-subtle)" />
-  <text x="442" y="200" font-size="10" font-weight="600" fill="var(--accent-emerald)">P &gt;= 0.85 : 60 Confident Pass</text>
-  <text x="442" y="217" font-size="10" font-weight="600" fill="var(--accent-rose)">P &lt;= 0.20 : 12 Confident Fail</text>
-  <text x="442" y="234" font-size="10" font-weight="600" fill="var(--accent-amber)">0.20 &lt; P &lt; 0.85 : 13 Uncertain</text>
-  <text x="442" y="248" font-size="9" fill="var(--text-muted)">2-pass debiased log-odds</text>
+  <!-- Stage 1 Right Chute (60 Confident Passes) -->
+  <path d="M 358 298 L 428 298 Q 458 298 458 328 L 458 346" fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" marker-end="url(#arrow-emerald)" />
+  <rect x="394" y="352" width="128" height="46" rx="6" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="458" y="372" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">60 Fast Pass</text>
+  <text x="458" y="389" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">P &gt;= 0.85</text>
 
-  <!-- Fast Pass Exit -->
-  <path d="M 545 264 L 545 295" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
-  <rect x="475" y="298" width="140" height="28" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
-  <text x="485" y="316" font-size="10" font-weight="700" fill="var(--accent-emerald)">72 Total Fast-Pathed</text>
+  <!-- Neck -> Stage 2 Lens -->
+  <text x="270" y="366" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent-amber)">13 Uncertain</text>
+  <text x="270" y="383" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">0.20 &lt; P &lt; 0.85</text>
+  <line x1="270" y1="392" x2="270" y2="438" stroke="var(--accent-amber)" stroke-width="2.5" class="anim-dash" marker-end="url(#arrow-amber)" />
 
-  <!-- Flow to Layer 2 -->
-  <path d="M 670 234 L 705 234" stroke="var(--accent-amber)" stroke-width="2" class="anim-dash" marker-end="url(#arrow-amber)" />
-  <text x="672" y="224" font-size="9" font-weight="700" fill="var(--accent-amber)">13 Escalated</text>
+  <!-- Magnifying Lens (Stage 2 JudgeGate) -->
+  <circle cx="228" cy="482" r="34" fill="var(--accent-amber-bg)" stroke="var(--accent-amber)" stroke-width="3" />
+  <circle cx="228" cy="482" r="24" fill="none" stroke="var(--accent-amber)" stroke-width="1.2" opacity="0.55" />
+  <line x1="253" y1="507" x2="274" y2="528" stroke="var(--accent-amber)" stroke-width="5" stroke-linecap="round" />
+  <text x="228" y="486" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">CoT</text>
 
-  <!-- Layer 2 Card -->
-  <rect x="710" y="105" width="170" height="235" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
-  <rect x="710" y="105" width="5" height="235" rx="2" fill="var(--accent-amber)" />
-  <rect x="725" y="118" width="115" height="18" rx="3" fill="var(--accent-amber-bg)" stroke="var(--accent-amber-border)" stroke-width="1" />
-  <text x="731" y="131" font-size="9" font-weight="700" fill="var(--accent-amber)" class="mono">LAYER 2: FULL CoT</text>
-  <text x="725" y="154" font-size="14" font-weight="700" fill="var(--text-primary)">JudgeGate</text>
-  <text x="725" y="171" font-size="11" fill="var(--text-muted)" class="mono">~1500 ms | 200 Tokens</text>
+  <text x="282" y="468" font-size="14" font-weight="700" fill="var(--text-primary)">Stage 2: JudgeGate</text>
+  <text x="282" y="487" font-size="12" fill="var(--text-secondary)" class="mono">~1500 ms | 200 tok critique</text>
+  <text x="282" y="506" font-size="12" font-weight="600" fill="var(--accent-amber)">11 Pass / 2 Fail (edge cases)</text>
 
-  <rect x="725" y="184" width="140" height="72" rx="4" fill="var(--card-subtle)" />
-  <text x="732" y="202" font-size="10" fill="var(--text-secondary)">Step-by-step audit</text>
-  <text x="732" y="218" font-size="10" fill="var(--text-secondary)">Heavy frontier LLM</text>
-  <text x="732" y="235" font-size="10" font-weight="600" fill="var(--text-primary)">11 Pass / 2 Fail</text>
-  <text x="732" y="249" font-size="9" fill="var(--accent-amber)">High latency fallback</text>
-
-  <!-- Bottom Metric Summary Strip -->
-  <rect x="40" y="356" width="840" height="42" rx="6" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1" />
-  <text x="55" y="381" font-size="11" font-weight="600" fill="var(--text-primary)">Funnel Outcome:</text>
-  <text x="165" y="381" font-size="11" fill="var(--accent-emerald)" font-weight="700">&#x25CF; 87% Fast-Pathed (Layer 0 + 1)</text>
-  <text x="390" y="381" font-size="11" fill="var(--accent-amber)" font-weight="700">&#x25CF; 13% Escalated to Judge</text>
-  <text x="590" y="381" font-size="11" fill="var(--accent-indigo)" font-weight="700">&#x25CF; 8.5x Cost &amp; Latency Reduction</text>
+  <!-- Bottom Outcome Strip -->
+  <rect x="24" y="544" width="492" height="40" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
+  <text x="114" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">87% Fast-Pathed</text>
+  <text x="270" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">13% Escalated</text>
+  <text x="424" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-indigo)">~8.5x Cost Drop</text>
 
 </svg>

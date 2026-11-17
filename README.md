@@ -10,11 +10,19 @@
 
 **Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs.**
 
-Standard LLM-as-a-Judge evaluations prompt a generative model to write a 200 to 400 word critique before emitting `PASS` or `FAIL`. Generating those tokens costs 1.5 to 6 seconds per assertion on local hardware. Conversely, forcing naive `max_tokens=1` or boolean structured outputs produces severe position and affirmative token bias: off-the-shelf models strongly prefer letter "A" and positive tokens, while greedy decoding collapses a 51% coin flip and 99% certainty into the identical boolean `True`, destroying the uncertainty signal needed to escalate difficult edge cases.
+LogitGate evaluates LLM outputs, RAG groundedness, and agent tool calls by reading **first-token log-probabilities** (`max_tokens=1`, `0` generated reasoning tokens) instead of waiting seconds for a generative Chain-of-Thought critique. A 2-pass log-odds swap cancels position and label priors, while split-conformal thresholds fast-path clear passes/fails in **16 to 101 ms** (**4.6x to 17.0x** faster than generative judges) and escalate only genuinely uncertain edge cases.
 
-LogitGate extracts debiased, calibrated probabilities from **first-token log-probabilities** (`max_tokens=1, temperature=0.0`, 0 generated critique tokens). It neutralizes label and token-order priors with an analytical 2-pass log-odds swap, and uses split-conformal calibration to escalate only borderline inputs to a generative judge.
+---
 
-Across multi-domain benchmarks, LogitGate evaluates inputs in **16 to 43 ms** (single-pass) and **32 to 101 ms** (debiased), delivering **4.6x to 17.0x** end-to-end speedups over generative judges while matching or exceeding evaluation accuracy.
+## Why First-Token Logits Instead of Text Generation?
+
+When grading an LLM output or RAG reply against a rubric, there are three ways to ask a model for a verdict:
+
+1. **Generative CoT Judge (`1.5-3.0 s`)**: Prompts a model to generate 150-300 reasoning tokens sequentially before emitting `PASS` or `FAIL`. High latency and token cost make it impractical on every CI test or live chat turn.
+2. **Naive `"Answer YES or NO"` Prompt**: Generates 1 text token (`"YES"`), which hides whether the model was `51%` guessing or `99%` certain, skews heavily toward favorite tokens and positions (`"YES"` / `"A"`), splits mass across `"Yes"` / `" Yes"` / `"yes"`, and can be hijacked by prompt injection inside the candidate.
+3. **LogitGate (`~40-90 ms`, `0` generated tokens)**: Sends a structured system + nonce-isolated user prompt with `max_tokens=1` and `<think>` disabled, runs **parallel prompt prefill only**, and reads the model's raw first-token log-probabilities (`top_logprobs`) across `A/B` surface variants in two swapped passes (`A=Pass, B=Fail` and `A=Fail, B=Pass`, sharing the GPU KV-cache). Swapping slots cancels position and token-prior bias algebraically, yielding a calibrated `0.0-1.0` probability that fast-paths clear passes/fails and escalates only uncertain middle-band cases (`0.20 < P < 0.85`) to `JudgeGate`.
+
+For an illustrated step-by-step walkthrough, see [docs/eli5/how_logitgate_works.md](docs/eli5/how_logitgate_works.md).
 
 ---
 
@@ -41,8 +49,8 @@ Across multi-domain benchmarks, LogitGate evaluates inputs in **16 to 43 ms** (s
 ```
 
 1. **Layer 0 (`ASTGate` / `ToolCallGate`, `<0.1 ms` on CPU)**: Deterministic validation runs first: Python AST syntax, forbidden imports, JSON/Pydantic schemas, regex security checks, and agent tool-call parameters (path traversal, SSRF, allowed tools). Malformed inputs fail immediately with 0 LLM calls.
-2. **Layer 1 (`LogitGate` / `ChoiceGate` / `ScoreGate` / `RankGate`, `~16-100 ms` on GPU, `0` generated tokens)**: Evaluates the prompt prefill log-probabilities at `max_tokens=1`. A 2-pass permutation cancels position and token-prior biases analytically in log-odds space, while BPE surface variants are marginalized across token variants.
-3. **Layer 2 (`JudgeGate`, `1.5-5.0 s`)**: Generative critique runs only when Layer 1 confidence lands in an ambiguous band (`0.20 < P < 0.85`), preserving full chain-of-thought diagnostics where needed while skipping 70% to 90% of generative judge latency.
+2. **Layer 1 (`LogitGate` / `ChoiceGate` / `ScoreGate` / `RankGate`, `~16-100 ms` on GPU, `0` generated tokens)**: Evaluates prompt prefill log-probabilities at `max_tokens=1` using 2-pass symmetric debiasing and BPE surface marginalization.
+3. **Layer 2 (`JudgeGate`, `1.5-5.0 s`)**: Generative critique runs only when Layer 1 confidence lands in an ambiguous band (`0.20 < P < 0.85`), preserving full chain-of-thought diagnostics where needed while skipping 70% to 90% of generative judge calls.
 
 For full architectural details, see [docs/architecture.md](docs/architecture.md) and [docs/README.md](docs/README.md).
 
@@ -145,31 +153,45 @@ def get_user_by_id(cursor, user_id: int):
 ```python
 from logitgate import LogitGate, ToolCallGate
 
-# Grounded RAG evaluation over retrieved context
-rag_gate = LogitGate("Is the generated response faithful to the retrieved passage?")
+# Trusted retrieved documents (prefilled once in KV-cache) vs. untrusted LLM draft
+retrieved_policy_chunks = [
+    "Standard tier: 14-day refund window.",
+    "Enterprise tier: 30-day refund window.",
+]
+user_question = "Can I get a refund on my Standard plan after 20 days?"
+faithful_llm_reply = (
+    "Standard plans only qualify for refunds within 14 days; "
+    "the 30-day window applies only to Enterprise."
+)
+
+# context= holds trusted retrieved docs (prefilled once in KV-cache); candidate= is the untrusted draft checked for hallucinations
+rag_gate = LogitGate("Is the generated response faithful to the retrieved policy?")
 rag_verdict = rag_gate.evaluate(
-    candidate="Account #4401 was registered on June 12, 2021.",
-    context=["Order record: account #4401 created 2021-06-12."],
-    query="When was account #4401 created?",
+    candidate=faithful_llm_reply,
+    context=retrieved_policy_chunks,
+    query=user_question,
 )
 assert rag_verdict.passed
+# Note: A hallucinated reply such as "Yes, 30 days" fails against a live backend (P <= 0.20, passed=False).
 
-# Pre-execution agent tool-call guardrail (<0.1ms Layer 0 check)
+# Pre-execution agent tool-call guardrail (<0.1ms Stage-0 sink check + Stage-1 intent check)
 tool_gate = ToolCallGate(
-    allowed_tools=["fetch_profile", "read_docs"],
-    allowed_roots=["/var/data"],
+    allowed_tools=["read_invoice", "list_orders"],
+    allowed_roots=["/var/data/invoices"],
+    user_intent="Read invoice #902 for the customer",
 )
 tool_verdict = tool_gate.evaluate(
-    {"name": "fetch_profile", "arguments": {"user_id": 4401}}
+    {"name": "read_invoice", "arguments": {"path": "/var/data/invoices/inv_902.pdf"}}
 )
 assert tool_verdict.passed
+# Path traversal ("../../etc/passwd") or SSRF ("http://169.254.169.254") fails in <0.1ms at Stage 0.
 ```
 
 ---
 
 ## Common vs. Power-User Feature Map (3-Tier Docs)
 
-LogitGate organizes documentation across three depth tiers: **Quick Notes** (zero-fluff copy-paste recipes), **Deep Notes** (systems architecture, mathematical proofs, security isolation), and **Visual ELI5** (intuitive animated walkthroughs). Explore the portal in [docs/README.md](docs/README.md).
+LogitGate organizes documentation across three depth tiers: **Quick Notes** (copy-paste recipes), **Deep Notes** (systems architecture, mathematical proofs, security isolation), and **Visual ELI5** (illustrated step-by-step walkthroughs). Explore the portal in [docs/README.md](docs/README.md).
 
 ### Table 1: Common Everyday Features (90% Path)
 

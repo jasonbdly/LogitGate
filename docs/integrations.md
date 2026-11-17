@@ -24,7 +24,7 @@ pytest -o logitgate_backend=stub://default
 
 The `@check` decorator supports the complete feature suite of LogitGate:
 
-- **Sync and Async Test Functions**: Seamlessly wraps sync test functions and `@pytest.mark.asyncio` coroutines.
+- **Sync and Async Test Functions**: Wraps sync test functions and `@pytest.mark.asyncio` coroutines without boilerplate runners.
 - **Grounded Verification (`context` & `query`)**: Validates answers against retrieved documents or user queries.
 - **Categorical Routing (`choices` & `pass_choices`)**: Asserts that an artifact maps to approved discrete choices.
 - **Ordinal Scoring (`score_range` & `score_threshold`)**: Enforces continuous score expectations (e.g. 1 to 5).
@@ -65,7 +65,7 @@ def test_support_classification():
 # 3. Multi-Rubric Code Quality Check
 @check(
     rubrics=[
-        "Function includes comprehensive Python type hints.",
+        "Function includes complete Python type hints.",
         "Function contains no hardcoded credentials or API keys.",
         "Function handles negative numbers by raising ValueError.",
     ],
@@ -89,7 +89,7 @@ LogitGate integrates natively with the DeepEval evaluation framework:
 
 ### A. High-Speed System-1 Judge Model (`LogitGateSystemOneModel`)
 
-Modern LLM evaluation suites running hundreds of test cases suffer from prohibitive latency and cost when using generative judges. `LogitGateSystemOneModel` acts as a drop-in System-1 judge for DeepEval's `JevEval` metrics (Deußer et al., 2026), evaluating test cases in **36–90 ms** using raw first-token logprobs.
+LLM evaluation suites running hundreds of test cases incur multi-second latency and high token bills when backed by generative judges. `LogitGateSystemOneModel` acts as a drop-in System-1 judge for DeepEval's `JevEval` metrics (Deußer et al., 2026), evaluating each `LLMTestCase` (`input`, `actual_output`) in **36-90 ms** with **0 generated CoT tokens** using raw first-token logprobs.
 
 `LogitGateSystemOneModel` supports all three DeepEval System-1 schemas:
 - **`NoulQuestion`**: Evaluates binary statements, returning `NoulAnswer(probability=...)`.
@@ -157,9 +157,9 @@ print(f"Confidence Score: {metric.score:.3f}, Passed: {metric.is_successful()}")
 
 ## 3. LangGraph Multi-Agent Routing (`as_conditional_edge` & `as_async_conditional_edge`)
 
-In multi-agent systems and state graphs (LangGraph, AutoGen), conditional routing traditionally requires an LLM to generate structured JSON text, introducing 2–5 seconds of latency per routing step.
+In multi-agent systems and state graphs (LangGraph, AutoGen), conditional routing traditionally requires an LLM to generate structured JSON text, introducing 2-5 seconds of decode latency per routing step.
 
-LogitGate's `as_conditional_edge` and `as_async_conditional_edge` convert any `LogitGate` or `ChoiceGate` into a sub-50ms routing edge.
+LogitGate's `as_conditional_edge` and `as_async_conditional_edge` convert any `LogitGate` or `ChoiceGate` into a **sub-50 ms routing edge** (0 generated tokens), extracting the target field via `state_key` and routing uncertain `AMBIGUOUS` states to `ambiguous_node` instead of forcing an arbitrary branch.
 
 ### Universal State Polymorphism
 
@@ -277,7 +277,7 @@ with Cascade(
 
 When building autonomous agents using Anthropic's Model Context Protocol (MCP) or OpenAI function calling, tools frequently execute system commands, filesystem queries, or database modifications.
 
-`ToolCallGate` inspects tool calls before execution, providing deterministic structural defenses (SSRF, path traversal, destructive SQL/shell) alongside semantic intent alignment:
+`ToolCallGate` inspects tool-call payloads before execution, separating the untrusted `candidate` JSON-RPC/tool dict from the trusted `user_intent`. Stage-0 deterministic defenses (SSRF, path traversal, destructive SQL/shell) block structural attacks in **<0.05 ms with 0 LLM calls**, while optional Stage-1 intent alignment (`check_intent=True`) verifies semantic compliance in **~45 ms**:
 
 ```python
 from logitgate import ToolCallGate
@@ -330,7 +330,7 @@ print(f"Attack Blocked: {attack_verdict.reason}")
 
 ## 6. Bring-Your-Own (BYO) Syntactic & Schema Validators (`ASTGate`)
 
-`ASTGate` acts as a universal Layer-0 (`<0.1 ms`, `can_fast_path = False`) adapter between your pipeline and Python's parsing ecosystem.
+`ASTGate` acts as a Layer-0 (**<0.1 ms, 0 LLM calls**, `can_fast_path = False`) adapter between your pipeline and Python's parsing ecosystem, eliminating malformed JSON/code before paying GPU prefill or judge costs.
 
 When initialized with `normalize=True`, `ASTGate` automatically strips conversational preamble, reasoning tags (`<think>...</think>`), and markdown fences (` ```python ... ``` `) before running structural validators:
 
