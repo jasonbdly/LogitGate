@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.16.0] - 2026-11-16
+
+### Added
+- **Pure In-Repo Three-Tier Progressive Documentation (`docs/`):** Added a 15-page GitHub/GitLab-native documentation portal (`docs/README.md`) organized by reader depth and workflow frequency: Expert Quick Notes (`docs/quick/{quickstart_recipes,rag_and_agents,backends_and_sidecars,integrations_and_otel}.md`), Deep Architecture & Security Notes (`docs/architecture.md`, `docs/math_and_debiasing.md`, `docs/deep/security_and_adversarial.md`), Visual ELI5 (`docs/eli5/how_logitgate_works.md`), and Power-User / Research Guides (`docs/advanced/{distillation_and_lora,drift_and_adaptive_conformal,recurrent_and_hardware}.md`).
+- **Deterministic Light/Dark Animated Architecture SVGs (`scripts/generate_visuals.py`, `docs/assets/`):** Added reproducible zero-script, accessibility-aware (`prefers-color-scheme: dark` and `prefers-reduced-motion: reduce`) CSS-animated storyboard SVGs (`cascade_flow.svg`, `symmetric_debiasing.svg`, `conformal_bands.svg`, `rag_prefix_cache.svg`, `toolcall_shield.svg`, and `stream_guard_abort.svg`) alongside CI link, XML, and `inspect.signature` snippet verification (`tests/test_v0160_docs_and_visuals.py`).
+
+### Changed
+- **Streamlined PyPI-Safe `README.md` & Executive Benchmark Summary (`docs/benchmarks.md`):** Condensed `README.md` into a concise PyPI-compatible storefront separating Common (90% everyday path) from Power-User features, and upgraded `docs/benchmarks.md` with a decision-grade Executive Summary table (95% Wilson CIs, exact McNemar p-values, AUROC/Brier/ECE, and `v0.15.0` RAG, `ToolCallGate`, and sidecar fallback benchmarks).
+
+### Fixed
+- **Gate/Cascade Backend Ownership & Nonce Delimiter Hardening:** Fixed `JudgeGate` missing `_owns_backend` / `_owns_cache` / `_owns_sink` tracking on `close()` / `aclose()`, prevented `Cascade(rubric=..., backend=...)` from closing caller-injected backend instances on teardown, and escaped literal closing delimiter tags inside `_format_bounded_block()`.
+
 ## [0.15.0] - 2026-11-16
 
 ### Added
