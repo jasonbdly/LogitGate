@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.16.1] - 2026-11-16
+
+### Changed
+- **PEP 639 SPDX Packaging Metadata (`pyproject.toml`):** Updated build metadata to `setuptools>=77.0.0`, SPDX `license = "Apache-2.0"`, and `license-files = ["LICENSE"]`, eliminating setuptools packaging deprecation warnings during wheel and sdist builds.
+
+### Fixed
+- **Slim-Container CI & Python 3.10 Matrix Compatibility:** Added `instructions` and `statement` keyword support to zero-`deepeval` fallback `ChoiceQuestion` and `ScoreQuestion` stubs, annotated `LogitGateMetric.threshold: float | None` and `load_dory_model()` return types for isolated `mypy` runs without optional extras installed, and handled CPython 3.10 `asyncio.run()` `CancelledError` message stripping in batch cancellation tests.
+
 ## [0.16.0] - 2026-11-16
 
 ### Added
