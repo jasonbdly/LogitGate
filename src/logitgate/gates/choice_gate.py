@@ -6,7 +6,7 @@ import secrets
 import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -36,8 +36,9 @@ from logitgate.debiasing.softmax import (
 from logitgate.debiasing.softmax import (
     softmax_probabilities as _softmax,
 )
-from logitgate.exceptions import BackendError, ConfigurationError
+from logitgate.exceptions import BackendError, ConfigurationError, UnsupportedLogprobsError
 from logitgate.gates.base import BaseGate
+from logitgate.gates.logit_gate import UnsupportedLogprobsPolicy, _validate_rag_context_and_query
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
@@ -117,6 +118,11 @@ class ChoiceGate(BaseGate):
         logit_temperature: float | Literal["auto"] | None = None,
         name: str = "ChoiceGate",
         *,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+        on_unsupported_logprobs: UnsupportedLogprobsPolicy = "raise",
+        sidecar_backend: str | LogitBackend | None = None,
+        sidecar_model: str | None = None,
         min_confidence: float | None = None,
         min_margin: float | None = None,
         save_on_fail: bool | None = None,
@@ -173,9 +179,39 @@ class ChoiceGate(BaseGate):
             seen_upper.add(k_upper)
             normalized_options[k_clean] = v
 
+        _validate_rag_context_and_query(context, query)
+        if on_unsupported_logprobs not in ("raise", "escalate", "sidecar"):
+            raise ConfigurationError(
+                f"Invalid on_unsupported_logprobs '{on_unsupported_logprobs}'. "
+                f"Must be one of ['raise', 'escalate', 'sidecar']"
+            )
+        if on_unsupported_logprobs == "sidecar" and sidecar_backend is None:
+            raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+
         owns_backend = not isinstance(backend, LogitBackend)
         resolved_backend = _resolve_logit_backend(backend, model=model)
+        owns_sidecar = False
+        resolved_sidecar: LogitBackend | None = None
+        eff_sidecar_model: str | None = None
+        sidecar_temp = 1.0
         try:
+            if sidecar_backend is not None:
+                owns_sidecar = not isinstance(sidecar_backend, LogitBackend)
+                resolved_sidecar = _resolve_logit_backend(sidecar_backend, model=sidecar_model)
+                eff_sidecar_model = (
+                    sidecar_model
+                    or getattr(resolved_sidecar, "model", None)
+                    or getattr(resolved_sidecar, "model_name", None)
+                    or get_default_model()
+                )
+                sidecar_temp, _ = _resolve_gate_temperature(
+                    None,
+                    eff_sidecar_model,
+                    resolved_sidecar,
+                    loaded_profile,
+                    binary=False,
+                )
+
             effective_model = (
                 model
                 or getattr(resolved_backend, "model", None)
@@ -195,6 +231,8 @@ class ChoiceGate(BaseGate):
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
+            if owns_sidecar and resolved_sidecar is not None:
+                resolved_sidecar.close()
             raise
 
         _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
@@ -207,6 +245,13 @@ class ChoiceGate(BaseGate):
         self.permutation_mode = permutation_mode
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self.context = context
+        self.query = query
+        self.on_unsupported_logprobs = on_unsupported_logprobs
+        self.sidecar_backend = resolved_sidecar
+        self.sidecar_model = eff_sidecar_model
+        self.sidecar_temperature = sidecar_temp
+        self._owns_sidecar_backend = owns_sidecar
         self._needs_lazy_calibration = needs_lazy
         self._calibration_lock = threading.Lock()
         self.min_confidence = effective_min_conf
@@ -219,6 +264,25 @@ class ChoiceGate(BaseGate):
         self._owns_backend = owns_backend
         self._owns_cache = isinstance(cache, (str, Path))
         self._owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+
+    def close(self) -> None:
+        """Safely close any owned resources (backend, cache, sidecar). Idempotent."""
+        super().close()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None and hasattr(sb, "close"):
+                sb.close()
+
+    async def aclose(self) -> None:
+        """Safely and asynchronously close any owned resources. Idempotent."""
+        await super().aclose()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None:
+                if hasattr(sb, "aclose"):
+                    await sb.aclose()
+                elif hasattr(sb, "close"):
+                    sb.close()
 
     @property
     def calibration_profile(self) -> CalibrationProfile | None:
@@ -238,6 +302,16 @@ class ChoiceGate(BaseGate):
             "logit_temperature": self.logit_temperature,
             "name": self.name,
         }
+        if self.context is not None:
+            config["context"] = self.context
+        if self.query is not None:
+            config["query"] = self.query
+        if self.on_unsupported_logprobs != "raise":
+            config["on_unsupported_logprobs"] = self.on_unsupported_logprobs
+        if self.sidecar_backend is not None:
+            config["sidecar_backend"] = infer_backend_spec(self.sidecar_backend)
+        if self.sidecar_model is not None:
+            config["sidecar_model"] = self.sidecar_model
         if self.min_confidence is not None:
             config["min_confidence"] = self.min_confidence
         if self.min_margin is not None:
@@ -311,7 +385,12 @@ class ChoiceGate(BaseGate):
         )
 
     def _choice_prompts_list(
-        self, candidate: Any, *, boundary_nonce: str | None = None
+        self,
+        candidate: Any,
+        *,
+        boundary_nonce: str | None = None,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
     ) -> list[str]:
         keys = list(self.options.keys())
         values = list(self.options.values())
@@ -330,15 +409,174 @@ class ChoiceGate(BaseGate):
                     options=slot_to_desc,
                     query_first=self.query_first,
                     boundary_nonce=boundary_nonce,
+                    context=context,
+                    query=query,
                 )
             )
         return prompts
 
-    def _choice_prompts(self, candidate: Any) -> tuple[str, str | None]:
-        prompts = self._choice_prompts_list(candidate)
+    def _choice_prompts(
+        self,
+        candidate: Any,
+        *,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+    ) -> tuple[str, str | None]:
+        prompts = self._choice_prompts_list(candidate, context=context, query=query)
         return prompts[0], (prompts[1] if len(prompts) > 1 else None)
 
-    def _verdict_from_logprobs_list(self, top_list: list[TopLogprobs], t0: float) -> Verdict:
+    def _escalate_unsupported(
+        self,
+        candidate: Any,
+        exc_msg: str,
+        t0: float,
+        kwargs: dict[str, Any],
+    ) -> Verdict:
+        latency = (time.perf_counter() - t0) * 1000.0
+        reason = f"[{self.name}] Backend does not support logprobs; escalating ({exc_msg})"
+        trace = LayerTrace(
+            layer_name=self.name,
+            status=DecisionStatus.AMBIGUOUS,
+            latency_ms=latency,
+            tokens_generated=0,
+            metadata={
+                "abstained_reason": "unsupported_logprobs",
+                "fallback_policy": "escalate",
+            },
+        )
+        verdict = Verdict(
+            passed=False,
+            status=DecisionStatus.AMBIGUOUS,
+            probability=None,
+            choice=None,
+            choice_probabilities=None,
+            triggered_layer=self.name,
+            total_latency_ms=latency,
+            total_tokens_generated=0,
+            reason=reason,
+            traces=[trace],
+        )
+        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+
+    def _execute_queries(
+        self, prompts: list[str], keys: list[str], top_k: int
+    ) -> tuple[list[TopLogprobs], bool, str | None, float]:
+        from logitgate.backends.base import infer_backend_spec
+
+        backend = self.backend
+        supports = getattr(backend, "supports_logprobs", True) is not False
+        if not supports:
+            if self.on_unsupported_logprobs == "raise":
+                raise UnsupportedLogprobsError(
+                    f"Backend '{getattr(backend, 'model', 'unknown')}' does not support logprobs."
+                )
+            if self.on_unsupported_logprobs == "escalate":
+                raise UnsupportedLogprobsError("Backend does not support logprobs")
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+            top_list = [
+                self.sidecar_backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
+                for p in prompts
+            ]
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_list, True, spec, self.sidecar_temperature
+
+        try:
+            top_list = [
+                backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
+                for p in prompts
+            ]
+            return top_list, False, None, self.logit_temperature
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs in ("raise", "escalate"):
+                raise
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'") from exc
+            top_list = [
+                self.sidecar_backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
+                for p in prompts
+            ]
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_list, True, spec, self.sidecar_temperature
+
+    async def _aexecute_queries(
+        self, prompts: list[str], keys: list[str], top_k: int
+    ) -> tuple[list[TopLogprobs], bool, str | None, float]:
+        from logitgate.backends.base import infer_backend_spec
+
+        backend = self.backend
+        supports = getattr(backend, "supports_logprobs", True) is not False
+        if not supports:
+            if self.on_unsupported_logprobs == "raise":
+                raise UnsupportedLogprobsError(
+                    f"Backend '{getattr(backend, 'model', 'unknown')}' does not support logprobs."
+                )
+            if self.on_unsupported_logprobs == "escalate":
+                raise UnsupportedLogprobsError("Backend does not support logprobs")
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+            target_backend = self.sidecar_backend
+            used_temp = self.sidecar_temperature
+            spec = infer_backend_spec(target_backend)
+            sidecar_used = True
+        else:
+            target_backend = backend
+            used_temp = self.logit_temperature
+            spec = None
+            sidecar_used = False
+
+        try:
+            if len(prompts) == 1:
+                top_list = [await target_backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)]
+            elif _resolve_warm_prefix(self.warm_prefix, target_backend):
+                first = await target_backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)
+                rest = list(
+                    await asyncio.gather(
+                        *[target_backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts[1:]]
+                    )
+                )
+                top_list = [first, *rest]
+            else:
+                top_list = list(
+                    await asyncio.gather(
+                        *[target_backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts]
+                    )
+                )
+            return top_list, sidecar_used, spec, used_temp
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs in ("raise", "escalate"):
+                raise
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'") from exc
+            sb = self.sidecar_backend
+            if len(prompts) == 1:
+                top_list = [await sb.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)]
+            elif _resolve_warm_prefix(self.warm_prefix, sb):
+                first = await sb.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)
+                rest = list(
+                    await asyncio.gather(
+                        *[sb.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts[1:]]
+                    )
+                )
+                top_list = [first, *rest]
+            else:
+                top_list = list(
+                    await asyncio.gather(
+                        *[sb.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts]
+                    )
+                )
+            spec = infer_backend_spec(sb)
+            return top_list, True, spec, self.sidecar_temperature
+
+    def _verdict_from_logprobs_list(
+        self,
+        top_list: list[TopLogprobs],
+        t0: float,
+        *,
+        sidecar_used: bool = False,
+        sidecar_spec: str | None = None,
+        effective_temp: float | None = None,
+    ) -> Verdict:
         if not top_list or any(not has_finite_logprobs(top) for top in top_list):
             raise BackendError(
                 "Backend returned no token log-probabilities (top_logprobs is empty). "
@@ -355,7 +593,8 @@ class ChoiceGate(BaseGate):
             for k in keys:
                 accum[k] += (pass_raw[k] - lse_pass) / float(len(perms))
 
-        choice_probs = _softmax(accum, self.logit_temperature)
+        used_temp = max(effective_temp if effective_temp is not None else self.logit_temperature, 1e-6)
+        choice_probs = _softmax(accum, used_temp)
         best_choice, max_prob = max(choice_probs.items(), key=lambda kv: kv[1])
         prob_rounded = round(max_prob, 4)
         rounded = {k: round(v, 4) for k, v in choice_probs.items()}
@@ -400,6 +639,10 @@ class ChoiceGate(BaseGate):
             "permutation_mode": self.permutation_mode,
             "top2_margin": margin,
         }
+        if sidecar_used:
+            meta["sidecar_used"] = True
+            if sidecar_spec is not None:
+                meta["sidecar_backend"] = sidecar_spec
         if abstained_reason is not None:
             meta["abstained_reason"] = abstained_reason
 
@@ -453,6 +696,10 @@ class ChoiceGate(BaseGate):
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+
         self._ensure_calibrated()
         hit = lookup_cached_verdict(
             self, candidate, gate_cache=self.cache, call_kwargs=kwargs
@@ -465,17 +712,33 @@ class ChoiceGate(BaseGate):
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
         nonce = secrets.token_hex(8)
-        prompts = self._choice_prompts_list(candidate, boundary_nonce=nonce)
-        top_list = [
-            self.backend.query_top_logprobs(p, top_k=top_k, allowed_tokens=keys)
-            for p in prompts
-        ]
+        prompts = self._choice_prompts_list(
+            candidate, boundary_nonce=nonce, context=eff_context, query=eff_query
+        )
+        try:
+            top_list, sidecar_used, sidecar_spec, eff_temp = self._execute_queries(prompts, keys, top_k)
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs == "escalate":
+                return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+            raise
         return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs_list(top_list, t0), **kwargs
+            candidate,
+            self._verdict_from_logprobs_list(
+                top_list,
+                t0,
+                sidecar_used=sidecar_used,
+                sidecar_spec=sidecar_spec,
+                effective_temp=eff_temp,
+            ),
+            **kwargs,
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
+
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
 
         await self._aensure_calibrated()
         hit = lookup_cached_verdict(
@@ -489,25 +752,25 @@ class ChoiceGate(BaseGate):
         keys = list(self.options)
         top_k = max(10, 2 * len(keys))
         nonce = secrets.token_hex(8)
-        prompts = self._choice_prompts_list(candidate, boundary_nonce=nonce)
-        if len(prompts) == 1:
-            top_list = [await self.backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)]
-        elif _resolve_warm_prefix(self.warm_prefix, self.backend):
-            first = await self.backend.aquery_top_logprobs(prompts[0], top_k=top_k, allowed_tokens=keys)
-            rest = list(
-                await asyncio.gather(
-                    *[self.backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts[1:]]
-                )
-            )
-            top_list = [first, *rest]
-        else:
-            top_list = list(
-                await asyncio.gather(
-                    *[self.backend.aquery_top_logprobs(p, top_k=top_k, allowed_tokens=keys) for p in prompts]
-                )
-            )
+        prompts = self._choice_prompts_list(
+            candidate, boundary_nonce=nonce, context=eff_context, query=eff_query
+        )
+        try:
+            top_list, sidecar_used, sidecar_spec, eff_temp = await self._aexecute_queries(prompts, keys, top_k)
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs == "escalate":
+                return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+            raise
         return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs_list(top_list, t0), **kwargs
+            candidate,
+            self._verdict_from_logprobs_list(
+                top_list,
+                t0,
+                sidecar_used=sidecar_used,
+                sidecar_spec=sidecar_spec,
+                effective_temp=eff_temp,
+            ),
+            **kwargs,
         )
 
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from logitgate.backends.base import LogitBackend
 from logitgate.exceptions import ConfigurationError
 from logitgate.gates.base import BaseGate
+from logitgate.gates.logit_gate import UnsupportedLogprobsPolicy, _validate_rag_context_and_query
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
@@ -45,6 +46,11 @@ class MultiRubricGate(BaseGate):
         rubrics: Sequence[str],
         name: str = "MultiRubricGate",
         *,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+        on_unsupported_logprobs: UnsupportedLogprobsPolicy = "raise",
+        sidecar_backend: str | LogitBackend | None = None,
+        sidecar_model: str | None = None,
         fail_fast: bool = False,
         **options: Any,
     ) -> None:
@@ -55,16 +61,37 @@ class MultiRubricGate(BaseGate):
         cleaned = [r.strip() for r in rubrics if isinstance(r, str) and r.strip()]
         if len(cleaned) != len(rubrics) or not cleaned:
             raise ConfigurationError("MultiRubricGate needs one or more non-empty rubric strings")
+        _validate_rag_context_and_query(context, query)
         self.rubrics = cleaned
         self.name = name
         self.fail_fast = fail_fast
+        self.context = context
+        self.query = query
+        self.on_unsupported_logprobs = on_unsupported_logprobs
         from logitgate.gates.logit_gate import LogitGate
 
-        self._gate = LogitGate(rubric=cleaned[0], name=name, **options)
+        self._gate = LogitGate(
+            rubric=cleaned[0],
+            name=name,
+            context=context,
+            query=query,
+            on_unsupported_logprobs=on_unsupported_logprobs,
+            sidecar_backend=sidecar_backend,
+            sidecar_model=sidecar_model,
+            **options,
+        )
         self.save_on_fail = self._gate.save_on_fail
         self._owns_backend = False
         self._owns_cache = False
         self._owns_sink = False
+
+    @property
+    def sidecar_backend(self) -> LogitBackend | None:
+        return self._gate.sidecar_backend
+
+    @property
+    def sidecar_model(self) -> str | None:
+        return self._gate.sidecar_model
 
     @property
     def gates(self) -> list[LogitGate]:
@@ -138,12 +165,20 @@ class MultiRubricGate(BaseGate):
     def __repr__(self) -> str:
         return f"MultiRubricGate(rubrics={len(self.rubrics)}, backend={self.backend!r})"
 
-    def evaluate_each(self, candidate: Any) -> list[Verdict]:
+    def evaluate_each(self, candidate: Any, **kwargs: Any) -> list[Verdict]:
         """Per-rubric verdicts, in `rubrics` order."""
-        return self._gate.evaluate_batch(candidate, self.rubrics, fail_fast=self.fail_fast)
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+        kw = {**kwargs, "context": eff_context, "query": eff_query}
+        return self._gate.evaluate_batch(candidate, self.rubrics, fail_fast=self.fail_fast, **kw)
 
-    async def aevaluate_each(self, candidate: Any) -> list[Verdict]:
-        return await self._gate.aevaluate_batch(candidate, self.rubrics, fail_fast=self.fail_fast)
+    async def aevaluate_each(self, candidate: Any, **kwargs: Any) -> list[Verdict]:
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+        kw = {**kwargs, "context": eff_context, "query": eff_query}
+        return await self._gate.aevaluate_batch(candidate, self.rubrics, fail_fast=self.fail_fast, **kw)
 
     def _aggregate(self, verdicts: Sequence[Verdict], t0: float) -> Verdict:
         traces: list[LayerTrace] = []
@@ -251,26 +286,40 @@ class MultiRubricGate(BaseGate):
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+        call_kwargs = {**kwargs, "context": eff_context, "query": eff_query}
+
         self._gate._ensure_calibrated()
         hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+            self, candidate, gate_cache=self.cache, call_kwargs=call_kwargs
         )
         if hit is not None:
-            return self._snapshot(candidate, hit, kwargs, _is_cache_hit=True)
+            return self._snapshot(candidate, hit, call_kwargs, _is_cache_hit=True)
         t0 = time.perf_counter()
-        return self._snapshot(candidate, self._aggregate(self.evaluate_each(candidate), t0), kwargs)
+        return self._snapshot(
+            candidate, self._aggregate(self.evaluate_each(candidate, **call_kwargs), t0), call_kwargs
+        )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+        call_kwargs = {**kwargs, "context": eff_context, "query": eff_query}
+
         await self._gate._aensure_calibrated()
         hit = lookup_cached_verdict(
-            self, candidate, gate_cache=self.cache, call_kwargs=kwargs
+            self, candidate, gate_cache=self.cache, call_kwargs=call_kwargs
         )
         if hit is not None:
-            return self._snapshot(candidate, hit, kwargs, _is_cache_hit=True)
+            return self._snapshot(candidate, hit, call_kwargs, _is_cache_hit=True)
         t0 = time.perf_counter()
-        return self._snapshot(candidate, self._aggregate(await self.aevaluate_each(candidate), t0), kwargs)
+        return self._snapshot(
+            candidate, self._aggregate(await self.aevaluate_each(candidate, **call_kwargs), t0), call_kwargs
+        )
 
 
 __all__ = ["MultiRubricGate"]

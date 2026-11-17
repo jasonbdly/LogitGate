@@ -10,11 +10,16 @@ from logitgate.backends.base import (
     GenerativeBackend,
     LogitBackend,
     _HTTPClientMixin,
+    _response_detail,
     strip_reasoning_blocks,
     translate_transport_errors,
 )
 from logitgate.debiasing.softmax import has_any_target_token
-from logitgate.exceptions import BackendError, ConfigurationError
+from logitgate.exceptions import (
+    BackendError,
+    ConfigurationError,
+    UnsupportedLogprobsError,
+)
 
 
 class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
@@ -24,6 +29,7 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
     and generative reviews with reasoning trace suppression.
     """
 
+    supports_logprobs: bool = True
     service_name = "OpenAI-compatible server"
     connect_hint = "Check base_url, and that the server is running (vLLM: `vllm serve <model>`)."
 
@@ -48,6 +54,7 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         *,
         suppress_thinking: bool = True,
         auto_logit_bias: bool = False,
+        supports_logprobs: bool = True,
         max_retries: int = 2,
         retry_backoff_base: float = 0.25,
         retry_max_wait: float = 5.0,
@@ -56,6 +63,9 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             raise ConfigurationError(f"suppress_thinking must be a bool, got {suppress_thinking!r}")
         if not isinstance(auto_logit_bias, bool):
             raise ConfigurationError(f"auto_logit_bias must be a bool, got {auto_logit_bias!r}")
+        if not isinstance(supports_logprobs, bool):
+            raise ConfigurationError(f"supports_logprobs must be a bool, got {supports_logprobs!r}")
+        self.supports_logprobs = supports_logprobs
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "sk-dummy")
@@ -359,6 +369,10 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        if not getattr(self, "supports_logprobs", True):
+            raise UnsupportedLogprobsError(
+                f"{self.service_name} at {self.base_url} is configured with supports_logprobs=False"
+            )
         url = f"{self.base_url}/chat/completions"
         payload = self.build_query_payload(
             prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
@@ -368,12 +382,30 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             if auto_bias:
                 payload["logit_bias"] = auto_bias
         resp = self._post_with_retry(url, json=payload, headers=self._headers())
-        if resp.status_code in (400, 422) and "reasoning_effort" in payload and "reasoning_effort" not in kwargs:
-            self._supports_reasoning_effort = False
-            payload.pop("reasoning_effort", None)
-            resp = self._post_with_retry(url, json=payload, headers=self._headers())
+        if resp.status_code in (400, 422):
+            detail = _response_detail(resp)
+            detail_lower = detail.lower()
+            if "logprobs" in detail_lower or "top_logprobs" in detail_lower:
+                raise UnsupportedLogprobsError(
+                    f"{self.service_name} at {self.base_url} does not support logprobs: HTTP {resp.status_code} {detail}"
+                )
+            if "reasoning_effort" in payload and "reasoning_effort" not in kwargs:
+                self._supports_reasoning_effort = False
+                payload.pop("reasoning_effort", None)
+                resp = self._post_with_retry(url, json=payload, headers=self._headers())
         resp.raise_for_status()
-        lps = self._extract_top_logprobs_from_response(resp.json())
+        resp_data = resp.json()
+        if (
+            isinstance(resp_data, dict)
+            and isinstance(resp_data.get("choices"), list)
+            and resp_data["choices"]
+            and isinstance(resp_data["choices"][0], dict)
+            and resp_data["choices"][0].get("logprobs") in (None, {})
+        ):
+            raise UnsupportedLogprobsError(
+                f"{self.service_name} at {self.base_url} returned response with logprobs={resp_data['choices'][0].get('logprobs')!r}"
+            )
+        lps = self._extract_top_logprobs_from_response(resp_data)
         fb_payload = self._build_chat_template_fallback_payload(payload, lps, allowed_tokens, kwargs)
         if fb_payload is not None:
             resp_fb = self._post_with_retry(url, json=fb_payload, headers=self._headers())
@@ -390,6 +422,10 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        if not getattr(self, "supports_logprobs", True):
+            raise UnsupportedLogprobsError(
+                f"{self.service_name} at {self.base_url} is configured with supports_logprobs=False"
+            )
         url = f"{self.base_url}/chat/completions"
         payload = self.build_query_payload(
             prompt, top_k=top_k, allowed_tokens=allowed_tokens, **kwargs
@@ -399,12 +435,30 @@ class OpenAICompatBackend(_HTTPClientMixin, LogitBackend, GenerativeBackend):
             if auto_bias:
                 payload["logit_bias"] = auto_bias
         resp = await self._apost_with_retry(url, json=payload, headers=self._headers())
-        if resp.status_code in (400, 422) and "reasoning_effort" in payload and "reasoning_effort" not in kwargs:
-            self._supports_reasoning_effort = False
-            payload.pop("reasoning_effort", None)
-            resp = await self._apost_with_retry(url, json=payload, headers=self._headers())
+        if resp.status_code in (400, 422):
+            detail = _response_detail(resp)
+            detail_lower = detail.lower()
+            if "logprobs" in detail_lower or "top_logprobs" in detail_lower:
+                raise UnsupportedLogprobsError(
+                    f"{self.service_name} at {self.base_url} does not support logprobs: HTTP {resp.status_code} {detail}"
+                )
+            if "reasoning_effort" in payload and "reasoning_effort" not in kwargs:
+                self._supports_reasoning_effort = False
+                payload.pop("reasoning_effort", None)
+                resp = await self._apost_with_retry(url, json=payload, headers=self._headers())
         resp.raise_for_status()
-        lps = self._extract_top_logprobs_from_response(resp.json())
+        resp_data = resp.json()
+        if (
+            isinstance(resp_data, dict)
+            and isinstance(resp_data.get("choices"), list)
+            and resp_data["choices"]
+            and isinstance(resp_data["choices"][0], dict)
+            and resp_data["choices"][0].get("logprobs") in (None, {})
+        ):
+            raise UnsupportedLogprobsError(
+                f"{self.service_name} at {self.base_url} returned response with logprobs={resp_data['choices'][0].get('logprobs')!r}"
+            )
+        lps = self._extract_top_logprobs_from_response(resp_data)
         fb_payload = self._build_chat_template_fallback_payload(payload, lps, allowed_tokens, kwargs)
         if fb_payload is not None:
             resp_fb = await self._apost_with_retry(url, json=fb_payload, headers=self._headers())

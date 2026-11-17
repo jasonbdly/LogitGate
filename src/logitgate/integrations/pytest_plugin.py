@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from logitgate.backends.base import LogitBackend
 from logitgate.gates.base import BaseGate
+from logitgate.gates.logit_gate import UnsupportedLogprobsPolicy
 from logitgate.models import DecisionStatus, Verdict
 
 _CHECK_SNAPSHOT_PATHS: list[str] = []
@@ -31,6 +32,10 @@ def check(
     model: str | None = None,
     normalize: bool | Callable[[Any], Any] = False,
     *,
+    context: str | Sequence[str] | None = None,
+    query: str | None = None,
+    on_unsupported_logprobs: UnsupportedLogprobsPolicy = "raise",
+    sidecar_backend: Any = None,
     calibration_profile: Any = None,
     distillation_bundle: Any = None,
     choices: Mapping[str, str] | None = None,
@@ -134,9 +139,10 @@ def check(
 
         gate: BaseGate
         if choices is not None:
+            eff_question = rubric or query or "Evaluation choice"
             if pass_choices is not None:
                 gate = _PassChoicesChoiceGate(
-                    question=rubric,
+                    question=eff_question,
                     options=choices,
                     pass_choices=pass_choices,
                     backend=backend,
@@ -145,10 +151,14 @@ def check(
                     min_margin=min_margin,
                     profile=calibration_profile,
                     cache=cache,
+                    context=context,
+                    query=query,
+                    on_unsupported_logprobs=on_unsupported_logprobs,
+                    sidecar_backend=sidecar_backend,
                 )
             else:
                 gate = ChoiceGate(
-                    question=rubric,
+                    question=eff_question,
                     options=choices,
                     backend=backend,
                     model=model,
@@ -156,11 +166,15 @@ def check(
                     min_margin=min_margin,
                     profile=calibration_profile,
                     cache=cache,
+                    context=context,
+                    query=query,
+                    on_unsupported_logprobs=on_unsupported_logprobs,
+                    sidecar_backend=sidecar_backend,
                 )
         elif score_range is not None:
             eff_thresh = score_threshold if score_threshold is not None else threshold
             gate = ScoreGate(
-                rubric=rubric,
+                rubric=rubric or query or "Evaluation score rubric",
                 min_score=score_range[0],
                 max_score=score_range[1],
                 threshold=eff_thresh,
@@ -168,6 +182,10 @@ def check(
                 model=model,
                 profile=calibration_profile,
                 cache=cache,
+                context=context,
+                query=query,
+                on_unsupported_logprobs=on_unsupported_logprobs,
+                sidecar_backend=sidecar_backend,
             )
         elif rubrics is not None:
             gate_opts: dict[str, Any] = {
@@ -177,6 +195,10 @@ def check(
                 "profile": calibration_profile,
                 "distillation_bundle": distillation_bundle,
                 "cache": cache,
+                "context": context,
+                "query": query,
+                "on_unsupported_logprobs": on_unsupported_logprobs,
+                "sidecar_backend": sidecar_backend,
             }
             if aggregation != "all":
                 gate = _AggregatedMultiRubricGate(
@@ -198,6 +220,10 @@ def check(
                 profile=calibration_profile,
                 distillation_bundle=distillation_bundle,
                 cache=cache,
+                context=context,
+                query=query,
+                on_unsupported_logprobs=on_unsupported_logprobs,
+                sidecar_backend=sidecar_backend,
             )
 
         if ast_check is True:

@@ -23,6 +23,7 @@ from logitgate.exceptions import (
     BackendTimeoutError,
     BackendUnavailableError,
     ConfigurationError,
+    UnsupportedLogprobsError,
 )
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -191,6 +192,7 @@ def strip_reasoning_blocks(text: str) -> str:
 class LogitBackend(abc.ABC):
     """Abstract base class for extracting first-token log-probabilities."""
 
+    supports_logprobs: bool = True
     prefers_sequential_prefix_warmup: bool = False
 
     @abc.abstractmethod
@@ -513,7 +515,11 @@ class StubBackend(LogitBackend, GenerativeBackend):
         logprob_responses: list[list[dict[str, Any]]] | None = None,
         diagnostic_text: str = "[VERDICT: PASS] All criteria met.",
         tokens_generated: int = 0,
+        supports_logprobs: bool = True,
     ) -> None:
+        if not isinstance(supports_logprobs, bool):
+            raise ConfigurationError(f"supports_logprobs must be a bool, got {supports_logprobs!r}")
+        self.supports_logprobs = supports_logprobs
         self.default_prob = default_prob
         self.forward_top_logprobs = forward_top_logprobs
         self.reverse_top_logprobs = reverse_top_logprobs
@@ -534,6 +540,8 @@ class StubBackend(LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        if not self.supports_logprobs:
+            raise UnsupportedLogprobsError("StubBackend configured with supports_logprobs=False")
         with self._lock:
             self.prompt_log.append(prompt)
             resp_idx = self._response_idx
@@ -660,6 +668,8 @@ class StubBackend(LogitBackend, GenerativeBackend):
         allowed_tokens: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        if not self.supports_logprobs:
+            raise UnsupportedLogprobsError("StubBackend configured with supports_logprobs=False")
         return self.query_top_logprobs(prompt, top_k, allowed_tokens, **kwargs)
 
     def generate(self, prompt: str, max_tokens: int | None = None, **kwargs: Any) -> tuple[str, int]:
@@ -701,10 +711,15 @@ def infer_backend_spec(backend: Any) -> str:
         else:
             break
     if isinstance(backend, StubBackend):
+        if not backend.supports_logprobs:
+            return "stub://no-logprobs"
         return f"stub://{backend.default_prob}" if backend.default_prob != 0.95 else "stub://default"
     cls_name = backend.__class__.__name__
     base_url = getattr(backend, "base_url", None) or ""
     model = getattr(backend, "model", None) or getattr(backend, "model_name", None) or ""
+    if cls_name == "GeminiBackend":
+        clean_model = model.removeprefix("models/") if model else "gemini-2.5-flash"
+        return f"gemini://{clean_model}"
     if cls_name == "OllamaBackend":
         host = base_url.replace("http://", "").replace("https://", "").rstrip("/") or "localhost:11434"
         return f"ollama://{host}/{model}" if model else f"ollama://{host}"
@@ -778,10 +793,19 @@ def resolve_logit_backend(
             backend_spec = default_spec
 
     spec = str(backend_spec).strip()
-    if spec.startswith("stub://") or spec == "stub" or spec == "stub://default":
+    if (
+        spec.startswith("stub://")
+        or spec == "stub"
+        or spec == "stub://default"
+        or spec in ("stub://no-logprobs", "stub://unsupported")
+    ):
+        if spec in ("stub://no-logprobs", "stub://unsupported"):
+            return StubBackend(supports_logprobs=False, **kwargs)
         prob = 0.95
         if "/" in spec and spec not in ("stub://", "stub://default"):
             part = spec.split("/")[-1]
+            if part in ("no-logprobs", "unsupported"):
+                return StubBackend(supports_logprobs=False, **kwargs)
             with contextlib.suppress(ValueError):
                 prob = float(part)
         return StubBackend(default_prob=prob, **kwargs)
@@ -791,6 +815,22 @@ def resolve_logit_backend(
             return None
         stripped = parsed_path.removeprefix("/")
         return stripped or None
+
+    if spec.startswith("gemini://") or spec == "gemini":
+        from logitgate.backends.gemini import GeminiBackend
+        parsed = urlparse(spec) if spec.startswith("gemini://") else None
+        uri_gemini_model: str | None = None
+        if parsed is not None:
+            if parsed.netloc:
+                if parsed.netloc == "models" and parsed.path:
+                    uri_gemini_model = parsed.path.lstrip("/")
+                else:
+                    raw_net = f"{parsed.netloc}{parsed.path}".strip("/")
+                    uri_gemini_model = raw_net or None
+            elif parsed.path:
+                uri_gemini_model = parsed.path.strip("/").removeprefix("models/").strip("/") or None
+        effective_model = model or uri_gemini_model or env_model or "gemini-2.5-flash"
+        return GeminiBackend(model=effective_model, **kwargs)
 
     if spec.startswith("ollama://"):
         from logitgate.backends.ollama import OllamaBackend

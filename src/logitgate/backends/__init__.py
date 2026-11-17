@@ -10,6 +10,7 @@ from logitgate.backends.dory_recurrent import (
     RecurrentLoopTrace,
     execute_adaptive_recurrent_loops,
 )
+from logitgate.backends.gemini import GeminiBackend
 from logitgate.backends.llamacpp import LlamaCppBackend
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
@@ -17,6 +18,7 @@ from logitgate.backends.pytorch_native import PrefixBroadcastLogitEvaluator
 from logitgate.backends.recurrent import RecurrentPyTorchBackend
 
 __all__ = [
+    "GeminiBackend",
     "GenerativeBackend",
     "LlamaCppBackend",
     "LogitBackend",

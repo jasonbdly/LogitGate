@@ -91,11 +91,7 @@ def _load_local_fixture(path: Path) -> list[dict[str, Any]]:
             if line_str:
                 raw_rows.append(json.loads(line_str))
 
-    extracted: list[dict[str, Any]] = []
-    for item in raw_rows:
-        if isinstance(item, dict):
-            extracted.append(item.get("row", item))
-    return extracted
+    return [item.get("row", item) for item in raw_rows if isinstance(item, dict)]
 
 
 def _fetch_fallback_content(
@@ -442,10 +438,7 @@ def normalize_judgebench_row(
     resp_b = str(row.get("response_B") or row.get("response_b") or "")
     raw_label = str(row.get("label", "A>B")).strip()
 
-    if raw_label in ("A>B", "A", "0", 0):
-        orig_winner = 0
-    else:
-        orig_winner = 1
+    orig_winner = 0 if raw_label in ("A>B", "A", "0", 0) else 1
 
     rng = random.Random(f"{seed}:judgebench:{idx}:{row_id}")
     swap = rng.random() < 0.5
@@ -597,10 +590,7 @@ def normalize_ragtruth_row(
     row_id = str(row.get("id") or f"ragtruth_{idx}")
     question = str(row.get("question") or row.get("query") or row.get("prompt") or "")
     ctx = row.get("context") or row.get("source_info")
-    if isinstance(ctx, list):
-        context_str = "\n".join(str(c) for c in ctx)
-    else:
-        context_str = str(ctx or "")
+    context_str = "\n".join(str(c) for c in ctx) if isinstance(ctx, list) else str(ctx or "")
 
     answer = str(row.get("answer") or row.get("response") or row.get("output") or "")
     raw_labels: Any = (
@@ -622,9 +612,10 @@ def normalize_ragtruth_row(
     hallu_label = row.get("hallucination_label") or row.get("hallucination")
 
     has_hallucination = False
-    if isinstance(raw_labels, list) and len(raw_labels) > 0 or isinstance(processed, dict) and sum(
-        int(v) for v in processed.values() if isinstance(v, (int, float))
-    ) > 0:
+    if (isinstance(raw_labels, list) and len(raw_labels) > 0) or (
+        isinstance(processed, dict)
+        and sum(int(v) for v in processed.values() if isinstance(v, (int, float))) > 0
+    ):
         has_hallucination = True
     elif hallu_label is not None:
         has_hallucination = str(hallu_label).strip().lower() in (
@@ -667,16 +658,10 @@ def normalize_rewardbench2_row(
     row_id = str(row.get("id") or f"rewardbench2_{idx}")
     prompt_text = str(row.get("prompt") or "")
     chosen = row.get("chosen")
-    if isinstance(chosen, list):
-        chosen_text = str(chosen[0] if chosen else "")
-    else:
-        chosen_text = str(chosen or "")
+    chosen_text = str(chosen[0] if chosen else "") if isinstance(chosen, list) else str(chosen or "")
 
     rejected = row.get("rejected") or []
-    if isinstance(rejected, list):
-        rejected_texts = [str(r) for r in rejected]
-    else:
-        rejected_texts = [str(rejected)]
+    rejected_texts = [str(r) for r in rejected] if isinstance(rejected, list) else [str(rejected)]
 
     pool: list[tuple[str, bool]] = [(chosen_text, True)] + [
         (r, False) for r in rejected_texts

@@ -6,6 +6,7 @@ import secrets
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -33,8 +34,9 @@ from logitgate.debiasing.softmax import (
 from logitgate.debiasing.softmax import (
     softmax_probabilities as _softmax,
 )
-from logitgate.exceptions import ConfigurationError
+from logitgate.exceptions import ConfigurationError, UnsupportedLogprobsError
 from logitgate.gates.base import BaseGate
+from logitgate.gates.logit_gate import UnsupportedLogprobsPolicy, _validate_rag_context_and_query
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
@@ -122,6 +124,11 @@ class ScoreGate(BaseGate):
         save_on_fail: bool | None = None,
         name: str = "ScoreGate",
         *,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+        on_unsupported_logprobs: UnsupportedLogprobsPolicy = "raise",
+        sidecar_backend: str | LogitBackend | None = None,
+        sidecar_model: str | None = None,
         fail_threshold: float | None = None,
         max_score_std: float | None = None,
         warm_prefix: bool | None = None,
@@ -203,9 +210,39 @@ class ScoreGate(BaseGate):
         effective_save_on_fail = _validate_optional_bool("save_on_fail", save_on_fail)
         effective_warm_prefix = _validate_optional_bool("warm_prefix", warm_prefix)
 
+        _validate_rag_context_and_query(context, query)
+        if on_unsupported_logprobs not in ("raise", "escalate", "sidecar"):
+            raise ConfigurationError(
+                f"Invalid on_unsupported_logprobs '{on_unsupported_logprobs}'. "
+                f"Must be one of ['raise', 'escalate', 'sidecar']"
+            )
+        if on_unsupported_logprobs == "sidecar" and sidecar_backend is None:
+            raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+
         owns_backend = not isinstance(backend, LogitBackend)
         resolved_backend = _resolve_logit_backend(backend, model=model)
+        owns_sidecar = False
+        resolved_sidecar: LogitBackend | None = None
+        eff_sidecar_model: str | None = None
+        sidecar_temp = 1.0
         try:
+            if sidecar_backend is not None:
+                owns_sidecar = not isinstance(sidecar_backend, LogitBackend)
+                resolved_sidecar = _resolve_logit_backend(sidecar_backend, model=sidecar_model)
+                eff_sidecar_model = (
+                    sidecar_model
+                    or getattr(resolved_sidecar, "model", None)
+                    or getattr(resolved_sidecar, "model_name", None)
+                    or get_default_model()
+                )
+                sidecar_temp, _ = _resolve_gate_temperature(
+                    None,
+                    eff_sidecar_model,
+                    resolved_sidecar,
+                    loaded_profile,
+                    binary=False,
+                )
+
             effective_model = (
                 model
                 or getattr(resolved_backend, "model", None)
@@ -225,6 +262,8 @@ class ScoreGate(BaseGate):
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
+            if owns_sidecar and resolved_sidecar is not None:
+                resolved_sidecar.close()
             raise
 
         _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
@@ -238,6 +277,13 @@ class ScoreGate(BaseGate):
         self.symmetric_debiasing = True if symmetric_debiasing is None else bool(symmetric_debiasing)
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self.context = context
+        self.query = query
+        self.on_unsupported_logprobs = on_unsupported_logprobs
+        self.sidecar_backend = resolved_sidecar
+        self.sidecar_model = eff_sidecar_model
+        self.sidecar_temperature = sidecar_temp
+        self._owns_sidecar_backend = owns_sidecar
         self._needs_lazy_calibration = needs_lazy
         self._calibration_lock = threading.Lock()
         self.fail_threshold = effective_fail_thresh
@@ -250,6 +296,25 @@ class ScoreGate(BaseGate):
         self._owns_backend = owns_backend
         self._owns_cache = isinstance(cache, (str, Path))
         self._owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+
+    def close(self) -> None:
+        """Safely close any owned resources (backend, cache, sidecar). Idempotent."""
+        super().close()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None and hasattr(sb, "close"):
+                sb.close()
+
+    async def aclose(self) -> None:
+        """Safely and asynchronously close any owned resources. Idempotent."""
+        await super().aclose()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None:
+                if hasattr(sb, "aclose"):
+                    await sb.aclose()
+                elif hasattr(sb, "close"):
+                    sb.close()
 
     @property
     def calibration_profile(self) -> CalibrationProfile | None:
@@ -270,6 +335,16 @@ class ScoreGate(BaseGate):
             "logit_temperature": self.logit_temperature,
             "name": self.name,
         }
+        if self.context is not None:
+            config["context"] = self.context
+        if self.query is not None:
+            config["query"] = self.query
+        if self.on_unsupported_logprobs != "raise":
+            config["on_unsupported_logprobs"] = self.on_unsupported_logprobs
+        if self.sidecar_backend is not None:
+            config["sidecar_backend"] = infer_backend_spec(self.sidecar_backend)
+        if self.sidecar_model is not None:
+            config["sidecar_model"] = self.sidecar_model
         if self.fail_threshold is not None:
             config["fail_threshold"] = self.fail_threshold
         if self.max_score_std is not None:
@@ -339,7 +414,14 @@ class ScoreGate(BaseGate):
             f"backend={self.backend!r})"
         )
 
-    def _score_prompts(self, candidate: Any, *, boundary_nonce: str | None = None) -> tuple[str, str | None]:
+    def _score_prompts(
+        self,
+        candidate: Any,
+        *,
+        boundary_nonce: str | None = None,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+    ) -> tuple[str, str | None]:
         def build(inverted: bool) -> str:
             return compile_score_prompt(
                 rubric=self.rubric,
@@ -349,11 +431,160 @@ class ScoreGate(BaseGate):
                 query_first=self.query_first,
                 inverted=inverted,
                 boundary_nonce=boundary_nonce,
+                context=context,
+                query=query,
             )
 
         return build(False), (build(True) if self.symmetric_debiasing else None)
 
-    def _verdict_from_logprobs(self, top_fwd: TopLogprobs, top_rev: TopLogprobs | None, t0: float) -> Verdict:
+    def _escalate_unsupported(
+        self,
+        candidate: Any,
+        exc_msg: str,
+        t0: float,
+        kwargs: dict[str, Any],
+    ) -> Verdict:
+        latency = (time.perf_counter() - t0) * 1000.0
+        reason = f"[{self.name}] Backend does not support logprobs; escalating ({exc_msg})"
+        trace = LayerTrace(
+            layer_name=self.name,
+            status=DecisionStatus.AMBIGUOUS,
+            latency_ms=latency,
+            tokens_generated=0,
+            metadata={
+                "abstained_reason": "unsupported_logprobs",
+                "fallback_policy": "escalate",
+            },
+        )
+        verdict = Verdict(
+            passed=False,
+            status=DecisionStatus.AMBIGUOUS,
+            probability=None,
+            score=None,
+            triggered_layer=self.name,
+            total_latency_ms=latency,
+            total_tokens_generated=0,
+            reason=reason,
+            traces=[trace],
+        )
+        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+
+    def _execute_queries(
+        self, forward: str, reverse: str | None, tokens: list[str], top_k: int
+    ) -> tuple[TopLogprobs, TopLogprobs | None, bool, str | None, float]:
+        from logitgate.backends.base import infer_backend_spec
+
+        backend = self.backend
+        supports = getattr(backend, "supports_logprobs", True) is not False
+        if not supports:
+            if self.on_unsupported_logprobs == "raise":
+                raise UnsupportedLogprobsError(
+                    f"Backend '{getattr(backend, 'model', 'unknown')}' does not support logprobs."
+                )
+            if self.on_unsupported_logprobs == "escalate":
+                raise UnsupportedLogprobsError("Backend does not support logprobs")
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+            top_fwd = self.sidecar_backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+            top_rev = (
+                self.sidecar_backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
+                if reverse is not None
+                else None
+            )
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
+        try:
+            top_fwd = backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+            top_rev = (
+                backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
+                if reverse is not None
+                else None
+            )
+            return top_fwd, top_rev, False, None, self.logit_temperature
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs in ("raise", "escalate"):
+                raise
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'") from exc
+            top_fwd = self.sidecar_backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+            top_rev = (
+                self.sidecar_backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
+                if reverse is not None
+                else None
+            )
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
+    async def _aexecute_queries(
+        self, forward: str, reverse: str | None, tokens: list[str], top_k: int
+    ) -> tuple[TopLogprobs, TopLogprobs | None, bool, str | None, float]:
+        from logitgate.backends.base import infer_backend_spec
+
+        backend = self.backend
+        supports = getattr(backend, "supports_logprobs", True) is not False
+        if not supports:
+            if self.on_unsupported_logprobs == "raise":
+                raise UnsupportedLogprobsError(
+                    f"Backend '{getattr(backend, 'model', 'unknown')}' does not support logprobs."
+                )
+            if self.on_unsupported_logprobs == "escalate":
+                raise UnsupportedLogprobsError("Backend does not support logprobs")
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+            target_backend = self.sidecar_backend
+            used_temp = self.sidecar_temperature
+            spec = infer_backend_spec(target_backend)
+            sidecar_used = True
+        else:
+            target_backend = backend
+            used_temp = self.logit_temperature
+            spec = None
+            sidecar_used = False
+
+        try:
+            top_rev: TopLogprobs | None = None
+            if reverse is None:
+                top_fwd = await target_backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+            elif _resolve_warm_prefix(self.warm_prefix, target_backend):
+                top_fwd = await target_backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+                top_rev = await target_backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
+            else:
+                top_fwd, top_rev = await asyncio.gather(
+                    target_backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens),
+                    target_backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens),
+                )
+            return top_fwd, top_rev, sidecar_used, spec, used_temp
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs in ("raise", "escalate"):
+                raise
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'") from exc
+            sb = self.sidecar_backend
+            top_rev = None
+            if reverse is None:
+                top_fwd = await sb.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+            elif _resolve_warm_prefix(self.warm_prefix, sb):
+                top_fwd = await sb.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
+                top_rev = await sb.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
+            else:
+                top_fwd, top_rev = await asyncio.gather(
+                    sb.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens),
+                    sb.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens),
+                )
+            spec = infer_backend_spec(sb)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
+    def _verdict_from_logprobs(
+        self,
+        top_fwd: TopLogprobs,
+        top_rev: TopLogprobs | None,
+        t0: float,
+        *,
+        sidecar_used: bool = False,
+        sidecar_spec: str | None = None,
+        effective_temp: float | None = None,
+    ) -> Verdict:
         _ensure_logprobs_present(top_fwd, top_rev)
         scores = range(self.min_score, self.max_score + 1)
         fwd_raw = {s: extract_token_logprob(top_fwd, str(s)) for s in scores}
@@ -368,7 +599,8 @@ class ScoreGate(BaseGate):
             lse_rev = m_rev + math.log(sum(math.exp(v - m_rev) for v in rev_raw.values()))
             combined = {s: (combined[s] + (rev_raw[s] - lse_rev)) / 2.0 for s in scores}
 
-        score_probs = _softmax(combined, self.logit_temperature)
+        used_temp = max(effective_temp if effective_temp is not None else self.logit_temperature, 1e-6)
+        score_probs = _softmax(combined, used_temp)
         expected_score_raw = sum(s * prob for s, prob in score_probs.items())
         expected_score = round(expected_score_raw, 4)
         score_variance = max(0.0, sum(((s - expected_score_raw) ** 2) * prob for s, prob in score_probs.items()))
@@ -402,6 +634,10 @@ class ScoreGate(BaseGate):
             "score_std": score_std,
             "token_probabilities": {str(k): round(v, 4) for k, v in score_probs.items()},
         }
+        if sidecar_used:
+            meta["sidecar_used"] = True
+            if sidecar_spec is not None:
+                meta["sidecar_backend"] = sidecar_spec
         if abstained_reason is not None:
             meta["abstained_reason"] = abstained_reason
         thresh_desc = (
@@ -456,6 +692,10 @@ class ScoreGate(BaseGate):
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+
         self._ensure_calibrated()
         hit = lookup_cached_verdict(
             self, candidate, gate_cache=self.cache, call_kwargs=kwargs
@@ -468,19 +708,34 @@ class ScoreGate(BaseGate):
         tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
         top_k = max(10, 2 * len(tokens))
         nonce = secrets.token_hex(8)
-        forward, reverse = self._score_prompts(candidate, boundary_nonce=nonce)
-        top_fwd = self.backend.query_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
-        top_rev = (
-            self.backend.query_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
-            if reverse is not None
-            else None
+        forward, reverse = self._score_prompts(
+            candidate, boundary_nonce=nonce, context=eff_context, query=eff_query
         )
+        try:
+            top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = self._execute_queries(forward, reverse, tokens, top_k)
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs == "escalate":
+                return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+            raise
         return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs
+            candidate,
+            self._verdict_from_logprobs(
+                top_fwd,
+                top_rev,
+                t0,
+                sidecar_used=sidecar_used,
+                sidecar_spec=sidecar_spec,
+                effective_temp=eff_temp,
+            ),
+            **kwargs,
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
+
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
 
         await self._aensure_calibrated()
         hit = lookup_cached_verdict(
@@ -494,20 +749,26 @@ class ScoreGate(BaseGate):
         tokens = [str(s) for s in range(self.min_score, self.max_score + 1)]
         top_k = max(10, 2 * len(tokens))
         nonce = secrets.token_hex(8)
-        forward, reverse = self._score_prompts(candidate, boundary_nonce=nonce)
-        top_rev: TopLogprobs | None = None
-        if reverse is None:
-            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
-        elif _resolve_warm_prefix(self.warm_prefix, self.backend):
-            top_fwd = await self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens)
-            top_rev = await self.backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens)
-        else:
-            top_fwd, top_rev = await asyncio.gather(
-                self.backend.aquery_top_logprobs(forward, top_k=top_k, allowed_tokens=tokens),
-                self.backend.aquery_top_logprobs(reverse, top_k=top_k, allowed_tokens=tokens),
-            )
+        forward, reverse = self._score_prompts(
+            candidate, boundary_nonce=nonce, context=eff_context, query=eff_query
+        )
+        try:
+            top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = await self._aexecute_queries(forward, reverse, tokens, top_k)
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs == "escalate":
+                return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+            raise
         return self._handle_failure_snapshot(
-            candidate, self._verdict_from_logprobs(top_fwd, top_rev, t0), **kwargs
+            candidate,
+            self._verdict_from_logprobs(
+                top_fwd,
+                top_rev,
+                t0,
+                sidecar_used=sidecar_used,
+                sidecar_spec=sidecar_spec,
+                effective_temp=eff_temp,
+            ),
+            **kwargs,
         )
 
 

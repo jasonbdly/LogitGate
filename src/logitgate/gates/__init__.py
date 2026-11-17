@@ -18,6 +18,12 @@ from logitgate.gates.logit_gate import LogitGate
 from logitgate.gates.multi_rubric_gate import MultiRubricGate
 from logitgate.gates.rank_gate import BestOfNResult, RankGate
 from logitgate.gates.score_gate import ScoreGate
+from logitgate.gates.tool_call_gate import (
+    NormalizedToolCall,
+    ToolCallFailureCode,
+    ToolCallGate,
+    normalize_tool_calls,
+)
 
 __all__ = [
     "ASTFailureCode",
@@ -32,7 +38,11 @@ __all__ = [
     "JudgeGate",
     "LogitGate",
     "MultiRubricGate",
+    "NormalizedToolCall",
     "RankGate",
     "ScoreGate",
+    "ToolCallFailureCode",
+    "ToolCallGate",
     "normalize_candidate",
+    "normalize_tool_calls",
 ]

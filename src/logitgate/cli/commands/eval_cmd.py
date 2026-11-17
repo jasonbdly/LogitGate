@@ -5,6 +5,7 @@ import json
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from logitgate.cascade import Cascade
@@ -178,6 +179,37 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     else:
         rubrics_list = []
 
+    is_tool_call = bool(getattr(args, "tool_call", False))
+    if not rubrics_list and not is_tool_call:
+        sys.stderr.write("Error: --rubric is required unless --tool-call is specified.\n")
+        return EXIT_FAILED
+
+    contexts: list[str] = []
+    if getattr(args, "context", None):
+        contexts.extend(args.context)
+    if getattr(args, "context_file", None):
+        from logitgate.telemetry.sinks import read_regular_text_nofollow
+
+        try:
+            cf_text = read_regular_text_nofollow(
+                Path(args.context_file),
+                max_bytes=16 * 1024 * 1024,
+                label="Context file",
+            )
+            contexts.append(cf_text)
+        except Exception as e:
+            sys.stderr.write(
+                f"Error reading context file '{sanitize_terminal_text(str(args.context_file))}': "
+                f"{sanitize_terminal_text(str(e))}\n"
+            )
+            return EXIT_FAILED
+
+    final_context: str | list[str] | None = None
+    if len(contexts) == 1:
+        final_context = contexts[0]
+    elif len(contexts) > 1:
+        final_context = contexts
+
     raw_choice = getattr(args, "choice", None)
     is_choice = bool(raw_choice)
     score_min_raw = getattr(args, "score_min", None)
@@ -186,6 +218,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     is_multi_rubric = len(rubrics_list) >= 2
 
     # Mutual exclusivity checks
+    if is_tool_call and (is_choice or is_score):
+        raise ConfigurationError("Cannot combine --tool-call with --choice or --score-min/--score-max")
+    if is_tool_call and is_multi_rubric:
+        raise ConfigurationError("Cannot combine --tool-call with multiple --rubric criteria")
     if is_choice and is_score:
         raise ConfigurationError("Cannot combine --choice with --score-min or --score-max")
     if is_choice and is_multi_rubric:
@@ -249,7 +285,28 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
         target_gate: BaseGate
         rubric_single = rubrics_list[0] if rubrics_list else ""
-        if is_choice:
+        if is_tool_call:
+            from logitgate.gates.tool_call_gate import ToolCallGate
+
+            intent_rubric = rubrics_list[0] if rubrics_list else None
+            check_intent = bool(rubrics_list)
+            target_gate = ToolCallGate(
+                allowed_tools=getattr(args, "allowed_tool", None),
+                allowed_roots=getattr(args, "allowed_root", None),
+                allowed_hosts=getattr(args, "allowed_host", None),
+                check_intent=check_intent,
+                intent_rubric=intent_rubric,
+                user_intent=getattr(args, "query", None),
+                backend=args.backend,
+                model=args.model,
+                pass_threshold=args.threshold,
+                fail_threshold=args.fail_threshold,
+                on_unsupported_logprobs=getattr(args, "on_unsupported_logprobs", "raise"),
+                sidecar_backend=getattr(args, "sidecar_backend", None),
+                telemetry_sink=sink if not has_ast else None,
+                cache=cache_obj if not has_ast else False,
+            )
+        elif is_choice:
             target_gate = ChoiceGate(
                 question=rubric_single,
                 options=parsed_choices,
@@ -259,6 +316,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
                 min_confidence=getattr(args, "min_confidence", None),
                 min_margin=getattr(args, "min_margin", None),
                 profile=args.profile,
+                context=final_context,
+                query=getattr(args, "query", None),
+                on_unsupported_logprobs=getattr(args, "on_unsupported_logprobs", "raise"),
+                sidecar_backend=getattr(args, "sidecar_backend", None),
                 telemetry_sink=sink if not has_ast else None,
                 cache=cache_obj if not has_ast else False,
             )
@@ -275,6 +336,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
                 backend=args.backend,
                 model=args.model,
                 profile=args.profile,
+                context=final_context,
+                query=getattr(args, "query", None),
+                on_unsupported_logprobs=getattr(args, "on_unsupported_logprobs", "raise"),
+                sidecar_backend=getattr(args, "sidecar_backend", None),
                 telemetry_sink=sink if not has_ast else None,
                 cache=cache_obj if not has_ast else False,
             )
@@ -288,6 +353,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
                 fail_threshold=args.fail_threshold,
                 profile=args.profile,
                 distillation_bundle=getattr(args, "bundle", None),
+                context=final_context,
+                query=getattr(args, "query", None),
+                on_unsupported_logprobs=getattr(args, "on_unsupported_logprobs", "raise"),
+                sidecar_backend=getattr(args, "sidecar_backend", None),
                 telemetry_sink=sink if not has_ast else None,
                 cache=cache_obj if not has_ast else False,
             )
@@ -300,6 +369,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
                 fail_threshold=args.fail_threshold,
                 profile=args.profile,
                 distillation_bundle=getattr(args, "bundle", None),
+                context=final_context,
+                query=getattr(args, "query", None),
+                on_unsupported_logprobs=getattr(args, "on_unsupported_logprobs", "raise"),
+                sidecar_backend=getattr(args, "sidecar_backend", None),
                 telemetry_sink=sink if not has_ast else None,
                 cache=cache_obj if not has_ast else False,
             )
@@ -324,7 +397,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
             verdict = evaluator.evaluate(candidate)
         finally:
-            target_gate.backend.close()
+            if hasattr(target_gate, "close"):
+                target_gate.close()
+            elif getattr(target_gate, "backend", None) is not None:
+                target_gate.backend.close()
     finally:
         if cache_obj is not None:
             cache_obj.close()

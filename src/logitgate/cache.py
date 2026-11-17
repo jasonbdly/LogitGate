@@ -271,7 +271,6 @@ def gate_cache_fingerprint(gate: BaseGate) -> dict[str, Any]:
         "rubric",
         "question",
         "options",
-        "context",
         "pass_threshold",
         "fail_threshold",
         "threshold",
@@ -293,6 +292,26 @@ def gate_cache_fingerprint(gate: BaseGate) -> dict[str, Any]:
         if hasattr(gate, attr):
             fp[attr] = _canonicalize_value(getattr(gate, attr))
 
+    effective_ctx = getattr(gate, "context", None)
+    if effective_ctx is not None:
+        from logitgate.debiasing.inversion import render_reference_context
+
+        clean_ctx = render_reference_context(effective_ctx)
+        if clean_ctx:
+            fp["context"] = clean_ctx
+
+    effective_q = getattr(gate, "query", None)
+    if effective_q is not None and isinstance(effective_q, str) and effective_q.strip():
+        fp["query"] = effective_q.strip()
+
+    on_unsupp = getattr(gate, "on_unsupported_logprobs", "raise")
+    if on_unsupp != "raise":
+        fp["on_unsupported_logprobs"] = on_unsupp
+
+    sidecar = getattr(gate, "sidecar_backend", None)
+    if sidecar is not None:
+        fp["sidecar_backend"] = _backend_fingerprint(sidecar, getattr(gate, "sidecar_model", None))
+
     if replay is None and backend is None:
         # Custom BaseGate subclass: capture deterministic public attributes
         custom_attrs: dict[str, Any] = {}
@@ -311,9 +330,12 @@ def compute_verdict_cache_key(
     *,
     rubric_override: str | None = None,
     context_override: Any = _NO_OVERRIDE,
+    query_override: Any = _NO_OVERRIDE,
     namespace: str = "",
 ) -> str:
     """Computes a collision-resistant SHA-256 content-addressed cache key."""
+    from logitgate.debiasing.inversion import render_reference_context
+
     payload: dict[str, Any] = {
         "v": 1,
         "ns": namespace,
@@ -321,8 +343,15 @@ def compute_verdict_cache_key(
         "rubric_override": rubric_override,
         "candidate": _canonicalize_value(candidate),
     }
-    if context_override is not _NO_OVERRIDE:
-        payload["context_override"] = _canonicalize_value(context_override)
+    if context_override is not _NO_OVERRIDE and context_override is not None:
+        clean_ctx = render_reference_context(context_override)
+        if clean_ctx:
+            payload["context_override"] = _canonicalize_value(clean_ctx)
+    if query_override is not _NO_OVERRIDE and query_override is not None:
+        if isinstance(query_override, str) and query_override.strip():
+            payload["query_override"] = _canonicalize_value(query_override.strip())
+        elif not isinstance(query_override, str):
+            payload["query_override"] = _canonicalize_value(query_override)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
         "utf-8"
     )
@@ -496,12 +525,14 @@ class VerdictCache:
         *,
         rubric_override: str | None = None,
         context_override: Any = _NO_OVERRIDE,
+        query_override: Any = _NO_OVERRIDE,
     ) -> str:
         return compute_verdict_cache_key(
             gate,
             candidate,
             rubric_override=rubric_override,
             context_override=context_override,
+            query_override=query_override,
             namespace=self.namespace,
         )
 
@@ -652,6 +683,7 @@ class VerdictCache:
         *,
         rubric_override: str | None = None,
         context_override: Any = _NO_OVERRIDE,
+        query_override: Any = _NO_OVERRIDE,
         _normalized_out: list[Any] | None = None,
     ) -> Verdict | None:
         t0 = time.perf_counter()
@@ -660,6 +692,7 @@ class VerdictCache:
             candidate,
             rubric_override=rubric_override,
             context_override=context_override,
+            query_override=query_override,
         )
         now = time.time()
         with self._lock:
@@ -683,6 +716,7 @@ class VerdictCache:
         *,
         rubric_override: str | None = None,
         context_override: Any = _NO_OVERRIDE,
+        query_override: Any = _NO_OVERRIDE,
         has_normalized: bool = False,
         normalized_artifact: Any = None,
     ) -> bool:
@@ -693,6 +727,7 @@ class VerdictCache:
             candidate,
             rubric_override=rubric_override,
             context_override=context_override,
+            query_override=query_override,
         )
         now = time.time()
         expires_at = (now + self.ttl_seconds) if self.ttl_seconds is not None else None
@@ -719,12 +754,14 @@ class VerdictCache:
         *,
         rubric_override: str | None = None,
         context_override: Any = _NO_OVERRIDE,
+        query_override: Any = _NO_OVERRIDE,
     ) -> bool:
         key = self.compute_key(
             gate,
             candidate,
             rubric_override=rubric_override,
             context_override=context_override,
+            query_override=query_override,
         )
         with self._lock:
             existed = self._mem.pop(key, None) is not None
@@ -840,7 +877,12 @@ def lookup_cached_verdict(
         )
         context_override = (
             call_kwargs["context"]
-            if (call_kwargs is not None and "context" in call_kwargs)
+            if (call_kwargs is not None and "context" in call_kwargs and call_kwargs["context"] is not None)
+            else _NO_OVERRIDE
+        )
+        query_override = (
+            call_kwargs["query"]
+            if (call_kwargs is not None and "query" in call_kwargs and call_kwargs["query"] is not None)
             else _NO_OVERRIDE
         )
         norm_box = call_kwargs.get("_normalized_out") if call_kwargs is not None else None
@@ -849,6 +891,7 @@ def lookup_cached_verdict(
             candidate,
             rubric_override=rubric_override,
             context_override=context_override,
+            query_override=query_override,
             _normalized_out=norm_box if isinstance(norm_box, list) else None,
         )
     finally:
@@ -876,7 +919,12 @@ def store_cached_verdict(
         )
         context_override = (
             call_kwargs["context"]
-            if (call_kwargs is not None and "context" in call_kwargs)
+            if (call_kwargs is not None and "context" in call_kwargs and call_kwargs["context"] is not None)
+            else _NO_OVERRIDE
+        )
+        query_override = (
+            call_kwargs["query"]
+            if (call_kwargs is not None and "query" in call_kwargs and call_kwargs["query"] is not None)
             else _NO_OVERRIDE
         )
         active_cache.put(
@@ -885,6 +933,7 @@ def store_cached_verdict(
             verdict,
             rubric_override=rubric_override,
             context_override=context_override,
+            query_override=query_override,
             has_normalized=has_normalized,
             normalized_artifact=normalized_artifact,
         )

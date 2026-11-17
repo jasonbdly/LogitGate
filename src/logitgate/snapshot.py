@@ -423,6 +423,44 @@ class VerdictSnapshot(BaseModel):
             ast_init = {k: v for k, v in gate_kwargs.items() if k in ast_allowed}
             return ASTGate(**ast_init), False
 
+        if gate_type == "ToolCallGate":
+            from logitgate.gates.tool_call_gate import ToolCallGate
+
+            tool_allowed = {
+                "allowed_tools",
+                "blocked_tools",
+                "tool_schemas",
+                "allowed_roots",
+                "allowed_hosts",
+                "block_path_traversal",
+                "block_ssrf",
+                "block_destructive_commands",
+                "block_destructive_sql",
+                "max_calls",
+                "check_intent",
+                "intent_rubric",
+                "user_intent",
+                "pass_threshold",
+                "fail_threshold",
+                "symmetric_debiasing",
+                "on_unsupported_logprobs",
+                "sidecar_backend",
+                "name",
+            }
+            tool_init = {k: v for k, v in gate_kwargs.items() if k in tool_allowed}
+            if tool_init.get("check_intent"):
+                if "intent_rubric" not in tool_init and self.rubric:
+                    tool_init["intent_rubric"] = self.rubric
+                return (
+                    ToolCallGate(
+                        backend=effective_backend,
+                        model=effective_model,
+                        **tool_init,
+                    ),
+                    owns_logit_backend,
+                )
+            return ToolCallGate(**tool_init), False
+
         profile_spec = gate_kwargs.get("calibration_profile")
         if profile_spec is None:
             profile_spec = gate_kwargs.get("profile")
@@ -453,6 +491,8 @@ class VerdictSnapshot(BaseModel):
             from logitgate.gates.judge_gate import JudgeGate
 
             judge_allowed = {
+                "context",
+                "query",
                 "max_tokens",
                 "think",
                 "symmetric_debiasing",
@@ -474,6 +514,11 @@ class VerdictSnapshot(BaseModel):
 
         if gate_type == "ScoreGate":
             score_allowed = {
+                "context",
+                "query",
+                "on_unsupported_logprobs",
+                "sidecar_backend",
+                "sidecar_model",
                 "min_score",
                 "max_score",
                 "threshold",
@@ -503,6 +548,11 @@ class VerdictSnapshot(BaseModel):
             if not isinstance(options, dict) or len(options) < 2:
                 raise ValueError("ChoiceGate snapshot is missing valid 'options' metadata for replay")
             choice_allowed = {
+                "context",
+                "query",
+                "on_unsupported_logprobs",
+                "sidecar_backend",
+                "sidecar_model",
                 "symmetric_debiasing",
                 "permutation_mode",
                 "query_first",
@@ -641,6 +691,11 @@ class VerdictSnapshot(BaseModel):
                     gates=rebuilt_layers,
                     rubric=self.rubric,
                     save_failures=False,
+                    context=gate_kwargs.get("context"),
+                    query=gate_kwargs.get("query"),
+                    on_unsupported_logprobs=gate_kwargs.get("on_unsupported_logprobs", "raise"),
+                    sidecar_backend=gate_kwargs.get("sidecar_backend"),
+                    sidecar_model=gate_kwargs.get("sidecar_model"),
                 )
             except BaseException:
                 for child, owns_child in reversed(built_children):
@@ -663,6 +718,11 @@ class VerdictSnapshot(BaseModel):
             return cascade_gate, owns_logit_backend
 
         allowed_keys = {
+            "context",
+            "query",
+            "on_unsupported_logprobs",
+            "sidecar_backend",
+            "sidecar_model",
             "pass_threshold",
             "fail_threshold",
             "symmetric_debiasing",
@@ -836,6 +896,8 @@ class VerdictSnapshot(BaseModel):
             think=think,
             symmetric_debiasing=self.gate_config.get("symmetric_debiasing", True),
             logit_temperature=judge_temp,
+            context=self.gate_config.get("context"),
+            query=self.gate_config.get("query"),
         )
         try:
             judge_verdict = judge.evaluate(
@@ -878,6 +940,8 @@ class VerdictSnapshot(BaseModel):
             think=think,
             symmetric_debiasing=self.gate_config.get("symmetric_debiasing", True),
             logit_temperature=judge_temp,
+            context=self.gate_config.get("context"),
+            query=self.gate_config.get("query"),
         )
         try:
             judge_verdict = await judge.aevaluate(

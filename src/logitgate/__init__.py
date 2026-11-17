@@ -12,6 +12,7 @@ from logitgate.backends.dory_recurrent import (
     RecurrentLoopTrace,
     execute_adaptive_recurrent_loops,
 )
+from logitgate.backends.gemini import GeminiBackend
 from logitgate.backends.llamacpp import LlamaCppBackend
 from logitgate.backends.ollama import OllamaBackend
 from logitgate.backends.openai_compat import OpenAICompatBackend
@@ -81,6 +82,7 @@ from logitgate.debiasing.inversion import (
     compile_listwise_rank_prompt,
     compile_pairwise_prompt,
     compile_score_prompt,
+    render_reference_context,
 )
 from logitgate.debiasing.permutation import (
     KNOWN_BINARY_MODEL_TEMPERATURES,
@@ -140,6 +142,7 @@ from logitgate.exceptions import (
     StreamAbortedError,
     StubBackendWarning,
     TelemetryWarning,
+    UnsupportedLogprobsError,
 )
 from logitgate.gates.ast_gate import (
     ASTFailureCode,
@@ -149,8 +152,20 @@ from logitgate.gates.ast_gate import (
 )
 from logitgate.gates.base import BaseGate, EscalationPolicy
 from logitgate.gates.judge_gate import JudgeGate
-from logitgate.gates.logit_gate import ChoiceGate, LogitGate, MultiRubricGate, ScoreGate
+from logitgate.gates.logit_gate import (
+    ChoiceGate,
+    LogitGate,
+    MultiRubricGate,
+    ScoreGate,
+    UnsupportedLogprobsPolicy,
+)
 from logitgate.gates.rank_gate import BestOfNGate, BestOfNResult, RankGate
+from logitgate.gates.tool_call_gate import (
+    NormalizedToolCall,
+    ToolCallFailureCode,
+    ToolCallGate,
+    normalize_tool_calls,
+)
 from logitgate.hardware.memory_guard import (
     PCIeSpilloverGuard,
     VRAMWatermarkStatus,
@@ -286,6 +301,7 @@ __all__ = [
     "ErrorPolicy",
     "EscalationPolicy",
     "ExportFormat",
+    "GeminiBackend",
     "GenerativeBackend",
     "GuardedStream",
     "HuggingFaceLogitBackend",
@@ -305,6 +321,7 @@ __all__ = [
     "LogitMetaCalibrator",
     "MemoryTelemetrySink",
     "MultiRubricGate",
+    "NormalizedToolCall",
     "OllamaBackend",
     "OpenAICompatBackend",
     "OtelAttributeValue",
@@ -331,6 +348,10 @@ __all__ = [
     "TelemetrySink",
     "TelemetrySummary",
     "TelemetryWarning",
+    "ToolCallFailureCode",
+    "ToolCallGate",
+    "UnsupportedLogprobsError",
+    "UnsupportedLogprobsPolicy",
     "VRAMWatermarkStatus",
     "Verdict",
     "VerdictCache",
@@ -397,9 +418,11 @@ __all__ = [
     "mcnemar_exact_test",
     "min_samples_per_class",
     "normalize_candidate",
+    "normalize_tool_calls",
     "prepare_symmetric_lora_examples",
     "recalibrate_from_telemetry",
     "redact_text",
+    "render_reference_context",
     "reset_config",
     "resolve_anchor_bank",
     "resolve_calibration_profile",

@@ -25,17 +25,17 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "benchmarks"))
 sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.external.loaders import (
+from benchmarks.external.loaders import (  # noqa: E402
     NormalizedBinaryItem,
     NormalizedPairwiseItem,
     NormalizedPoolItem,
     load_external_benchmark,
     pairwise_to_binary_cases,
 )
-from benchmarks.external.registry import EXTERNAL_BENCHMARKS
-from logitgate import BestOfNGate, LogitGate, RankGate, StreamGuard
-from logitgate.backends.base import resolve_logit_backend
-from logitgate.benchmark import BenchmarkCase, run_benchmark
+from benchmarks.external.registry import EXTERNAL_BENCHMARKS  # noqa: E402
+from logitgate import BestOfNGate, LogitGate, RankGate, StreamGuard  # noqa: E402
+from logitgate.backends.base import resolve_logit_backend  # noqa: E402
+from logitgate.benchmark import BenchmarkCase, run_benchmark  # noqa: E402
 
 DEFAULT_BACKEND = "ollama://localhost:11434"
 
@@ -165,19 +165,90 @@ def evaluate_binary(
     model: str | None = None,
     *,
     modes: tuple[str, ...] = ("logit", "cascade"),
+    use_grounded_context: bool = False,
+    progress: bool = True,
 ) -> dict[str, Any]:
-    """Evaluates binary benchmarks via LogitGate's standard run_benchmark runner."""
-    cases = [
-        BenchmarkCase(
-            rubric=item.rubric, candidate=item.candidate, expected=item.expected
-        )
-        for item in items
-    ]
-    report = run_benchmark(cases=cases, backend=backend, model=model, modes=list(modes))
+    """Evaluates binary benchmarks via LogitGate's standard run_benchmark runner or grounded evaluation."""
+    if not use_grounded_context:
+        cases = [
+            BenchmarkCase(
+                rubric=item.rubric, candidate=item.candidate, expected=item.expected
+            )
+            for item in items
+        ]
+        report = run_benchmark(cases=cases, backend=backend, model=model, modes=list(modes))
+        return {
+            "task_type": "binary",
+            "total": len(items),
+            "benchmark_report": report.to_dict(),
+        }
+
+    from logitgate import BaseGate, Cascade, JudgeGate, LogitGate
+    from logitgate.benchmark import BenchmarkReport, ModeStats
+    from logitgate.models import DecisionStatus
+
+    modes_stats: dict[str, ModeStats] = {}
+    for mode in modes:
+        stats = ModeStats(mode=mode)
+        for idx, item in enumerate(items, 1):
+            has_grounded = bool(
+                isinstance(item.metadata, dict)
+                and "answer" in item.metadata
+                and "context" in item.metadata
+            )
+            cand = item.metadata["answer"] if has_grounded else item.candidate
+            ctx = item.metadata["context"] if has_grounded else None
+            q = item.metadata.get("question") if has_grounded else None
+
+            evaluator: Cascade | BaseGate
+            if mode == "cascade":
+                evaluator = Cascade(
+                    rubric=item.rubric, backend=backend, model=model, save_failures=False
+                )
+            elif mode == "logit":
+                evaluator = LogitGate(
+                    rubric=item.rubric, backend=backend, model=model, save_on_fail=False
+                )
+            elif mode == "judge":
+                evaluator = JudgeGate(
+                    rubric=item.rubric, backend=backend, model=model, save_on_fail=False
+                )
+            else:
+                continue
+
+            t0 = time.perf_counter()
+            v = evaluator.evaluate(candidate=cand, context=ctx, query=q)
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+
+            stats.latencies_ms.append(dt_ms)
+            stats.generated_tokens.append(v.total_tokens_generated)
+            stats.llm_calls.append(len(v.traces))
+            is_corr = v.passed == item.expected
+            stats.correct.append(is_corr)
+            stats.ambiguous.append(v.status == DecisionStatus.AMBIGUOUS)
+            stats.judge_skipped.append(
+                any(t.layer_name.startswith("LogitGate") for t in v.traces)
+                and not any(t.layer_name.startswith("JudgeGate") for t in v.traces)
+            )
+            stats.probabilities.append(v.probability)
+            stats.labels.append(item.expected)
+            if progress:
+                status_str = "OK" if is_corr else "ERR"
+                print(
+                    f"  [{mode}][{idx:03d}/{len(items):03d}] {item.id} -> Pred={v.passed} Exp={item.expected} [{status_str}] ({dt_ms:.1f}ms)",
+                    flush=True,
+                )
+        modes_stats[mode] = stats
+
+    bench_report = BenchmarkReport(
+        metadata={"grounded_context": True, "total_items": len(items)},
+        modes=modes_stats,
+    )
     return {
         "task_type": "binary",
+        "grounded_context": True,
         "total": len(items),
-        "benchmark_report": report.to_dict(),
+        "benchmark_report": bench_report.to_dict(),
     }
 
 
@@ -363,6 +434,7 @@ def run_benchmark_suite(
     seed: int = 42,
     symmetric: bool = True,
     eval_stream_guard: bool = False,
+    use_grounded_context: bool = False,
     local_path: str | None = None,
     cache_dir: str | None = None,
     force_refresh: bool = False,
@@ -410,7 +482,12 @@ def run_benchmark_suite(
                     bin_items, resolved_backend, model=model
                 )
             else:
-                results = evaluate_binary(bin_items, resolved_backend, model=model)
+                results = evaluate_binary(
+                    bin_items,
+                    resolved_backend,
+                    model=model,
+                    use_grounded_context=use_grounded_context,
+                )
         else:
             raise ValueError(f"Unsupported task_type: {spec.task_type}")
 
@@ -462,6 +539,11 @@ def main() -> None:
         help="Evaluate StreamGuard violation catch rate and tokens saved (on ragtruth)",
     )
     parser.add_argument(
+        "--grounded-context",
+        action="store_true",
+        help="Enable grounded context mode passing (context, query, answer) from item metadata",
+    )
+    parser.add_argument(
         "--local-path", default=None, help="Path to local JSON/JSONL fixture file"
     )
     parser.add_argument("--cache-dir", default=None, help="Cache directory override")
@@ -491,6 +573,7 @@ def main() -> None:
             seed=args.seed,
             symmetric=args.symmetric,
             eval_stream_guard=args.eval_stream_guard,
+            use_grounded_context=args.grounded_context,
             local_path=args.local_path,
             cache_dir=args.cache_dir,
             force_refresh=args.force_refresh,

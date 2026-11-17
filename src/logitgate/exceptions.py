@@ -38,6 +38,16 @@ class BackendTimeoutError(BackendError, TimeoutError):
     """The server accepted the connection but didn't answer in time (often a cold model load)."""
 
 
+class UnsupportedLogprobsError(BackendError):
+    """Raised when an inference provider or model does not expose token log-probabilities.
+
+    Examples include Anthropic Claude, AWS Bedrock Converse, Groq LPUs, or OpenAI reasoning
+    models (`o1`, `o3-mini`, `o4-mini`). Subclasses `BackendError` so existing callers remain
+    compatible while allowing gates with ``on_unsupported_logprobs='escalate' | 'sidecar'``
+    to route seamlessly.
+    """
+
+
 class StubBackendWarning(UserWarning):
     """Emitted once per process when no backend is configured and the offline stub is used.
 

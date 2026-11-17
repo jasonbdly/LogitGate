@@ -8,11 +8,17 @@ from typing import Any, Literal, cast
 
 from typing_extensions import Self
 
+from logitgate.backends.base import LogitBackend, infer_backend_spec
 from logitgate.calibration.lifecycle import _same_nonzero_sign
 from logitgate.debiasing.permutation import compute_shannon_entropy
 from logitgate.debiasing.softmax import clamped_sigmoid
 from logitgate.exceptions import ConfigurationError
 from logitgate.gates.base import TIER_GENERATIVE, TIER_LOGIT, BaseGate, EscalationPolicy
+from logitgate.gates.logit_gate import (
+    UnsupportedLogprobsPolicy,
+    _call_resolve_logit_backend,
+    _validate_rag_context_and_query,
+)
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
 
@@ -207,10 +213,24 @@ class Cascade(BaseGate):
         telemetry_sink: Any = None,
         cache: Any = None,
         save_failures: bool | None = None,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+        on_unsupported_logprobs: UnsupportedLogprobsPolicy = "raise",
+        sidecar_backend: str | LogitBackend | None = None,
+        sidecar_model: str | None = None,
         **kwargs: Any,
     ) -> None:
         from logitgate.cache import resolve_verdict_cache
         from logitgate.telemetry.sinks import resolve_telemetry_sink
+
+        _validate_rag_context_and_query(context, query)
+        if on_unsupported_logprobs not in ("raise", "escalate", "sidecar"):
+            raise ConfigurationError(
+                f"Invalid on_unsupported_logprobs '{on_unsupported_logprobs}'. "
+                f"Must be one of ['raise', 'escalate', 'sidecar']"
+            )
+        if on_unsupported_logprobs == "sidecar" and sidecar_backend is None:
+            raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
 
         owns_gates = False
         if gates is None:
@@ -222,6 +242,11 @@ class Cascade(BaseGate):
                     "backend": backend,
                     "model": model,
                     "distillation_bundle": distillation_bundle,
+                    "context": context,
+                    "query": query,
+                    "on_unsupported_logprobs": on_unsupported_logprobs,
+                    "sidecar_backend": sidecar_backend,
+                    "sidecar_model": sidecar_model,
                 }
                 for k in ("pass_threshold", "fail_threshold", "logit_temperature", "profile"):
                     if k in kwargs:
@@ -230,6 +255,8 @@ class Cascade(BaseGate):
                 l2_kw: dict[str, Any] = {
                     "backend": judge_backend,
                     "model": judge_model,
+                    "context": context,
+                    "query": query,
                 }
                 if "trigger" in kwargs:
                     l2_kw["trigger"] = kwargs["trigger"]
@@ -257,11 +284,18 @@ class Cascade(BaseGate):
             raise ConfigurationError(f"prior_weight must be between 0.0 and 1.0, got {prior_weight!r}")
         resolved_sink = resolve_telemetry_sink(telemetry_sink)
         owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
+        owns_sidecar = False
+        resolved_sidecar: LogitBackend | None = None
+        if sidecar_backend is not None:
+            owns_sidecar = not isinstance(sidecar_backend, LogitBackend)
+            resolved_sidecar = _call_resolve_logit_backend(sidecar_backend, model=sidecar_model)
         try:
             resolved_cache = resolve_verdict_cache(cache)
         except BaseException:
             if owns_sink and resolved_sink not in (None, False):
                 resolved_sink.close()  # type: ignore[union-attr]
+            if owns_sidecar and resolved_sidecar is not None:
+                resolved_sidecar.close()
             raise
         self.gates = resolved_gates
         self.name = name
@@ -270,6 +304,12 @@ class Cascade(BaseGate):
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
         self.save_failures = save_failures
+        self.context = context
+        self.query = query
+        self.on_unsupported_logprobs = on_unsupported_logprobs
+        self.sidecar_backend = resolved_sidecar
+        self.sidecar_model = sidecar_model
+        self._owns_sidecar_backend = owns_sidecar
         self._owns_telemetry_sink = owns_sink
         self._owns_cache = isinstance(cache, (str, Path)) or hasattr(cache, "__fspath__")
         self._owns_gates = owns_gates
@@ -315,6 +355,10 @@ class Cascade(BaseGate):
         for b in getattr(self, "_replay_extra_backends", ()):
             if hasattr(b, "close") and callable(b.close):
                 b.close()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None and hasattr(sb, "close") and callable(sb.close):
+                sb.close()
 
     async def aclose(self) -> None:
         """Asynchronously closes owned resources including telemetry sink, cache, and child gates."""
@@ -348,6 +392,13 @@ class Cascade(BaseGate):
                 await b.aclose()
             elif hasattr(b, "close") and callable(b.close):
                 b.close()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None:
+                if hasattr(sb, "aclose") and callable(sb.aclose):
+                    await sb.aclose()
+                elif hasattr(sb, "close") and callable(sb.close):
+                    sb.close()
 
     def __enter__(self) -> Self:
         return self
@@ -472,11 +523,22 @@ class Cascade(BaseGate):
 
     def replay_config(self) -> dict[str, Any]:
         layers = [cfg for g in self.gates if (cfg := g.replay_config()) is not None]
-        return {
+        config: dict[str, Any] = {
             "gate_type": "Cascade",
             "rubric": self.rubric,
             "layers": layers,
         }
+        if self.context is not None:
+            config["context"] = self.context
+        if self.query is not None:
+            config["query"] = self.query
+        if self.on_unsupported_logprobs != "raise":
+            config["on_unsupported_logprobs"] = self.on_unsupported_logprobs
+        if self.sidecar_backend is not None:
+            config["sidecar_backend"] = infer_backend_spec(self.sidecar_backend)
+        if self.sidecar_model is not None:
+            config["sidecar_model"] = self.sidecar_model
+        return config
 
     def _effective_cache(self) -> Any:
         if self.cache is not None:
@@ -583,20 +645,25 @@ class Cascade(BaseGate):
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import _resolve_active_cache, lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+        call_kwargs = {**kwargs, "context": eff_context, "query": eff_query}
+
         eff_cache = self._effective_cache()
-        active_cache, owns_temp = _resolve_active_cache(eff_cache, kwargs)
+        active_cache, owns_temp = _resolve_active_cache(eff_cache, call_kwargs)
         if active_cache is not None:
             if owns_temp:
                 active_cache.close()
             if not _has_active_cascade_audit(self.gates):
                 self._ensure_children_calibrated_sync()
                 hit = lookup_cached_verdict(
-                    self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
+                    self, candidate, gate_cache=eff_cache, call_kwargs=call_kwargs
                 )
                 if hit is not None:
-                    return self._finalize_cache_hit(hit, candidate, kwargs)
+                    return self._finalize_cache_hit(hit, candidate, call_kwargs)
 
-        pipeline = self._pipeline(candidate, kwargs)
+        pipeline = self._pipeline(candidate, call_kwargs)
         try:
             request = next(pipeline)
         except StopIteration as done:  # pragma: no cover - the first gate always runs
@@ -614,20 +681,25 @@ class Cascade(BaseGate):
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import _resolve_active_cache, lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+        call_kwargs = {**kwargs, "context": eff_context, "query": eff_query}
+
         eff_cache = self._effective_cache()
-        active_cache, owns_temp = _resolve_active_cache(eff_cache, kwargs)
+        active_cache, owns_temp = _resolve_active_cache(eff_cache, call_kwargs)
         if active_cache is not None:
             if owns_temp:
                 active_cache.close()
             if not _has_active_cascade_audit(self.gates):
                 await self._aensure_children_calibrated_async()
                 hit = lookup_cached_verdict(
-                    self, candidate, gate_cache=eff_cache, call_kwargs=kwargs
+                    self, candidate, gate_cache=eff_cache, call_kwargs=call_kwargs
                 )
                 if hit is not None:
-                    return self._finalize_cache_hit(hit, candidate, kwargs)
+                    return self._finalize_cache_hit(hit, candidate, call_kwargs)
 
-        pipeline = self._pipeline(candidate, kwargs)
+        pipeline = self._pipeline(candidate, call_kwargs)
         try:
             request = next(pipeline)
         except StopIteration as done:  # pragma: no cover - the first gate always runs
@@ -951,7 +1023,11 @@ class Cascade(BaseGate):
             upstream_gate, upstream = gate, verdict
             if (cfg := gate.replay_config()) is not None:
                 replay_cfg = cfg
-            gate_rubric = getattr(gate, "rubric", None) or getattr(gate, "question", None)
+            gate_rubric = (
+                getattr(gate, "rubric", None)
+                or getattr(gate, "intent_rubric", None)
+                or getattr(gate, "question", None)
+            )
             if isinstance(gate_rubric, str) and gate_rubric:
                 rubric = gate_rubric
 
@@ -960,9 +1036,14 @@ class Cascade(BaseGate):
                 outcome = fields
                 continue
 
+            effective_fail_tier = (
+                verdict.traces[-1].metadata.get("layer_tier", gate.layer_tier)
+                if verdict.traces and isinstance(verdict.traces[-1].metadata, dict)
+                else gate.layer_tier
+            )
             next_gate = self.gates[i + 1] if i + 1 < len(self.gates) else None
             defers_to_generative = (
-                gate.layer_tier >= TIER_LOGIT
+                effective_fail_tier >= TIER_LOGIT
                 and next_gate is not None
                 and next_gate.layer_tier >= TIER_GENERATIVE
             )

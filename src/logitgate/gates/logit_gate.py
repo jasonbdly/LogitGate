@@ -6,7 +6,7 @@ import secrets
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -50,10 +50,38 @@ from logitgate.debiasing.softmax import (
     compute_binary_log_odds,
     has_any_target_token,
 )
-from logitgate.exceptions import ConfigurationError
+from logitgate.exceptions import ConfigurationError, UnsupportedLogprobsError
 from logitgate.gates.base import BaseGate, BatchErrorPolicy, _make_batch_error_verdict
 from logitgate.models import DecisionStatus, LayerTrace, Verdict
 from logitgate.snapshot import persist_failure_snapshot
+
+UnsupportedLogprobsPolicy = Literal["raise", "escalate", "sidecar"]
+
+
+def _validate_rag_context_and_query(
+    context: Any, query: Any
+) -> None:
+    if context is not None:
+        if isinstance(context, bool):
+            raise ConfigurationError("context cannot be a boolean")
+        if not isinstance(context, (str, Sequence)):
+            raise ConfigurationError(
+                f"context must be a string, sequence of strings, or None, got {type(context).__name__}"
+            )
+        if isinstance(context, Sequence) and not isinstance(context, str):
+            for idx, c in enumerate(context):
+                if isinstance(c, bool):
+                    raise ConfigurationError(
+                        f"context chunk at index {idx} cannot be a boolean"
+                    )
+                if not isinstance(c, (str, Mapping)) and not hasattr(c, "__dict__"):
+                    raise ConfigurationError(
+                        f"context chunk at index {idx} must be a string or structured object, got {type(c).__name__}"
+                    )
+    if query is not None and (isinstance(query, bool) or not isinstance(query, str)):
+        raise ConfigurationError(
+            f"query must be a string or None, got {type(query).__name__}"
+        )
 
 if TYPE_CHECKING:
     from logitgate.calibration.adaptive import AdaptiveConformalController
@@ -139,6 +167,11 @@ class LogitGate(BaseGate):
         max_positional_bias: float | None = None,
         name: str = "LogitGate",
         *,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
+        on_unsupported_logprobs: UnsupportedLogprobsPolicy = "raise",
+        sidecar_backend: str | LogitBackend | None = None,
+        sidecar_model: str | None = None,
         warm_prefix: bool | None = None,
         profile: CalibrationProfile | str | Path | None = None,
         adaptive_controller: AdaptiveConformalController | None = None,
@@ -270,9 +303,39 @@ class LogitGate(BaseGate):
             bias_val = None
         effective_warm_prefix = _validate_optional_bool("warm_prefix", warm_prefix)
 
+        _validate_rag_context_and_query(context, query)
+        if on_unsupported_logprobs not in ("raise", "escalate", "sidecar"):
+            raise ConfigurationError(
+                f"Invalid on_unsupported_logprobs '{on_unsupported_logprobs}'. "
+                f"Must be one of ['raise', 'escalate', 'sidecar']"
+            )
+        if on_unsupported_logprobs == "sidecar" and sidecar_backend is None:
+            raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+
         owns_backend = not isinstance(backend, LogitBackend)
         resolved_backend = _call_resolve_logit_backend(backend, model=model)
+        owns_sidecar = False
+        resolved_sidecar: LogitBackend | None = None
+        eff_sidecar_model: str | None = None
+        sidecar_temp = 1.0
         try:
+            if sidecar_backend is not None:
+                owns_sidecar = not isinstance(sidecar_backend, LogitBackend)
+                resolved_sidecar = _call_resolve_logit_backend(sidecar_backend, model=sidecar_model)
+                eff_sidecar_model = (
+                    sidecar_model
+                    or getattr(resolved_sidecar, "model", None)
+                    or getattr(resolved_sidecar, "model_name", None)
+                    or get_default_model()
+                )
+                sidecar_temp, _ = _resolve_gate_temperature(
+                    None,
+                    eff_sidecar_model,
+                    resolved_sidecar,
+                    loaded_profile,
+                    binary=True,
+                )
+
             effective_model = (
                 model
                 or getattr(resolved_backend, "model", None)
@@ -292,6 +355,8 @@ class LogitGate(BaseGate):
         except BaseException:
             if owns_backend:
                 resolved_backend.close()
+            if owns_sidecar and resolved_sidecar is not None:
+                resolved_sidecar.close()
             raise
 
         _warn_if_profile_model_mismatch(loaded_profile, effective_model, name)
@@ -306,6 +371,13 @@ class LogitGate(BaseGate):
         self.symmetric_debiasing = effective_sym
         self.query_first = query_first
         self.logit_temperature = effective_temp
+        self.context = context
+        self.query = query
+        self.on_unsupported_logprobs = on_unsupported_logprobs
+        self.sidecar_backend = resolved_sidecar
+        self.sidecar_model = eff_sidecar_model
+        self.sidecar_temperature = sidecar_temp
+        self._owns_sidecar_backend = owns_sidecar
         self._needs_lazy_calibration = (
             False
             if (resolved_meta is not None or resolved_unanchored_meta is not None)
@@ -332,6 +404,25 @@ class LogitGate(BaseGate):
         self._owns_cache = isinstance(cache, (str, Path))
         self._owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
 
+    def close(self) -> None:
+        """Safely close any owned resources (backend, cache, sidecar). Idempotent."""
+        super().close()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None and hasattr(sb, "close"):
+                sb.close()
+
+    async def aclose(self) -> None:
+        """Safely and asynchronously close any owned resources. Idempotent."""
+        await super().aclose()
+        if getattr(self, "_owns_sidecar_backend", False):
+            sb = getattr(self, "sidecar_backend", None)
+            if sb is not None:
+                if hasattr(sb, "aclose"):
+                    await sb.aclose()
+                elif hasattr(sb, "close"):
+                    sb.close()
+
     @property
     def calibration_profile(self) -> CalibrationProfile | None:
         return self.profile
@@ -350,6 +441,16 @@ class LogitGate(BaseGate):
             "preset": self.preset,
             "name": self.name,
         }
+        if self.context is not None:
+            config["context"] = self.context
+        if self.query is not None:
+            config["query"] = self.query
+        if self.on_unsupported_logprobs != "raise":
+            config["on_unsupported_logprobs"] = self.on_unsupported_logprobs
+        if self.sidecar_backend is not None:
+            config["sidecar_backend"] = infer_backend_spec(self.sidecar_backend)
+        if self.sidecar_model is not None:
+            config["sidecar_model"] = self.sidecar_model
         if self.max_positional_bias is not None:
             config["max_positional_bias"] = self.max_positional_bias
         if self.warm_prefix is not None:
@@ -424,6 +525,8 @@ class LogitGate(BaseGate):
         rubric_index: int = 0,
         *,
         boundary_nonce: str | None = None,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
     ) -> tuple[str, str | None, bool]:
         target_r = self.rubric if rubrics is None else rubrics[rubric_index]
         anchor_str = (
@@ -447,6 +550,8 @@ class LogitGate(BaseGate):
                     query_first=self.query_first,
                     boundary_nonce=boundary_nonce,
                     anchor_block=anchor_str,
+                    context=context,
+                    query=query,
                 )
             return compile_batch_binary_prompt(
                 rubrics=rubrics,
@@ -457,6 +562,8 @@ class LogitGate(BaseGate):
                 query_first=False,
                 boundary_nonce=boundary_nonce,
                 anchor_block=anchor_str,
+                context=context,
+                query=query,
             )
 
         return build("A", "B"), (build("B", "A") if self.symmetric_debiasing else None), was_anchored
@@ -468,12 +575,16 @@ class LogitGate(BaseGate):
         rubric_index: int = 0,
         *,
         boundary_nonce: str | None = None,
+        context: str | Sequence[str] | None = None,
+        query: str | None = None,
     ) -> tuple[str, str | None]:
         fwd, rev, _ = self._binary_prompts_with_anchor_flag(
             candidate,
             rubrics,
             rubric_index,
             boundary_nonce=boundary_nonce,
+            context=context,
+            query=query,
         )
         return fwd, rev
 
@@ -495,6 +606,129 @@ class LogitGate(BaseGate):
         )
         return top_fwd, top_rev
 
+    def _escalate_unsupported(
+        self,
+        candidate: Any,
+        exc_msg: str,
+        t0: float,
+        kwargs: dict[str, Any],
+    ) -> Verdict:
+        latency = (time.perf_counter() - t0) * 1000.0
+        reason = f"[{self.name}] Backend does not support logprobs; escalating ({exc_msg})"
+        trace = LayerTrace(
+            layer_name=self.name,
+            status=DecisionStatus.AMBIGUOUS,
+            latency_ms=latency,
+            tokens_generated=0,
+            metadata={
+                "abstained_reason": "unsupported_logprobs",
+                "fallback_policy": "escalate",
+            },
+        )
+        verdict = Verdict(
+            passed=False,
+            status=DecisionStatus.AMBIGUOUS,
+            probability=None,
+            triggered_layer=self.name,
+            total_latency_ms=latency,
+            total_tokens_generated=0,
+            reason=reason,
+            traces=[trace],
+        )
+        return self._handle_failure_snapshot(candidate, verdict, **kwargs)
+
+    def _execute_queries(
+        self, forward: str, reverse: str | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None, bool, str | None, float]:
+        from logitgate.backends.base import infer_backend_spec
+
+        backend = self.backend
+        supports = getattr(backend, "supports_logprobs", True) is not False
+        if not supports:
+            if self.on_unsupported_logprobs == "raise":
+                raise UnsupportedLogprobsError(
+                    f"Backend '{getattr(backend, 'model', 'unknown')}' does not support logprobs."
+                )
+            if self.on_unsupported_logprobs == "escalate":
+                raise UnsupportedLogprobsError("Backend does not support logprobs")
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+            top_fwd = self.sidecar_backend.query_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"])
+            top_rev = (
+                self.sidecar_backend.query_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"])
+                if reverse is not None
+                else None
+            )
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
+        try:
+            top_fwd = self._query(forward)
+            top_rev = self._query(reverse) if reverse is not None else None
+            return top_fwd, top_rev, False, None, self.logit_temperature
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs in ("raise", "escalate"):
+                raise
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'") from exc
+            top_fwd = self.sidecar_backend.query_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"])
+            top_rev = (
+                self.sidecar_backend.query_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"])
+                if reverse is not None
+                else None
+            )
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
+    async def _aquery_sidecar(
+        self, forward: str, reverse: str | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        if self.sidecar_backend is None:
+            raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+        if reverse is None:
+            return await self.sidecar_backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"]), None
+        if _resolve_warm_prefix(self.warm_prefix, self.sidecar_backend):
+            top_fwd = await self.sidecar_backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"])
+            top_rev = await self.sidecar_backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"])
+            return top_fwd, top_rev
+        top_fwd, top_rev = await asyncio.gather(
+            self.sidecar_backend.aquery_top_logprobs(forward, top_k=10, allowed_tokens=["A", "B"]),
+            self.sidecar_backend.aquery_top_logprobs(reverse, top_k=10, allowed_tokens=["A", "B"]),
+        )
+        return top_fwd, top_rev
+
+    async def _aexecute_queries(
+        self, forward: str, reverse: str | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None, bool, str | None, float]:
+        from logitgate.backends.base import infer_backend_spec
+
+        backend = self.backend
+        supports = getattr(backend, "supports_logprobs", True) is not False
+        if not supports:
+            if self.on_unsupported_logprobs == "raise":
+                raise UnsupportedLogprobsError(
+                    f"Backend '{getattr(backend, 'model', 'unknown')}' does not support logprobs."
+                )
+            if self.on_unsupported_logprobs == "escalate":
+                raise UnsupportedLogprobsError("Backend does not support logprobs")
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'")
+            top_fwd, top_rev = await self._aquery_sidecar(forward, reverse)
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
+        try:
+            top_fwd, top_rev = await self._aquery_pair(forward, reverse)
+            return top_fwd, top_rev, False, None, self.logit_temperature
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs in ("raise", "escalate"):
+                raise
+            if self.sidecar_backend is None:
+                raise ConfigurationError("sidecar_backend is required when on_unsupported_logprobs='sidecar'") from exc
+            top_fwd, top_rev = await self._aquery_sidecar(forward, reverse)
+            spec = infer_backend_spec(self.sidecar_backend)
+            return top_fwd, top_rev, True, spec, self.sidecar_temperature
+
     def _verdict_from_logprobs(
         self,
         top_fwd: list[dict[str, Any]],
@@ -502,12 +736,15 @@ class LogitGate(BaseGate):
         t0: float,
         *,
         anchored: bool = False,
+        sidecar_used: bool = False,
+        sidecar_spec: str | None = None,
+        effective_temp: float | None = None,
     ) -> Verdict:
         _ensure_logprobs_present(top_fwd, top_rev)
         fwd_has_target = has_any_target_token(top_fwd, ("A", "B"))
         rev_has_target = True if top_rev is None else has_any_target_token(top_rev, ("A", "B"))
         l1, p1 = compute_binary_log_odds(top_fwd, pass_token="A", fail_token="B")
-        temp = max(self.logit_temperature, 1e-6)
+        temp = max(effective_temp if effective_temp is not None else self.logit_temperature, 1e-6)
         l2: float | None = None
         p2: float | None = None
         pos_bias: float | None = None
@@ -529,7 +766,7 @@ class LogitGate(BaseGate):
                 calibrated_prob = combine_symmetric_log_odds(
                     forward_log_odds=l1,
                     reverse_log_odds=l2,
-                    logit_temperature=self.logit_temperature,
+                    logit_temperature=temp,
                 )
                 log_odds_pass = (l1 + l2) / (2.0 * temp)
         else:
@@ -612,6 +849,10 @@ class LogitGate(BaseGate):
             "log_odds_pass": round(log_odds_pass, 4),
             "shannon_entropy": round(shannon_entropy, 4),
         }
+        if sidecar_used:
+            meta["sidecar_used"] = True
+            if sidecar_spec is not None:
+                meta["sidecar_backend"] = sidecar_spec
         if active_mc is not None:
             meta["meta_calibrated"] = True
         if self.anchor_bank is not None:
@@ -679,6 +920,10 @@ class LogitGate(BaseGate):
     def evaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
 
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+
         self._ensure_calibrated()
         hit = lookup_cached_verdict(
             self, candidate, gate_cache=self.cache, call_kwargs=kwargs
@@ -690,18 +935,34 @@ class LogitGate(BaseGate):
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
         forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-            candidate, boundary_nonce=nonce
+            candidate, boundary_nonce=nonce, context=eff_context, query=eff_query
         )
-        top_fwd = self._query(forward)
-        top_rev = self._query(reverse) if reverse is not None else None
+        try:
+            top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = self._execute_queries(forward, reverse)
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs == "escalate":
+                return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+            raise
         return self._handle_failure_snapshot(
             candidate,
-            self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored),
+            self._verdict_from_logprobs(
+                top_fwd,
+                top_rev,
+                t0,
+                anchored=was_anchored,
+                sidecar_used=sidecar_used,
+                sidecar_spec=sidecar_spec,
+                effective_temp=eff_temp,
+            ),
             **kwargs,
         )
 
     async def aevaluate(self, candidate: Any, **kwargs: Any) -> Verdict:
         from logitgate.cache import lookup_cached_verdict
+
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
 
         await self._aensure_calibrated()
         hit = lookup_cached_verdict(
@@ -714,12 +975,25 @@ class LogitGate(BaseGate):
         t0 = time.perf_counter()
         nonce = secrets.token_hex(8)
         forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-            candidate, boundary_nonce=nonce
+            candidate, boundary_nonce=nonce, context=eff_context, query=eff_query
         )
-        top_fwd, top_rev = await self._aquery_pair(forward, reverse)
+        try:
+            top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = await self._aexecute_queries(forward, reverse)
+        except UnsupportedLogprobsError as exc:
+            if self.on_unsupported_logprobs == "escalate":
+                return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+            raise
         return self._handle_failure_snapshot(
             candidate,
-            self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored),
+            self._verdict_from_logprobs(
+                top_fwd,
+                top_rev,
+                t0,
+                anchored=was_anchored,
+                sidecar_used=sidecar_used,
+                sidecar_spec=sidecar_spec,
+                effective_temp=eff_temp,
+            ),
             **kwargs,
         )
 
@@ -761,6 +1035,10 @@ class LogitGate(BaseGate):
                 raise ConfigurationError("Each rubric in rubrics must be a non-empty string")
         if not rubrics:
             return []
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+
         self._ensure_calibrated()
         nonce = secrets.token_hex(8)
         results = []
@@ -768,19 +1046,44 @@ class LogitGate(BaseGate):
             t0 = time.perf_counter()
             if on_error == "raise":
                 forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-                    candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                    candidate, rubrics, rubric_index=idx, boundary_nonce=nonce, context=eff_context, query=eff_query
                 )
-                top_fwd = self._query(forward)
-                top_rev = self._query(reverse) if reverse is not None else None
-                verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                try:
+                    top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = self._execute_queries(forward, reverse)
+                    verdict = self._verdict_from_logprobs(
+                        top_fwd,
+                        top_rev,
+                        t0,
+                        anchored=was_anchored,
+                        sidecar_used=sidecar_used,
+                        sidecar_spec=sidecar_spec,
+                        effective_temp=eff_temp,
+                    )
+                except UnsupportedLogprobsError as exc:
+                    if self.on_unsupported_logprobs == "escalate":
+                        verdict = self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+                    else:
+                        raise
             else:
                 try:
                     forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce, context=eff_context, query=eff_query
                     )
-                    top_fwd = self._query(forward)
-                    top_rev = self._query(reverse) if reverse is not None else None
-                    verdict = self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                    top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = self._execute_queries(forward, reverse)
+                    verdict = self._verdict_from_logprobs(
+                        top_fwd,
+                        top_rev,
+                        t0,
+                        anchored=was_anchored,
+                        sidecar_used=sidecar_used,
+                        sidecar_spec=sidecar_spec,
+                        effective_temp=eff_temp,
+                    )
+                except UnsupportedLogprobsError as exc:
+                    if self.on_unsupported_logprobs == "escalate":
+                        verdict = self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+                    else:
+                        verdict = _make_batch_error_verdict(self, exc, on_error, t0)
                 except Exception as exc:
                     verdict = _make_batch_error_verdict(self, exc, on_error, t0)
             results.append(verdict)
@@ -840,6 +1143,10 @@ class LogitGate(BaseGate):
                 raise ConfigurationError("Each rubric in rubrics must be a non-empty string")
         if not rubrics:
             return []
+        eff_context = kwargs.get("context", self.context) if "context" in kwargs else self.context
+        eff_query = kwargs.get("query", self.query) if "query" in kwargs else self.query
+        _validate_rag_context_and_query(eff_context, eff_query)
+
         await self._aensure_calibrated()
         nonce = secrets.token_hex(8)
 
@@ -851,16 +1158,41 @@ class LogitGate(BaseGate):
                 t0 = time.perf_counter()
                 if on_error == "raise":
                     forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce, context=eff_context, query=eff_query
                     )
-                    top_fwd, top_rev = await self._aquery_pair(forward, reverse)
-                    return self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                    try:
+                        top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = await self._aexecute_queries(forward, reverse)
+                        return self._verdict_from_logprobs(
+                            top_fwd,
+                            top_rev,
+                            t0,
+                            anchored=was_anchored,
+                            sidecar_used=sidecar_used,
+                            sidecar_spec=sidecar_spec,
+                            effective_temp=eff_temp,
+                        )
+                    except UnsupportedLogprobsError as exc:
+                        if self.on_unsupported_logprobs == "escalate":
+                            return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+                        raise
                 try:
                     forward, reverse, was_anchored = self._binary_prompts_with_anchor_flag(
-                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce
+                        candidate, rubrics, rubric_index=idx, boundary_nonce=nonce, context=eff_context, query=eff_query
                     )
-                    top_fwd, top_rev = await self._aquery_pair(forward, reverse)
-                    return self._verdict_from_logprobs(top_fwd, top_rev, t0, anchored=was_anchored)
+                    top_fwd, top_rev, sidecar_used, sidecar_spec, eff_temp = await self._aexecute_queries(forward, reverse)
+                    return self._verdict_from_logprobs(
+                        top_fwd,
+                        top_rev,
+                        t0,
+                        anchored=was_anchored,
+                        sidecar_used=sidecar_used,
+                        sidecar_spec=sidecar_spec,
+                        effective_temp=eff_temp,
+                    )
+                except UnsupportedLogprobsError as exc:
+                    if self.on_unsupported_logprobs == "escalate":
+                        return self._escalate_unsupported(candidate, str(exc), t0, kwargs)
+                    return _make_batch_error_verdict(self, exc, on_error, t0)
                 except Exception as exc:
                     return _make_batch_error_verdict(self, exc, on_error, t0)
 
@@ -903,6 +1235,7 @@ __all__ = [
     "MultiRubricGate",
     "ScoreGate",
     "TopLogprobs",
+    "UnsupportedLogprobsPolicy",
     "_cal_lock_key",
     "_ensure_logprobs_present",
     "_get_async_cal_lock",
@@ -918,6 +1251,7 @@ __all__ = [
     "_validate_optional_bool",
     "_validate_optional_unit_float",
     "_validate_prob_threshold",
+    "_validate_rag_context_and_query",
     "_warn_if_profile_model_mismatch",
     "resolve_logit_backend",
 ]

@@ -13,7 +13,7 @@ def _register_eval_parser(
     eval_parser.add_argument(
         "--rubric",
         action="append",
-        required=True,
+        default=None,
         help="Evaluation rubric or question to verify against candidate (repeatable for MultiRubricGate)",
     )
     eval_parser.add_argument(
@@ -138,6 +138,59 @@ def _register_eval_parser(
         type=float,
         default=None,
         help="Score threshold required for a PASSED verdict in ScoreGate",
+    )
+    eval_parser.add_argument(
+        "--context",
+        action="append",
+        default=None,
+        help="Retrieved context chunk to condition the evaluation (repeatable)",
+    )
+    eval_parser.add_argument(
+        "--context-file",
+        type=str,
+        default=None,
+        help="Path to a text file containing reference context",
+    )
+    eval_parser.add_argument(
+        "--query",
+        type=str,
+        default=None,
+        help="User query or question corresponding to the candidate response",
+    )
+    eval_parser.add_argument(
+        "--on-unsupported-logprobs",
+        choices=("raise", "escalate", "sidecar"),
+        default="raise",
+        help="Policy when backend does not support logprobs: 'raise', 'escalate', or 'sidecar' (default: raise)",
+    )
+    eval_parser.add_argument(
+        "--sidecar-backend",
+        type=str,
+        default=None,
+        help="Sidecar backend specification for logprob estimation when primary backend does not support logprobs",
+    )
+    eval_parser.add_argument(
+        "--tool-call",
+        action="store_true",
+        help="Evaluate candidate tool calls via ToolCallGate (deterministic Layer-0 contract and optional Layer-1 intent)",
+    )
+    eval_parser.add_argument(
+        "--allowed-tool",
+        action="append",
+        default=None,
+        help="Permitted tool name for ToolCallGate (repeatable)",
+    )
+    eval_parser.add_argument(
+        "--allowed-root",
+        action="append",
+        default=None,
+        help="Permitted filesystem root directory for ToolCallGate (repeatable)",
+    )
+    eval_parser.add_argument(
+        "--allowed-host",
+        action="append",
+        default=None,
+        help="Permitted network host for ToolCallGate (repeatable)",
     )
     return eval_parser
 
