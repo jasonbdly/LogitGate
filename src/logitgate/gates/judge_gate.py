@@ -407,6 +407,9 @@ class JudgeGate(BaseGate):
         self.telemetry_sink = resolved_sink
         self.cache = resolved_cache
         self.name = name
+        self._owns_backend = owns_backend
+        self._owns_cache = isinstance(cache, (str, Path))
+        self._owns_sink = isinstance(telemetry_sink, str) or hasattr(telemetry_sink, "__fspath__")
         self._probe_gate: LogitGate | None = None
 
     def replay_config(self) -> dict[str, Any]:

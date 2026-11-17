@@ -774,13 +774,20 @@ def test_uri_edge_cases_and_malformed_json_responses(
 
 
 def test_all_docs_python_blocks_compile() -> None:
-    """Every ```python block in docs/*.md must be syntactically valid Python."""
+    """Every ```python block in docs/**/*.md must be syntactically valid Python."""
     docs_dir = Path(__file__).resolve().parent.parent / "docs"
-    for doc_path in sorted(docs_dir.glob("*.md")):
+    doc_files = sorted(docs_dir.rglob("*.md"))
+    assert len(doc_files) >= 15
+    for doc_path in doc_files:
+        rel_name = doc_path.relative_to(docs_dir).as_posix()
         content = doc_path.read_text(encoding="utf-8")
-        blocks = re.findall(r"```python\n(.*?)```", content, flags=re.DOTALL)
+        blocks = re.findall(
+            r"^```python\n(.*?)^```",
+            content,
+            flags=re.DOTALL | re.MULTILINE,
+        )
         for i, block in enumerate(blocks):
-            compile(block, f"{doc_path.name}[python block {i}]", "exec")
+            compile(block, f"docs/{rel_name}[python block {i}]", "exec")
 
 
 def test_pass_4_adversarial_security_and_ml_science_fixes(tmp_path: Path) -> None:

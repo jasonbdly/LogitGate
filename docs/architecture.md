@@ -1,228 +1,467 @@
-# 3-Layer Cascaded Router Architecture & Deployment Topologies
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
 
-This document provides a comprehensive architectural breakdown of the **LogitGate** evaluation pipeline, its execution mechanics, short-circuiting rules, and production deployment topologies.
+# Deep Notes: Systems Architecture & Execution Mechanics
+
+This document provides an exhaustive systems-level breakdown of the **LogitGate** evaluation engine: its trait-based gate hierarchy, prefix-preserving attention mechanics, concurrency and lifecycle invariants, capability-aware backend routing, and production deployment topologies.
 
 ---
 
-## 3-Layer Cascaded Router Architecture
+## 1. 3-Layer Cascaded Router Architecture
+
+LogitGate organizes evaluation into three distinct physical layers to achieve maximal verification throughput at minimum cost and latency.
+
+![LogitGate 3-Layer Cascade Flow](./assets/cascade_flow.svg)
 
 ```mermaid
 flowchart TD
-    artifact["Candidate Artifact"] --> L0["Layer 0: ASTGate / ContractGate"]
+    artifact["Candidate Artifact (Code / JSON / Text)"] --> L0["Layer 0: ASTGate / ToolCallGate (~0.04ms CPU)"]
     
-    L0 -->|"Syntax / DAG / Forbidden Import"| F0["FAIL: 0 LLM calls (sub-0.1ms)"]
-    L0 -->|"Passed"| L1["Layer 1: LogitGate"]
+    L0 -->|"Syntax / Schema / SSRF / Path Violation"| F0["FAIL: 0 LLM calls (sub-0.1ms)"]
+    L0 -->|"Passed Structural Invariants"| L1["Layer 1: LogitGate / MultiRubricGate (~40–110ms GPU)"]
     
-    L1 -->|"P >= pass_threshold (>= 0.85)"| P1["PASS: 0 CoT tokens (~40–120ms)"]
-    L1 -->|"P <= fail_threshold (<= 0.20)"| F1["FAIL: 0 CoT tokens (~40–120ms)"]
-    L1 -->|"0.20 < P < 0.85 (Ambiguous)"| L2["Layer 2: JudgeGate"]
+    L1 -->|"P >= pass_threshold (>= 0.85)"| P1["PASS: 0 CoT tokens (Fast-Path)"]
+    L1 -->|"P <= fail_threshold (<= 0.20)"| F1["FAIL: 0 CoT tokens (Decisive)"]
+    L1 -->|"0.20 < P < 0.85 (Ambiguous / Drift)"| L2["Layer 2: JudgeGate (1,500–4,000ms GPU)"]
     
-    L2 -->|"Escalated Critique"| R2["Actionable Diagnostic Report"]
+    L2 -->|"Generative Adjudication"| R2["Actionable Diagnostic Report / Reversal"]
 ```
 
 ### Layer Execution Breakdown
 
-1. **Layer 0 (`ASTGate` / `ContractGate`)**:
+1. **Layer 0 (`ASTGate` / `ContractGate` / `ToolCallGate` Stage-0)**:
    - **Latency**: Sub-millisecond (~0.04 ms on CPU).
-   - **Cost**: Zero LLM calls, zero tokens, zero GPU memory.
-   - **Mechanics**: Deterministically verifies structural contracts before any neural network invocation:
-     - Python AST syntax trees (`syntax=True`).
-     - Forbidden imports (`forbidden_imports=["os", "sys", "subprocess"]`).
-     - Forbidden regex patterns (`forbidden_patterns`).
-     - Required document sections (`required_sections`).
-     - Character length bounds (`min_length`, `max_length`).
-     - Pydantic models & JSON Schemas (`json_schema`).
-     - Task dependency acyclic DAG cycles (`acyclic_dag=True`).
-     - Arbitrary user-defined callables (`validators`).
-   - If an artifact fails Layer 0, the pipeline halts immediately with `passed=False` and `status=DecisionStatus.FAILED`.
+   - **Cost**: 0 LLM calls, 0 tokens generated, 0 GPU memory allocated.
+   - **Mechanics**: Enforces deterministic, non-probabilistic invariants before invoking neural weights:
+     - Python AST syntax trees (`syntax=True`) and sequence validation.
+     - Forbidden imports (`forbidden_imports=["os", "sys", "subprocess"]`), inspecting both `Import` and `ImportFrom` nodes as well as dynamic `__import__` / `importlib` calls.
+     - Forbidden regex patterns (`forbidden_patterns`), scanned across both raw and normalized inputs.
+     - JSON Schema and Pydantic model validation (`json_schema`), strictly disallowing boolean coercions for numeric types (`not isinstance(val, bool)`).
+     - Deterministic security barriers via `ToolCallGate`: path traversal (`..`), SSRF IP literal blocking (RFC-1918, link-local `169.254.169.254`, loopback), and destructive shell/SQL patterns.
+   - **Short-Circuiting**: Any failure at Layer 0 halts the pipeline immediately with `passed=False` and `status=DecisionStatus.FAILED`. Layer 0 failures are final and cannot be overturned by downstream generative models.
 
-2. **Layer 1 (`LogitGate` / `ChoiceGate` / `ScoreGate`)**:
-   - **Latency**: ~36–41 ms (single-pass GPU), ~90–113 ms (2-pass debiased GPU), ~170–640 ms (CPU).
-   - **Output Tokens**: **0 autoregressive Chain-of-Thought tokens**.
-   - **Mechanics**: Reads the model's raw first-token log-probabilities (`max_tokens=1`) under greedy decoding.
-     - **Binary Pass/Fail (`LogitGate`)**: Runs forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes to cancel pretraining token priors and positional bias, abstaining (`DecisionStatus.AMBIGUOUS`) inside `fail_threshold < P < pass_threshold`, when target tokens are unobserved, or when `max_positional_bias` sign-flip divergence is exceeded.
-     - **Discrete K-ary Selection (`ChoiceGate`)**: Normalizes probabilities across $K$ options using forward and reverse permutation averaging (`derangement`, `cyclic`, or `reverse`), supporting selective `AMBIGUOUS` abstention on unobserved target tokens (`choice=None`), `min_confidence`, or `min_margin` (`top2_margin`) so low-confidence routes can escalate to Layer 2.
-     - **Continuous Scoring (`ScoreGate`)**: Computes probability-weighted expected scores ($\mathbb{E}[S] = \sum s \cdot P(s)$) over discrete anchors (1 to 5) with scale reversal, supporting selective `AMBIGUOUS` abstention on unobserved target tokens (`score=None`), uncertainty band `fail_threshold < E[S] < threshold`, or bimodal dispersion `score_std > max_score_std`.
-     - **Thinking Prefill Suppression & Warm Prefixing**: Layer-1 backends automatically suppress reasoning prefill tokens (`OllamaBackend` sends `think=False` with legacy HTTP 400 opt-out; `OpenAICompatBackend` sends `reasoning_effort="none"` with sticky HTTP 400/422 opt-out and automatic `chat_template_kwargs={"enable_thinking": False}` fallback on `<think>`/`<|thought|>`/empty traps plus optional `auto_logit_bias=True`; `LlamaCppBackend` supports `chat_template_kwargs` and Mode-A `auto_logit_bias=True`). Async 2-pass backends that prefer cold-prefix cache warmup (`OllamaBackend`, `LlamaCppBackend`) run Pass 1 sequentially before Pass 2 by default (configurable via `warm_prefix`).
+2. **Layer 1 (`LogitGate` / `ChoiceGate` / `ScoreGate` / `MultiRubricGate` / `RankGate`)**:
+   - **Latency**: ~36–45 ms (single-pass GPU), ~85–115 ms (2-pass debiased GPU), ~160–380 ms (CPU).
+   - **Output Tokens**: **0 autoregressive Chain-of-Thought (CoT) tokens**. The backend requests exactly `max_tokens=1`.
+   - **Mechanics**: Reads the model's raw first-token log-probabilities under greedy decoding:
+     - **Binary Pass/Fail (`LogitGate`)**: Executes forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes in log-odds space to cancel pretraining token priors and positional bias.
+     - **Atomic Multi-Criteria (`MultiRubricGate`)**: Evaluates multiple orthogonal rubrics against a shared candidate context using weakest-link aggregation, reusing prompt KV-cache across all rubrics.
+     - **K-ary Categorical Routing (`ChoiceGate`)**: Normalizes probabilities across $K$ options using fixed-point-free derangement permutations, supporting margin-based escalation.
+     - **Continuous Scoring (`ScoreGate`)**: Computes probability-weighted expected scores ($\mathbb{E}[S] = \sum s \cdot P(s)$) over discrete anchors (1 to 5) with scale reversal debiasing.
+     - **Zero-Token Ranking (`RankGate`)**: Ranks candidate pools using pairwise symmetric swap cancellation, listwise slot derangement, or round-robin Hodge combinatorial projections.
    - **Short-Circuiting Rules**:
-     - If calibrated confidence $P \ge \text{pass\_threshold}$ (default: $0.85$), it issues an immediate **Fast-Path PASS**, bypassing the following Layer-2 gate (unless that gate's policy is `always`).
-     - If confidence $P \le \text{fail\_threshold}$ (default: $0.20$) and downstream `JudgeGate` is configured with `trigger="on_ambiguous_only"`, it issues an immediate **Decisive FAIL**, short-circuiting Layer 2.
-
-> **Routing is trait-based.** `Cascade` never checks concrete classes. Each gate declares `layer_tier` (0 deterministic, 1 logit, 2 generative), `can_fast_path`, and, on tier-2 gates, `escalation_policy`. Tier-0 failures are final. A tier-1 failure or ambiguity defers to an immediately following tier-2 gate, whose policy decides whether it runs. Custom gates, wrappers, and decorators that declare these traits route exactly like the built-ins. The sync and async paths share one generator-based pipeline (`Cascade._pipeline`), so routing behavior is identical between `evaluate` and `aevaluate` by construction.
+     - **Fast-Path PASS**: Calibrated confidence $P \ge \text{pass\_threshold}$ (default: $0.85$) issues an immediate PASS, bypassing Layer 2.
+     - **Decisive FAIL**: Calibrated confidence $P \le \text{fail\_threshold}$ (default: $0.20$) issues an immediate FAIL, short-circuiting Layer 2 when configured with `trigger="on_ambiguous_only"`.
+     - **Ambiguous Escalation**: When $0.20 < P < 0.85$, or target tokens are unobserved, the gate marks the verdict `DecisionStatus.AMBIGUOUS` and escalates to Layer 2.
 
 3. **Layer 2 (`JudgeGate`)**:
-   - **Latency**: 1,500–5,000 ms (generative autoregressive decoding).
+   - **Latency**: 1,500–4,500 ms (generative autoregressive decoding).
    - **Trigger Policies**:
-     - `on_ambiguous_only` (default): Executes ONLY when Layer 1 confidence is genuinely ambiguous ($0.20 < P < 0.85$). Clean passes and decisive failures bypass Layer 2.
-     - `on_ambiguous_or_fail`: Executes if Layer 1 was ambiguous ($0.20 < P < 0.85$) OR if Layer 1 failed, providing actionable diagnostic feedback.
-     - `adjudicate`: Escalates both ambiguous items AND Layer-1 semantic failures while allowing Tier-2 `JudgeGate` to overturn Tier-1 false-negative failures (deterministic Tier-0 `ASTGate` failures remain final).
-     - `always`: Forces generative critique on every artifact regardless of upstream confidence.
-   - **Monotonic Failure Preservation**:
-     - Under `on_ambiguous_or_fail`, when Layer 1 decisively fails ($P \le \text{fail\_threshold}$) and escalates to Layer 2 for diagnostic reporting, the final Verdict preserves `passed=False` even if the downstream generative judge's text critique phrasing is lenient.
-   - **Post-Critique Logit Adjudication & Prior-Evidence Fusion**:
-     - When backed by a `LogitBackend`, `JudgeGate` performs symmetric 2-pass post-critique `A/B` log-odds adjudication over its verification notes, and `Cascade(..., fuse_logits=True, prior_weight=0.30)` fuses permutation-consistent Layer-1 priors ($|z_1| \ge 1.0$) with uncertain split Layer-2 critiques ($|z_2| < 1.0$) before falling back to structured `[VERDICT: ...]` tags or the self-healing 1-token `_probe()`.
-     - If tags are omitted, `JudgeGate` runs its self-healing 1-token `LogitGate` probe on the generated critique text before heuristic fallback.
+     - `on_ambiguous_only` (default): Executes ONLY when Layer 1 confidence is genuinely ambiguous ($0.20 < P < 0.85$). Clean passes and decisive failures bypass Layer 2 completely.
+     - `on_ambiguous_or_fail`: Executes if Layer 1 was ambiguous OR failed, providing rich diagnostic critiques for defective artifacts.
+     - `adjudicate`: Escalates ambiguous items AND semantic Layer-1 failures, permitting Layer 2 to overturn Layer-1 false negatives while keeping Layer-0 structural failures strictly final.
+     - `always`: Forces full generative critique on every artifact regardless of Layer-1 confidence.
+   - **Post-Critique Logit Adjudication**: When backed by a `LogitBackend`, `JudgeGate` performs symmetric 2-pass post-critique log-odds adjudication over its generated critique notes. If tags are omitted, an internal 1-token `LogitGate` probe classifies the critique text before heuristic fallback.
 
 ---
 
-## System Requirements & Hardware Tiers
+## 2. Trait-Based Routing & Modular Gate Hierarchy (`BaseGate`)
 
-`LogitGate` adapts dynamically across hardware environments:
+Routing decisions in `Cascade` are strictly **trait-based**. The pipeline never checks concrete subclasses (`isinstance(gate, LogitGate)`). Instead, all gates inherit from `BaseGate` and declare routing traits that govern pipeline flow.
 
-| Hardware Tier | Recommended Model | Backend Specifier / Config | Typical Single-Pass Latency | Target Workflows |
-| :--- | :--- | :--- | :--- | :--- |
-| **0-GPU CI Runners / Air-Gapped** | Offline Deterministic Stub | `stub://default` | **< 0.05 ms** | Unit tests, mock suites, CI smoke tests |
-| **CPU-Only Laptops / Edge** | `qwen2.5-coder:3b` / `llama3.2:3b` / `gemma4:e4b` | `ollama://localhost:11434/qwen2.5-coder:3b` (`options={"num_gpu": 0}`) | **~64–170 ms** (`2.1 GB` RAM on 3B) | Local developer testing & CPU CI without discrete GPU |
-| **8–12 GB VRAM Consumer GPU** | `qwen2.5:7b` / `gemma4:e4b` | `ollama://localhost:11434/gemma4:e4b` | **~40–45 ms** | Desktop development, real-time agent loops |
-| **16–24 GB VRAM Workstation** | `qwen2.5-coder:14b` / `qwen2.5:14b` | `ollama://localhost:11434/qwen2.5-coder:14b` | **~40–50 ms** | Production evaluation suites, coding agents |
-| **Cloud Inference / Hosted APIs** | `gpt-4o-mini` / `vLLM` | `openai://api.openai.com/v1` or `vllm://localhost:8000/v1` | **~60–120 ms** (network bounded) | High-concurrency enterprise pipelines |
+```mermaid
+classDiagram
+    class BaseGate {
+        +str name
+        +int layer_tier
+        +bool can_fast_path
+        +bool can_override_fail
+        +EscalationPolicy escalation_policy
+        +evaluate(candidate, **kwargs) Verdict
+        +aevaluate(candidate, **kwargs) Verdict
+        +evaluate_batch(candidates, **kwargs) list[Verdict]
+        +close() void
+        +aclose() void
+    }
+    class ASTGate {
+        +int layer_tier = 0
+        +bool can_fast_path = False
+    }
+    class ToolCallGate {
+        +int layer_tier = 0 or 1
+        +bool can_fast_path = False or True
+    }
+    class LogitGate {
+        +int layer_tier = 1
+        +bool can_fast_path = True
+    }
+    class JudgeGate {
+        +int layer_tier = 2
+        +bool can_fast_path = False
+        +bool can_override_fail = True
+        +EscalationPolicy escalation_policy
+    }
+    BaseGate <|-- ASTGate
+    BaseGate <|-- ToolCallGate
+    BaseGate <|-- LogitGate
+    BaseGate <|-- JudgeGate
+```
 
----
+### Routing Traits Specification
 
-## 3 Deployment Topologies: Preventing KV-Cache Eviction & Thrashing
+| Routing Trait | Values | Meaning |
+| :--- | :--- | :--- |
+| `layer_tier` | `0` (Deterministic), `1` (Logit), `2` (Generative) | Declares the gate execution tier. Tier-0 failures are irrevocable and halt immediately. Tier-1 failures defer to an immediately following Tier-2 gate. |
+| `can_fast_path` | `True`, `False` | When `True`, a decisive PASS ($P \ge \text{pass\_threshold}$) immediately bypasses subsequent gates (unless the downstream gate specifies `escalation_policy="always"`). |
+| `can_override_fail` | `True`, `False` | When `True` (e.g. `JudgeGate(trigger="adjudicate")`), the gate has authority to overturn an upstream Tier-1 semantic failure if its detailed critique determines the candidate is actually correct. |
+| `escalation_policy` | `"on_ambiguous_only"`, `"on_ambiguous_or_fail"`, `"adjudicate"`, `"always"` | Defines the criteria under which this gate executes when preceded by an upstream gate in a `Cascade`. |
 
-When deploying LLM evaluation pipelines, a common production failure mode is **KV-Cache Thrashing**: when a primary generation model (e.g., an agent synthesizing code) is interrupted by an evaluation judge loading into the same VRAM or context window, evicting the primary generator's KV-cache and forcing expensive full recomputation.
+### Hybrid Stage-0 / Stage-1 Routing in `ToolCallGate`
 
-`LogitGate` supports three deployment topologies designed to prevent cache eviction:
+`ToolCallGate` exhibits dynamic trait adaptation:
+- When verifying structural contracts (allowed tool names, parameter schemas, SSRF barriers, path traversal), it operates as **Tier 0** (`layer_tier = 0`, `can_fast_path = False`). Any violation fails immediately in <0.1 ms without LLM invocation.
+- When `check_intent=True` or `intent_rubric` is supplied, it transitions to **Tier 1** (`layer_tier = 1`, `can_fast_path = True`). It invokes an internal `LogitGate` to assess semantic intent alignment, permitting decisive intent passes to short-circuit downstream `JudgeGate` stages.
 
-### Topology 1: Single-Model Shared KV-Cache (Batch Evaluation Suites)
-- **Use Case**: Evaluating multiple rubrics on the same candidate artifact.
-- **Mechanics**: Using `MultiRubricGate` (or `evaluate_batch(candidate, rubrics)`), the candidate tokens are evaluated once at the root of the prompt. Subsequent rubric logit probes reuse the shared `[CANDIDATE ARTIFACT]` prompt prefix in the KV-cache without evicting the context, reducing per-rubric latency to ~110 ms on GPU and ~450–925 ms on CPU. Setting `fail_fast=True` short-circuits remaining rubrics as soon as any rubric produces `DecisionStatus.FAILED`, saving **40%–80%** of backend calls on defective artifacts, while `warm_prefix` runs Pass 1 ahead of Pass 2 in async evaluation to avoid cold-prefill slot races on single-node servers.
+### Custom Gate Implementation Recipe
 
-### Topology 2: Heterogeneous Dual-GPU Sidecar (High-Throughput Production)
-- **GPU 0**: Pinned exclusively to the primary generator model (e.g., `gemma4:26b` MoE or `gemma4:31b` Dense) with 16k–32k context. Its generation KV-cache is **never evicted**.
-- **GPU 1**: Dedicated to a lightweight `LogitGate` sidecar (`qwen2.5:14b` or `gemma4:e4b` in ~8.7–9.4 GB VRAM, or `llama3.2:3b` in ~3.2 GB VRAM).
-- **Latency & Throughput**: Real-time gating queries complete in ~40–50 ms (single-pass) or ~85–120 ms (2-pass symmetric) over local IPC (`http://localhost:11435`) without contending for GPU 0's memory bandwidth.
+Any developer can author custom routing gates by subclassing `BaseGate` and declaring these traits:
 
-### Topology 3: Single-GPU Workstation + Pure-CPU `LogitGate` Sidecar (Memory-Constrained)
-- **100% of GPU VRAM** is preserved for the primary generator model.
-- **Layer 1 `LogitGate`** runs on the host CPU with `options={"num_gpu": 0, "num_ctx": 2048}` in ~170 ms (single-pass) using standard System RAM (~3.2 GB for 3B Q4 models like `qwen2.5:3b` / `llama3.2:3b`, or ~9.4 GB for `gemma4:e4b`).
-- **Short-Circuiting**: Clear passes short-circuit without GPU VRAM interference. Only ambiguous items or failures escalate to the GPU-backed `JudgeGate`.
+```python
+from logitgate.gates.base import BaseGate, TIER_DETERMINISTIC
+from logitgate.models import DecisionStatus, LayerTrace, Verdict
 
----
+class CharacterBudgetGate(BaseGate):
+    """Tier-0 gate that enforces a strict maximum character budget."""
+    name = "CharacterBudgetGate"
+    layer_tier = TIER_DETERMINISTIC
+    can_fast_path = False
 
-## Portable Calibration Profiles & Zero-Probe Cold Start (`CalibrationProfile`)
+    def __init__(self, max_characters: int = 1000) -> None:
+        self.max_characters = max_characters
 
-Production CI/CD runners and stateless containers often deploy unrecognized fine-tuned or quantized Bring-Your-Own (BYO) checkpoints. Without an explicit profile, the first evaluation triggers lazy micro-calibration probes (~16–32 HTTP calls), and setting thresholds independently of temperature causes scale drift.
+    def evaluate(self, candidate: str, **kwargs) -> Verdict:
+        length = len(candidate)
+        passed = length <= self.max_characters
+        status = DecisionStatus.PASSED if passed else DecisionStatus.FAILED
+        reason = "Within budget" if passed else f"Exceeded {self.max_characters} chars ({length})"
+        
+        trace = LayerTrace(
+            layer_name=self.name,
+            status=status,
+            latency_ms=0.02,
+            failure_code="OVER_BUDGET" if not passed else None,
+        )
+        return Verdict(
+            status=status,
+            passed=passed,
+            triggered_layer=self.name,
+            total_latency_ms=0.02,
+            total_tokens_generated=0,
+            reason=reason,
+            traces=[trace],
+        )
+```
 
-`CalibrationProfile` (`schema_version=1`, atomically serialized with symlink rejection and 1 MiB load guard via `.save()` / `.load()`) bundles calibrated temperatures alongside mutually consistent Layer-1 conformal cutoffs:
-
-- **Unified Configuration Precedence**: All gates accepting `profile: CalibrationProfile | str | Path | None = None` (`LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `RankGate`, `BestOfNGate`, and `JudgeGate`) enforce strict resolution order:
-  `explicit constructor kwarg > profile field > preset > global defaults`.
-- **Zero-Probe Cold Start**: Supplying a `profile=` sets `_needs_lazy_calibration = False`, eliminating lazy micro-calibration probes on unseen BYO checkpoints (`2` forward/reverse calls from request #1) while emitting a `CalibrationWarning` if the loaded profile's `model` tag differs from the runtime gate model.
-- **Multiclass `0.65` Softmax Floor (`effective_multiclass_temperature`)**: Sub-4B checkpoints often fit sharp binary temperatures ($T_{\text{bin}} \approx 0.06\text{--}0.40$) to counteract zero-shot `A/B` symbol attenuation. When a binary-only profile (`multiclass_temperature=None`) is passed to `ChoiceGate`, `ScoreGate`, `RankGate`, or `JudgeGate`, `effective_multiclass_temperature` automatically applies `max(0.65, binary_temperature)` so multi-option softmax distributions do not over-sharpen unless a dedicated `multiclass_temperature` was fitted (`calibrate_multiclass=True`).
-- **Snapshot Independence**: `VerdictSnapshot` records resolved gate configuration values (`logit_temperature`, `pass_threshold`, `fail_threshold`, `score_threshold`, `score_fail_threshold`, `choice_min_confidence`, `choice_min_margin`) directly into the snapshot so `VerdictSnapshot.replay()` and `areplay()` remain reproducible even after an external `profile.json` file is removed.
-
----
-
-## Zero-Token Candidate Ranking & Best-of-N Pipelines (`RankGate` & `BestOfNGate`)
-
-Evaluating a pool of $N \ge 2$ candidate completions adds two structural requirements beyond single-candidate verification: permutation-invariant preference extraction and defense against **all-bad pools** where pure relative ranking otherwise promotes the least defective candidate.
-
-- **Mode Scaling (`RankGate.mode`)**:
-  - `pairwise` ($N = 2$): 2 swapped forward/reverse single-token calls (`max_tokens=1`).
-  - `listwise` ($2 \le N \le 10$): single-token slot softmax (`A..J`) across `"derangement"` (2 calls), `"reverse"` (2 calls), or `"cyclic"` ($N$ calls).
-  - `round_robin` ($2 \le N \le 16$): all $N(N - 1)/2$ swapped pairs with Hodge centered log-worths and Condorcet `cycle_residual`.
-  - `tournament` ($2 \le N \le 32$): $N - 1$ swapped single-elimination matches with automatic odd-$N$ byes and champion-rooted tree log-worths.
-  - `auto`: selects `pairwise` ($N = 2$), `listwise` ($3 \le N \le 6$), and `tournament` ($7 \le N \le 32$).
-- **Contract-Filtered `BestOfNGate` (`pre_gate -> RankGate -> post_gate`)**:
-  - Runs optional deterministic/cheap `pre_gate` (`ASTGate`, `ContractGate`, etc.) across all candidates first (`evaluate` sync / `asyncio.gather` async): `0` survivors fails immediately with `0` LLM calls; `1` sole survivor promotes at `probability=1.0` with `0` ranking calls; $\ge 2$ survivors are ranked and zero-filled for rejected keys while remapping `winner_index` to original pool indices.
-  - Runs optional `post_gate` (`LogitGate` / `JudgeGate`) against the winning candidate to catch **all-bad pools** where even the top-ranked survivor violates core correctness or policy contracts, persisting a single `VerdictSnapshot` across the full gate pipeline.
-- **`Cascade` Winner Forwarding (`_normalized_out`) & Snapshot Replay**:
-  - Both `RankGate` and `BestOfNGate` emit the winning candidate artifact via `kwargs["_normalized_out"]` on `verdict.passed`, allowing downstream `Cascade` stages (`selector >> JudgeGate(...)`) to verify the selected artifact directly while `VerdictSnapshot.replay()` / `areplay()` reconstructs `RankGate` and `BestOfNGate` (including `pre_gate_config` / `post_gate_config`) identically.
-
----
-
-## Production Telemetry, Privacy Controls & Self-Distilling Sinks (`logitgate.telemetry`)
-
-Production deployments need continuous observability over fast-path rates, abstention drifts, and Layer-1 student vs. Layer-2 teacher disagreements without adding blocking latency or leaking sensitive artifacts into logs:
-
-- **Zero-Allocation Disabled Fast Path & Single-Record Cascade Deduplication**:
-  - When no sink is attached (`telemetry_sink=None` and `LOGITGATE_TELEMETRY_PATH` unset), `emit_verdict_telemetry` returns immediately before building a `TelemetryRecord`.
-  - Composite pipelines (`Cascade`, `BestOfNGate`, and `JudgeGate`'s internal fallback `_probe_gate`) pass `_suppress_telemetry=True` to inner stages and automatically inherit or multiplex child gate sinks (`_effective_telemetry_sink`), emitting **one consolidated `TelemetryRecord`** per top-level evaluation with `fast_pathed`, `escalated`, `primary_model`, `teacher_model`, and uncontaminated `teacher_passed` (captured prior to `locked_upstream_fail` or `fuse_logits`).
-  - `VerdictSnapshot.replay()` / `explain()` and `BenchmarkRunner` warmups suppress telemetry emission automatically so offline debugging and warmup probes never pollute production streams.
-- **Symlink-Hardened Rotation & Linear-Time PII Redaction**:
-  - `JsonlTelemetrySink` and `DistillationSink` open log files and rotated archives (`max_bytes`, `backup_count`) under a `threading.Lock` with `os.O_NOFOLLOW` symlink checks and configurable failure isolation (`on_error="warn" | "raise" | "ignore"`).
-  - Four `PrivacyMode` levels (`"full"`, `"redact_pii"`, `"hash_only"`, `"omit_candidate"`) sanitize candidate artifacts before disk persistence; `"redact_pii"` scrubs emails, `Bearer` headers, `sk-`/`ghp_`/`glpat-`/`AKIA` tokens, US SSNs, and Luhn-validated payment card numbers in linear $O(N)$ time without catastrophic backtracking.
-- **Teacher-to-Student Discrepancy Mining, Zero-Call Recalibration & Dataset Export**:
-  - `DistillationSink` (with bounded SHA-256 `(rubric, candidate)` deduplication) and offline `load_distillation_records()` classify escalated evaluations into four discrepancy buckets: `false_accept_caught`, `false_reject_overturned`, `polarity_flip` ($L_{\text{fwd}} \cdot L_{\text{rev}} < 0$), and `ambiguous_resolved`.
-  - Because `TelemetryRecord` and `DistillationRecord` preserve raw Layer-1 `(student_forward_log_odds, student_reverse_log_odds)` alongside `teacher_passed`, `recalibrate_from_telemetry()` fits an updated temperature + split-conformal `CalibrationProfile` in **milliseconds with zero LLM calls** (best paired with a periodic full-audit shadow burn-in sample so non-conformity scores remain exchangeable across the full input distribution).
-  - `export_distillation_dataset()` compiles collected discrepancies into `"calibration_jsonl"` (compatible directly with `logitgate calibrate --dataset`), `"sft_jsonl"` (`2x` symmetric `A/B` + `B/A` swapped prompt/completion pairs so LoRA fine-tuning never re-introduces positional slot bias), or `"dpo_jsonl"` preference triples.
-
----
-
-## Mid-Stream Token Guardrails (`StreamGuard`, `guard_stream`, `aguard_stream`)
-
-Post-hoc verification waits for an upstream generator to emit 100% of its tokens before running a check — wasting downstream generation compute on early violations and either delaying time-to-first-token (TTFT) by the entire response duration or leaking violating tokens to the client. `StreamGuard` (`logitgate.streaming`) wraps synchronous (`Iterable`) and asynchronous (`AsyncIterable`) token streams (`str`, OpenAI `ChatCompletionChunk`, Ollama dicts, or custom `chunk_extractor`):
-
-- **Clause-Aligned Stride Scheduling & Exact-Prefix Final Deduplication**:
-  - Checkpoints fire once `chars_seen >= min_chars` and `chars_delta >= stride_chars` (or `chunks_delta >= stride_chunks`), waiting up to `max_wait_chars` for a natural clause terminator (`.`, `!`, `?`, `;`, `:`, `\n`, `}`, `]`) when `clause_boundary=True` to avoid evaluating mid-identifier or mid-negation fragments.
-  - If the final stream chunk already triggered a checkpoint at `chars_seen`, `final_check=True` reuses that `Verdict` without issuing a redundant backend call.
-- **Conformal Layer-1 Prefix Checks vs. Hysteresis (`consecutive_failures`)**:
-  - Calibrated standalone `LogitGate` naturally maps incomplete or ambiguous prefixes into its `(fail_threshold, pass_threshold)` `AMBIGUOUS` band (`0.0%` false-alarm mid-stream abort rate on `streaming_trajectories_32.json` even at `consecutive_failures=1`), aborting only when a prefix decisively enters `<= fail_threshold`.
-  - When wrapping a `Cascade(LogitGate >> JudgeGate)` directly around a stream, incomplete prefixes that score `AMBIGUOUS` at Layer 1 escalate to Layer 2 mid-sentence; setting `consecutive_failures=2` applies two-strike hysteresis so transient prefix ambiguity resolves cleanly once the completing clause arrives.
-- **Delivery Modes & Upstream Generator Cancellation**:
-  - `delivery="optimistic"` yields chunks immediately (`0` buffering latency) and cancels the upstream generator via `.close()` / `await .aclose()` (`close_upstream_on_abort=True`) as soon as a violation triggers, saving **44%–51%** of downstream generated characters on early-onset violations.
-  - `delivery="buffered"` holds unverified chunks in a bounded window (`max_buffer_chars=1_048_576`) and flushes them **only** when a checkpoint returns `verdict.passed == True` (`fail_streak == 0`), holding across both `FAILED` strikes and `AMBIGUOUS` uncertainty bands to guarantee **zero violating-character leakage (`0.0%`)** upon abort.
-  - Single-record stream telemetry (`emit_verdict_telemetry` with `stream_guard=True`, `aborted_mid_stream`, `abort_chunk_index`, and `stream_checks`) emits once per stream while suppressing intermediate probe spam.
+The synchronous and asynchronous pipeline paths share one generator-based engine (`Cascade._pipeline`), ensuring identical routing behavior between `evaluate` and `aevaluate` by construction.
 
 ---
 
-## Deterministic Content-Addressed Verdict Caching (`VerdictCache`)
+## 3. KV-Cache Prefix Engineering & Memory Layout
 
-Repeated evaluations in CI suites, RAG regression harnesses, `MultiRubricGate` reruns, and agent retry loops often re-verify identical `(gate, candidate)` pairs. `VerdictCache` (`logitgate.cache`) provides sub-`0.15 ms` content-addressed memoization across `ASTGate`, `LogitGate`, `MultiRubricGate`, `ChoiceGate`, `ScoreGate`, `RankGate`, `BestOfNGate`, `JudgeGate`, and `Cascade`:
+In causal autoregressive transformers, tokens can only attend to previous positions. When evaluating an artifact across multiple passes or rubrics, naive prompt templates cause **KV-Cache Thrashing** by altering early tokens, forcing the inference engine to recompute the entire prompt representation.
 
-- **Secret-Free Canonical Fingerprinting (`lgcache:v1:<sha256>`)**:
-  - Keys hash the gate class, routing traits, rubric/question/options/context (including call-time `rubric_override` on `JudgeGate` and `context` overrides on `RankGate`/`BestOfNGate`), calibrated temperature and thresholds (`CalibrationProfile` values excluding timestamps), backend protocol/model/options/LoRA adapter (stripping `api_key` and auth headers), and canonicalized candidate payload.
-  - `Cascade` stabilizes any pending lazy BYO calibration on child gates *before* computing the composite key and passes `_bypass_cache=True` to child gates sharing the top-level cache so each evaluation writes one composite entry without double-storing child stages.
-- **Safety Invariants (`cache_ambiguous=False`, `_normalized_out` Preservation, Replay Bypass)**:
-  - `DecisionStatus.AMBIGUOUS` abstentions are **not cached** by default (`cache_ambiguous=False`) so transient uncertainty or uncalibrated abstentions never lock out downstream escalation.
-  - Normalized artifacts produced by `ASTGate(normalize=True)` or `RankGate`/`BestOfNGate` winner selection are persisted alongside the `Verdict` so `Cascade` pipelines (`ASTGate(normalize=True) >> LogitGate` and `BestOfNGate >> LogitGate`) preserve exact `_normalized_out` semantics across both RAM and SQLite reloads.
-  - `VerdictSnapshot.replay()` / `explain()` and `run_benchmark()` warmups pass `_bypass_cache=True` automatically so live diagnostic replays are never short-circuited by cached verdicts.
-- **Thread-Safe LRU + Hardened WAL-Mode SQLite Persistence**:
-  - Combines an in-process `RLock`-guarded `OrderedDict` LRU (`max_entries`, optional `ttl_seconds`) with an optional `0o600` WAL-mode SQLite backing store (`O_NOFOLLOW` symlink rejection, `256 MiB` existing-file cap, and `max_disk_entries` FIFO/expiry pruning), sustaining **`>6,100` evaluations/sec** across 8 threads (`~0.11 ms` RAM hit, `~0.14 ms` cold-RAM SQLite reload hit).
+LogitGate enforces a strict **Prefix-Preserving Memory Layout** designed to keep 95%–99% of prompt tokens cached in GPU attention memory.
+
+![Prefix-Preserving KV-Cache Layout](./assets/rag_prefix_cache.svg)
+
+### Full Prompt Structure
+
+```
+[EVALUATION RUBRIC]
+{rubric}
+
+[REFERENCE CONTEXT]
+{context}
+
+[USER QUERY]
+{query}
+
+[CANDIDATE ARTIFACT]
+<candidate_{nonce}>
+{candidate}
+</candidate_{nonce}>
+
+[DECISION MAPPING]
+A: The candidate complies fully with the rubric.
+B: The candidate violates the rubric or has defects.
+Respond with a single character (A or B).
+Verdict:
+```
+
+### Prefix Sharing Across Debiasing Passes
+
+- **Pass 1 (Forward)**: Maps $A = \text{Pass}, B = \text{Fail}$.
+- **Pass 2 (Reverse)**: Maps $B = \text{Pass}, A = \text{Fail}$.
+- **Memory Invariant**: Every single token from `[EVALUATION RUBRIC]` down through the end of the `</candidate_{nonce}>` block is **100% byte-identical** between Pass 1 and Pass 2.
+- **Performance Impact**: Pass 2 hits the inference engine's prompt cache (Ollama, vLLM, llama.cpp) for the entire prefix. Only the short `[DECISION MAPPING]` suffix (~30 tokens) requires forward attention computation. This drops Pass-2 latency by **60%–75%**, turning a 2-pass debiased evaluation into an operation barely slower than a single un-debiased pass.
+
+### Candidate-Prefix Isolated Batching (`MultiRubricGate` & `evaluate_batch`)
+
+When evaluating $K$ atomic rubrics against one candidate document:
+- The candidate artifact (often 1,000–16,000+ tokens) is anchored at Token 0 as the shared root prefix.
+- Each rubric is appended in complete isolation at the suffix.
+- Because attention cannot look forward, rubric $i$ cannot contaminate or distract attention when evaluating rubric $j$.
+- Evaluating 20 rubrics reuses the cached candidate embedding 20 times, reducing per-rubric latency from ~90 ms down to ~20–35 ms on modern GPUs.
+
+<details>
+<summary>🌱 <b>ELI5: Why does prefix layout matter for GPU memory?</b></summary>
+<blockquote>
+Think of an LLM reading a prompt like a student studying a 50-page textbook chapter before answering a quiz.
+
+If you ask the student: "Does this chapter mention apples? Answer A for yes, B for no", they read all 50 pages and answer "A".
+
+Now, if you want to double-check their answer by swapping the letters: "Does this chapter mention apples? Answer B for yes, A for no", you don't want the student to re-read the 50 pages from scratch! You want them to keep their memory of the chapter fresh in their head and just apply the new rule to the very last sentence.
+
+By putting the big document first and the A/B question at the very end, the GPU remembers the whole document in its high-speed memory (the KV-cache). The second question takes only a split second because the GPU only processes the final sentence!
+</blockquote>
+</details>
 
 ---
 
-## Online Drift Detection & Adaptive Conformal Control (`v0.10.0`)
+## 4. Concurrency, Lifecycles & Resilience Invariants
 
-Split conformal calibration (`fit_calibration_profile`) guarantees marginal selective Layer-1 risk $\le \alpha^*$ when deployment inputs remain exchangeable with the calibration holdout. When traffic shifts to new domains or encounters adversarial prevalence spikes, exchangeability breaks. `v0.10.0` closes that loop with two composable subsystems:
+LogitGate is engineered for mission-critical production pipelines. It adheres to strict systems concurrency, deterministic cleanup, and failure-isolation standards.
 
-- **Zero-Dependency Covariate, Score & Disagreement Drift Detection (`logitgate.telemetry.drift`)**:
-  - `compute_psi()` computes Laplace-smoothed quantile-binned Population Stability Index (`PSI < 0.10` negligible, `0.10..0.25` moderate, `>= 0.25` severe) with explicit constant-reference bin guarding, while `compute_ks_two_sample()` computes exact empirical CDF supremum distances and Stephens-adjusted Kolmogorov survival $p$-values without requiring SciPy.
-  - `detect_telemetry_drift(reference, current)` and `logitgate telemetry drift <cur.jsonl> --reference <ref.jsonl> [--fail-on-drift]` combine symmetric log-odds PSI/KS, escalation-rate shifts, positional-bias surges, and Layer-2 teacher disagreement rates into a structured `DriftReport`.
-  - `RollingDriftMonitor(TelemetrySink)` maintains `RLock`-protected baseline and sliding evaluation windows in memory (automatically scrubbing candidate text via `privacy="omit_candidate"`), firing `on_drift` callbacks and optionally applying cooldown-gated proactive band boosts (`drift_boost_theta`) to a coupled `AdaptiveConformalController`.
-- **Gibbs–Candès Adaptive Conformal Inference (`AdaptiveConformalController`)**:
-  - Maintains a scalar log-odds margin offset $\theta_t \ge \theta_{\min}$ around base cutoffs $(\tau_{\text{rej},0}, \tau_{\text{acc},0})$:
-    $$u_t = \operatorname{logit}(\tau_{\text{acc},0}) + \theta_t, \qquad \ell_t = \operatorname{logit}(\tau_{\text{rej},0}) - \theta_t, \qquad \theta_{t+1} = \max\!\left(\theta_{\min},\; \theta_t + \eta(\hat{\text{err}}_t - \alpha^*)\right)$$
-  - **Unclipped Finite-Sample Adversarial Guarantee**: Whenever $\theta_t \ge \theta_{\text{abstain}}$ (`8.0` by default), `force_ambiguous=True` causes Layer 1 (`LogitGate` / `MultiRubricGate`) to escalate every input to Layer 2 (`err_t = 0`), stepping $\theta_t$ down deterministically by $\eta \alpha^*$ per step without upper-clip bias and bounding time-averaged selective risk $\le \alpha^* + O(1/(\eta T))$ on arbitrary non-stationary streams.
-  - **Explicit vs. Autonomous Zero-Label Shadow Auditing (`cascade_audit`)**: Supports delayed ground-truth feedback (`feedback_mode="explicit"`, `controller.observe(verdict, truth)`) and autonomous zero-human-label `Cascade` adaptation (`audit_sample_rate > 0`, e.g., `0.25`), where `Cascade` shadow-audits fast-path decisions via Layer-2 `JudgeGate` with probability $p$, computes unbiased Horvitz–Thompson inverse-propensity error $\hat{\text{err}}_t = \mathbb{I}[\hat{y}_{L1} \ne y_{\text{teacher}}]/p$, overrides caught mistakes when `override_on_audit=True`, and isolates `VerdictCache` keys across threshold updates via `cache_fingerprint()`.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Application / Caller
+    participant Cas as Cascade / Gate
+    participant Pool as Async Semaphore Pool
+    participant Http as _HTTPClientMixin (httpx)
+    participant Model as Inference Endpoint (Ollama / vLLM / Gemini)
+
+    App->>Cas: evaluate_batch(candidates, on_error="abstain")
+    Cas->>Http: Warm item 0 (cold prefix prefill)
+    Http->>Model: POST /v1/chat/completions (item 0)
+    Model-->>Http: 200 OK + logprobs
+    Cas->>Pool: Fan-out items 1..N-1 bounded by Semaphore
+    par Concurrent In-Flight Requests
+        Pool->>Http: POST /v1/chat/completions (item 1)
+        Pool->>Http: POST /v1/chat/completions (item 2)
+    end
+    Http-->>Model: Request fails (429 Rate Limit)
+    Http->>Http: Read Retry-After, exponential backoff + jitter
+    Http->>Model: Retry POST
+    Model-->>Http: 200 OK + logprobs
+    Cas->>App: list[Verdict] (fault-isolated)
+    App->>Cas: close() / aclose()
+    Note over Cas: Deterministic teardown: caller-owned resources preserved!
+```
+
+### Concurrency and Resilience Guarantees
+
+1. **Ownership-Tracked Resource Teardown (`_owns_*`)**:
+   - Every gate and `Cascade` tracks ownership flags (`_owns_backend`, `_owns_cache`, `_owns_sink`, `_owns_logit_gate`).
+   - When a gate is closed via `close()` or `aclose()`, it tears down only resources it created automatically. Caller-injected clients, caches, or telemetry sinks remain open and healthy for reuse across the application.
+   - All gates implement Python's `with` and `async with` context manager protocols for deterministic resource reclamation.
+
+2. **Per-Model Singleflight BYO Calibration Locks (`calibration/lifecycle.py`)**:
+   - Production CI runners often deploy unseen Bring-Your-Own (BYO) model checkpoints. Without explicit calibration, the first evaluation performs lazy micro-calibration probes (~16 calls).
+   - If 10 worker threads simultaneously evaluate artifacts against an uncalibrated model, LogitGate uses per-model singleflight locks (`_SYNC_CAL_LOCKS` and event-loop-scoped `_ASYNC_CAL_LOCKS` stored in a `WeakKeyDictionary`).
+   - The first thread executes the calibration probes; all other concurrent threads wait for the lock and immediately load the resulting `CalibrationProfile` with zero redundant calls.
+
+3. **Bounded & Fault-Isolated Batch Concurrency**:
+   - Batch operations (`evaluate_batch`, `aevaluate_batch`) accept `on_error: BatchErrorPolicy = "raise" | "abstain" | "fail"`.
+   - In async execution, item 0 runs first to warm the prefix cache on single-node servers (`warm_prefix`). Subsequent items 1 through $N-1$ execute concurrently bounded by an `asyncio.Semaphore(max_concurrency)`.
+   - Per-item `Exception` isolation catches evaluation errors without crashing the batch, while never swallowing `BaseException` subclasses (`asyncio.CancelledError`, `KeyboardInterrupt`).
+
+4. **Async HTTP Client Lifecycle & Transient Retry (`_HTTPClientMixin`)**:
+   - All HTTP backends (`OllamaBackend`, `OpenAICompatBackend`, `GeminiBackend`, `LlamaCppBackend`) inherit from `_HTTPClientMixin`.
+   - Auto-created `httpx.AsyncClient` instances track the running event loop (`_async_client_loop`) and recreate cleanly when called across sequential `asyncio.run()` invocations.
+   - Transient HTTP errors (`{408, 429, 502, 503, 504}`) and transport disconnections are retried with bounded exponential backoff, jitter, and strict honoring of the `Retry-After` header. Permanent client errors (`400`, `401`, `403`, `404`) fail immediately without retry.
+
+5. **In-Process Backend Thread Safety**:
+   - Forward and reverse debiasing passes run concurrently via `asyncio.gather`.
+   - In-process backends with mutable state or native C++/CUDA bindings (`LlamaCppBackend`, `RecurrentPyTorchBackend`, `StubBackend`) serialize non-thread-safe native calls using a `threading.Lock` or `threading.RLock`.
 
 ---
 
-## Two-Tier BYO Teacher-to-Student Distillation (`v0.11.0`, `logitgate.distill`)
+## 5. Capability-Aware Backend Routing (`on_unsupported_logprobs`) & Gemini Engine
 
-Small sub-4B Layer-1 models fail on hard counterfactual rubrics in two opposite ways that scalar temperature scaling $p = \sigma(z_{\text{sym}} / T)$ cannot fix: **systematic skepticism** (e.g., `qwen2.5-coder:3b` scoring `20.8%` on `hard_positive`) and **systematic sycophancy** (e.g., `llama3.2:3b` scoring `25.0%` on `hard_negative`). Because $z_{\text{sym}} = 0 \implies \sigma(0/T) = 0.50$ for every $T > 0$, scalar temperature scaling has zero intercept and cannot recenter a skewed decision boundary, while naive few-shot prompting across unrelated domains pollutes single-token (`max_tokens=1`) attention. `logitgate.distill` provides a two-tier architecture that works across both closed commercial APIs and open-weights local deployments:
+Certain modern frontier models (Anthropic Claude 3.5 Sonnet, OpenAI `o3-mini`, reasoning-tuned APIs) do not expose raw token logprobs. LogitGate handles this heterogeneous reality gracefully.
 
-- **Tier A — Weight-Free Portable `DistillationBundle` (100% BYO Models & Closed APIs)**:
-  - **Relevance-Gated Contrastive Anchor Bank (`DistilledAnchorBank`)**: Pairs opposite-label `(PASS, FAIL)` items with maximal surface lexical overlap per rubric (automatically surfacing natural counterfactual minimal pairs without dataset-specific variant tags), condenses teacher critiques into slot-neutral rationales, and injects `[CALIBRATION ANCHORS]` inside the static prefix ahead of `[DECISION MAPPING]` so Pass 1 (`A=Pass, B=Fail`) and Pass 2 (`B=Pass, A=Fail`) retain **100% byte-identical KV-cache prefixes**. Crucially, `retrieve()` gates injection on Szymkiewicz–Simpson rubric token overlap (`min_rubric_overlap=0.25` by default) and excludes exact candidate self-matches (`exclude_exact=True`), injecting anchors on deployed/paraphrased rubrics while abstaining cleanly (`[]`, `anchored=False`) on unseen out-of-domain rubrics so off-topic exemplars never degrade `max_tokens=1` discrimination or inflate CPU prefill latency.
-  - **`<1 KB` 5-Feature `LogitMetaCalibrator` + Unanchored OOD Fallback**: Fits L2-regularized Newton–Raphson / IRLS logistic regression with an **unpenalized intercept** and positive monotonicity projection (`w_sym >= 0.05`) over `[symmetric_log_odds, signed_slot_bias, positional_bias_magnitude, top_k_entropy, unobserved_residual_mass]`, followed by **stratified 5-fold out-of-fold (`OOF`)** split-conformal threshold calibration (`calibrate_cascade_thresholds`). When `compile_distillation_bundle()` builds a relevance-gated bundle, it stores both `meta_calibrator` (for anchored in-rubric hits) and `unanchored_meta_calibrator` (automatically selected whenever `anchor_bank` abstains on an out-of-domain rubric), or compiles in **0 LLM calls** directly from `DistillationSink` JSONL logs (`compile_distillation_bundle(telemetry=...)`).
-- **Tier B — Architecture-Agnostic Open-Weights BYO LoRA Compiler (`logitgate[distill]`)**:
-  - Because low-rank weight deltas ($\Delta W = \frac{\alpha}{r} B A$) live in a specific base model's hidden dimension and tokenizer space, LoRA adapters transfer across **serving runtimes** for a chosen open-weights student rather than across unrelated model families. `train_distillation_lora()` makes *compiling* that adapter universal across any HuggingFace `AutoModelForCausalLM` family (`Llama`, `Qwen2`, `Gemma2`, `Mistral`, `Phi`, etc.) via PEFT `target_modules="all-linear"`.
-  - Expands teacher-labeled data into `2x` symmetric (`A/B` forward + `B/A` reverse) examples (`prepare_symmetric_lora_examples()`) with cross-entropy loss masked **strictly onto the single first decision token** (`labels = [-100, ..., -100, verdict_id]`), fits a post-LoRA `CalibrationProfile` + `DistillationBundle` automatically, supports direct in-process inference via `HuggingFaceLogitBackend` or `LlamaCppBackend(lora_path=..., lora_scale=...)`, and emits turnkey multi-runtime artifacts (`Modelfile.ollama`, `serve_vllm.sh --enable-lora`, and `serve_llamacpp.sh --lora`).
+### The `on_unsupported_logprobs` Policy
 
+All Layer-1 gates (`LogitGate`, `ChoiceGate`, `ScoreGate`, `MultiRubricGate`, `ToolCallGate`, `Cascade`) accept the parameter:
+`on_unsupported_logprobs: Literal["raise", "escalate", "sidecar"] = "raise"`
 
+```mermaid
+flowchart TD
+    req["Evaluation Request"] --> check{"Backend supports logprobs?"}
+    check -->|"Yes (Ollama / vLLM / Gemini)"| L1["Layer 1: Raw First-Token Logprob Debiasing"]
+    check -->|"No (Claude / o3-mini)"| policy{"on_unsupported_logprobs"}
+    
+    policy -->|"raise (Default)"| err["Raise UnsupportedLogprobsError"]
+    policy -->|"escalate"| L2["Direct Escalation to Tier-2 JudgeGate (Generative Critique)"]
+    policy -->|"sidecar"| sidecar["Route Layer 1 to sidecar_backend (e.g. Local 14B GPU)"]
+    sidecar --> L1
+```
+
+- **`"raise"` (Default)**: Raises `UnsupportedLogprobsError` immediately with an actionable hint describing which backends support logprobs.
+- **`"escalate"`**: Safely bypasses Layer 1 and escalates directly to Tier-2 `JudgeGate`, utilizing the non-logprob model for a full generative critique.
+- **`"sidecar"`**: Routes the Layer-1 logprob check to an attached lightweight sidecar backend (`sidecar_backend=OllamaBackend(model="qwen2.5-coder:14b")`). This preserves sub-50ms Layer-1 filtering while allowing your primary application to remain on Claude or `o3`.
+
+### Native Google Gemini Backend (`GeminiBackend`)
+
+LogitGate includes a dedicated, zero-dependency REST backend for Google Gemini (`gemini-2.5-flash`, `gemini-2.5-pro`):
+
+- **Header-Isolated Authentication**: Injects the API key into the `x-goog-api-key` HTTP header rather than appending it to the URL query string (`?key=...`), preventing credential exposure in proxy access logs and network traces.
+- **Reasoning Suppression (`thinkingBudget=0`)**: Gemini 2.5 Flash employs internal reasoning tokens. For Layer-1 logprob extraction (`maxOutputTokens=1`), `GeminiBackend` automatically sets `thinkingConfig={"thinkingBudget": 0}` so thinking tokens do not consume the single emitted slot.
+- **Logprob Configuration**: Automatically requests `responseLogprobs=True` with clamped logprob candidate distributions.
+
+```python
+from logitgate import LogitGate
+from logitgate.backends import GeminiBackend
+
+# Native zero-dependency Gemini backend with thinking suppression
+backend = GeminiBackend(
+    model="gemini-2.5-flash",
+    api_key="your-api-key",  # Or read automatically from GEMINI_API_KEY
+)
+
+gate = LogitGate(
+    rubric="Is the code mathematically correct and free of off-by-one errors?",
+    backend=backend,
+)
+```
 
 ---
 
-## OpenTelemetry Span Bridge & Schema Compatibility (`v0.12.0`)
+## 6. Deterministic Content-Addressed Verdict Caching (`VerdictCache`)
 
-`v0.12.0` extends the observability stack with `OtelSpanSink` (`logitgate.telemetry.otel`) and schema-versioned artifact contracts:
+Repeated evaluations in CI suites, agent retry loops, and RAG regression runs frequently re-test identical `(gate, candidate)` pairs. `VerdictCache` provides sub-0.15ms memoization.
 
-- **Zero-Dependency OpenTelemetry Integration (`OtelSpanSink`)**:
-  - Lazily resolves `opentelemetry.trace.get_tracer(instrumentation_name, version)` when `opentelemetry-api` (`pip install 'logitgate[otel]'`) is installed, accepts any injected `Tracer` implementing `start_as_current_span(...)` or `start_span(...)`, and degrades cleanly to a zero-overhead no-op (`is_enabled == False`) when `opentelemetry-api` is absent (`require_otel=False` default).
-  - Emits strictly sanitized OpenTelemetry primitive and homogeneous-list attributes (`gen_ai.system`, `gen_ai.request.model`, `logitgate.gate.*`, `logitgate.verdict.*`, `logitgate.teacher.*`, `logitgate.layers.*`, `logitgate.candidate.sha256`, and `logitgate.tag.<key>`), omitting `None` and non-finite (`NaN`/`±inf`) values automatically.
-  - Records per-layer execution traces as `"logitgate.layer"` span events (`record_layer_events=True`), optionally marks failed verdicts with `StatusCode.ERROR` (`error_on_fail=True`), defaults to `privacy="omit_candidate"` (scrubbing both raw candidate text and generative `JudgeGate` critique strings from exported spans), and supports full `with` / `async with` sink lifecycles alongside `CompositeTelemetrySink`.
-- **Public API Surface & Artifact Schema Versioning**:
-  - Top-level exports in `logitgate.__all__` cover gates, backends, `Cascade`, `CalibrationProfile`, `AdaptiveConformalController`, `DistilledAnchorBank`, `LogitMetaCalibrator`, `DistillationBundle`, `StreamGuard`, `VerdictCache`, `TelemetryRecord`, `DistillationRecord`, `OtelSpanSink`, and CLI subcommands (`eval`, `calibrate`, `explain`, `benchmark`, `rank`, `stream`, `telemetry`, `distill`).
-  - Serialized JSON/SQLite schemas (`CalibrationProfile`, `VerdictSnapshot`, `TelemetryRecord`, `DistillationRecord`, `DistillationBundle`, and `lgcache:v1:<sha256>` cache keys) carry explicit `schema_version` fields to support backward-compatible artifact loading across releases.
+```mermaid
+flowchart LR
+    eval["Gate Evaluation"] --> hash["Compute Canonical Key lgcache:v1:sha256"]
+    hash --> mem{"In RAM LRU?"}
+    mem -->|"Hit (~0.11ms)"| ret["Return Cached Verdict"]
+    mem -->|"Miss"| disk{"In SQLite WAL?"}
+    disk -->|"Hit (~0.14ms)"| load["Promote to RAM + Return"]
+    disk -->|"Miss"| run["Run Backend Inference (~45ms)"]
+    run --> save["Store in RAM + SQLite WAL"]
+```
+
+### Safety and Security Invariants
+
+- **Secret-Free Canonical Fingerprinting (`lgcache:v1:<sha256>`)**: Cache keys hash the gate class, routing traits, rubric, context, query, calibrated temperature, thresholds, backend protocol, model name, and candidate payload. API keys, authorization headers, and timestamps are stripped before hashing.
+- **No Transient Ambiguity Caching (`cache_ambiguous=False`)**: Verdicts with `status=DecisionStatus.AMBIGUOUS` are never cached. If a model was uncertain or an input requires escalation, downstream gates must always have the opportunity to re-evaluate.
+- **Preservation of Normalized Artifacts (`_normalized_out`)**: When `ASTGate(normalize=True)` strips markdown fences or `BestOfNGate` selects a winner, the normalized artifact is stored alongside the cached verdict so subsequent cascade stages receive the exact transformed artifact.
+- **Replay Bypass**: `VerdictSnapshot.replay()` and benchmark warmups automatically pass `_bypass_cache=True` to guarantee that offline debugging replays always execute fresh inference.
+
+---
+
+## 7. Production Observability & Distributed Tracing (`OtelSpanSink`)
+
+Production deployments require deep observability over fast-path short-circuit rates, Layer-1 vs. Layer-2 teacher disagreements, and latency breakdowns without leaking sensitive customer data into log files.
+
+```mermaid
+flowchart TD
+    verdict["Verdict Generated"] --> filter{"Telemetry Sink Attached?"}
+    filter -->|"No Sink"| fast["Zero-Allocation Fast Return (<0.001ms)"]
+    filter -->|"Sink Attached"| sanitize["Sanitize PII (O(N) regex) / Omit Candidate"]
+    sanitize --> otel["OtelSpanSink: Emit Span Attributes & Layer Events"]
+    sanitize --> disk["JsonlTelemetrySink: Thread-Safe Log Rotation (O_NOFOLLOW)"]
+    sanitize --> distill["DistillationSink: Discrepancy Mining for Auto-Tuning"]
+```
+
+- **Zero-Allocation Fast Path**: When no telemetry sink is attached, LogitGate returns immediately without allocating a `TelemetryRecord` object.
+- **OpenTelemetry Integration (`OtelSpanSink`)**: Lazily bridges into `opentelemetry-api` when installed (`pip install 'logitgate[otel]'`). Emits standardized OpenTelemetry attributes (`gen_ai.system`, `gen_ai.request.model`, `logitgate.gate.*`, `logitgate.verdict.*`) and records per-layer executions as span events.
+- **Symlink-Hardened Rotation & PII Redaction**: Telemetry sinks open log files under `os.O_NOFOLLOW` checks to prevent symlink hijacking. Four privacy modes (`"full"`, `"redact_pii"`, `"hash_only"`, `"omit_candidate"`) sanitize candidate text before disk persistence in linear $O(N)$ time.
+
+---
+
+## 8. Deployment Topologies: Preventing KV-Cache Eviction
+
+When deploying evaluation pipelines alongside primary generation agents, a primary failure mode is **GPU Memory Contention and Cache Thrashing**: the judge model is loaded into the same VRAM as the generator, evicting the generator's multi-thousand-token context.
+
+LogitGate supports three production topologies:
+
+| Topology | Hardware Architecture | Generator Model | Gate Model | Latency | Memory Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Topology 1: Shared KV-Cache** | Single GPU (16–24 GB) | Same model | Same model (`MultiRubricGate`) | ~20–40 ms / rubric | Candidate cached once at Token 0 |
+| **Topology 2: Dual-GPU Sidecar** | Dual GPU (e.g. 24 GB + 12 GB) | GPU 0 (32B MoE / Dense) | GPU 1 (14B or 4B Gate) | ~40–50 ms total | **Zero eviction** on GPU 0 |
+| **Topology 3: CPU Sidecar** | Single GPU + Host RAM | GPU 0 (Full VRAM) | Host CPU (3B or 4B Q4) | ~160–250 ms total | **100% GPU VRAM** preserved for generator |
+
+### Topology 2 Architecture (Heterogeneous Dual-GPU Sidecar)
+
+```mermaid
+flowchart LR
+    agent["Agent Workload"] --> GPU0["GPU 0 (Primary Generator)<br/>e.g. 32B Coder (24 GB VRAM)<br/>Context: 32,000 tokens<br/><b>KV-Cache NEVER Evicted</b>"]
+    
+    GPU0 -->|"Generate Artifact"| gate_router["LogitGate Router"]
+    
+    gate_router -->|"Local IPC HTTP"| GPU1["GPU 1 (LogitGate Sidecar)<br/>e.g. 14B / 4B Gate (8 GB VRAM)<br/>Latency: ~40ms (0 CoT tokens)"]
+    
+    GPU1 -->|"Fast-Path PASS (P >= 0.85)"| done["Immediate Next Agent Step"]
+    GPU1 -->|"Ambiguous (0.20 < P < 0.85)"| GPU0
+    Note over GPU0: Escalates to GPU 0 for generative JudgeGate critique only when ambiguous!
+```
+
+---
+
+## 9. Comprehensive Pipeline Execution Recipe
+
+The following end-to-end Python script demonstrates the full modular architecture: `ASTGate` Layer 0 structural gating, `LogitGate` Layer 1 debiased logprob verification with content-addressed caching, and `JudgeGate` Layer 2 generative adjudication with bounded batch concurrency and deterministic context management.
+
+```python
+import asyncio
+from logitgate import ASTGate, Cascade, JudgeGate, LogitGate
+from logitgate.backends import OllamaBackend
+from logitgate.cache import VerdictCache
+
+async def main() -> None:
+    # 1. Provision shared, ownership-tracked backend and cache
+    backend = OllamaBackend(model="qwen2.5-coder:14b", keep_alive="10m")
+    cache = VerdictCache(max_entries=1000)
+
+    # 2. Assemble 3-Layer Cascade using context management
+    async with Cascade(
+        ASTGate(syntax=True, forbidden_imports=["subprocess", "shutil"]),
+        LogitGate(
+            rubric="Candidate code must be clean, correctly typed, and handle edge cases.",
+            pass_threshold=0.85,
+            fail_threshold=0.20,
+            backend=backend,
+            cache=cache,
+        ),
+        JudgeGate(
+            max_tokens=100,
+            trigger="on_ambiguous_only",  # Generative critique only when ambiguous
+            backend=backend,
+            cache=cache,
+        ),
+    ) as pipeline:
+        candidates = [
+            "def add(a: int, b: int) -> int:\n    return a + b\n",
+            "import subprocess\ndef exploit():\n    subprocess.run(['rm', '-rf', '/'])\n",
+            "def complex_solve(matrix: list[list[float]]) -> float:\n    # Ambiguous solution\n    return 0.0\n",
+        ]
+
+        # 3. Evaluate batch with fault isolation and bounded concurrency
+        verdicts = await pipeline.aevaluate_batch(
+            candidates,
+            on_error="abstain",
+            max_concurrency=4,
+        )
+
+        for i, v in enumerate(verdicts):
+            print(f"Item {i}: Passed={v.passed} at {v.triggered_layer} ({v.total_latency_ms:.1f}ms) - {v.reason}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+---
+
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)

@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 420" width="100%" height="100%" role="img" aria-label="Prefix-Cached Grounded RAG Evaluation Architecture">
+  <title>Prefix-Cached Grounded RAG Evaluation Architecture</title>
+  <desc>Shows KV-cache prefilled once with context and query, then reused across multiple rubrics and candidate checks</desc>
+  <defs>
+    <style>
+    :root {
+      --canvas-bg: #f8fafc;
+      --card-bg: #ffffff;
+      --card-border: #cbd5e1;
+      --card-subtle: #f1f5f9;
+      --text-primary: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #64748b;
+      --text-inverse: #ffffff;
+      --accent-emerald: #059669;
+      --accent-emerald-bg: #ecfdf5;
+      --accent-emerald-border: #a7f3d0;
+      --accent-rose: #dc2626;
+      --accent-rose-bg: #fef2f2;
+      --accent-rose-border: #fecaca;
+      --accent-amber: #d97706;
+      --accent-amber-bg: #fffbeb;
+      --accent-amber-border: #fde68a;
+      --accent-sky: #0284c7;
+      --accent-sky-bg: #f0f9ff;
+      --accent-sky-border: #bae6fd;
+      --accent-indigo: #4338ca;
+      --accent-indigo-bg: #eef2ff;
+      --accent-indigo-border: #c7d2fe;
+      --accent-purple: #7c3aed;
+      --accent-purple-bg: #f5f3ff;
+      --accent-purple-border: #ddd6fe;
+      --flow-line: #94a3b8;
+      --flow-arrow: #64748b;
+      --glow-fast: rgba(16, 185, 129, 0.25);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas-bg: #0b1120;
+        --card-bg: #1e293b;
+        --card-border: #334155;
+        --card-subtle: #0f172a;
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        --text-inverse: #0f172a;
+        --accent-emerald: #10b981;
+        --accent-emerald-bg: #064e3b;
+        --accent-emerald-border: #047857;
+        --accent-rose: #f43f5e;
+        --accent-rose-bg: #4c0519;
+        --accent-rose-border: #be123c;
+        --accent-amber: #f59e0b;
+        --accent-amber-bg: #451a03;
+        --accent-amber-border: #b45309;
+        --accent-sky: #38bdf8;
+        --accent-sky-bg: #082f49;
+        --accent-sky-border: #0369a1;
+        --accent-indigo: #818cf8;
+        --accent-indigo-bg: #1e1b4b;
+        --accent-indigo-border: #4338ca;
+        --accent-purple: #a78bfa;
+        --accent-purple-bg: #2e1065;
+        --accent-purple-border: #6d28d9;
+        --flow-line: #475569;
+        --flow-arrow: #94a3b8;
+        --glow-fast: rgba(16, 185, 129, 0.45);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, ::before, ::after {
+        animation: none !important;
+        transition: none !important;
+        stroke-dashoffset: 0 !important;
+      }
+    }
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    .anim-dash {
+      stroke-dasharray: 6 5;
+      animation: dashMove 2.5s linear infinite;
+    }
+    .anim-pulse {
+      animation: pulseGlow 2.5s ease-in-out infinite;
+    }
+    .anim-probe {
+      animation: probeSweep 3s ease-in-out infinite alternate;
+    }
+    @keyframes dashMove {
+      to {
+        stroke-dashoffset: -22;
+      }
+    }
+    @keyframes pulseGlow {
+      0%, 100% {
+        opacity: 0.95;
+      }
+      50% {
+        opacity: 0.45;
+      }
+    }
+    @keyframes probeSweep {
+      0% {
+        transform: translateX(0px);
+      }
+      100% {
+        transform: translateX(18px);
+      }
+    }
+</style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-arrow)" />
+    </marker>
+    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
+    </marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-rose)" />
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
+    </marker>
+  </defs>
+  <rect width="920" height="420" fill="var(--canvas-bg)" rx="12" />
+
+  <!-- Header Bar -->
+  <rect x="40" y="24" width="210" height="22" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
+  <text x="48" y="39" font-size="10" font-weight="700" fill="var(--accent-emerald)" class="mono">PREFIX-CACHED EVALUATION</text>
+  <text x="40" y="68" font-size="18" font-weight="700" fill="var(--text-primary)">Prefix-Cached Grounded RAG: Prefill Once, Verify in Slices</text>
+  <text x="40" y="86" font-size="12" fill="var(--text-secondary)">Retrieved context &amp; user query stay pinned in GPU KV-cache; 2.5x faster evaluation across rubrics</text>
+
+  <!-- Prompt Layout Strip -->
+  <!-- Prefix Block (Pinned) -->
+  <rect x="40" y="105" width="510" height="74" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1.5" />
+  <rect x="52" y="115" width="155" height="18" rx="3" fill="var(--card-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
+  <text x="58" y="128" font-size="9" font-weight="700" fill="var(--accent-emerald)" class="mono">PINNED PREFIX (KV-CACHED)</text>
+  <text x="218" y="128" font-size="10" font-weight="600" fill="var(--accent-emerald)">&#x2713; Prefilled Once (1,880 Tokens)</text>
+
+  <rect x="52" y="140" width="300" height="26" rx="4" fill="var(--card-bg)" />
+  <text x="60" y="157" font-size="10" fill="var(--text-primary)" class="mono">&lt;context&gt; 1,800 tok retrieved doc &lt;/context&gt;</text>
+
+  <rect x="360" y="140" width="180" height="26" rx="4" fill="var(--card-bg)" />
+  <text x="368" y="157" font-size="10" fill="var(--text-primary)" class="mono">&lt;query&gt; 80 tok query &lt;/query&gt;</text>
+
+  <!-- Suffix Block (Dynamic) -->
+  <rect x="560" y="105" width="320" height="74" rx="8" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo-border)" stroke-width="1.5" />
+  <rect x="572" y="115" width="145" height="18" rx="3" fill="var(--card-bg)" stroke="var(--accent-indigo-border)" stroke-width="1" />
+  <text x="578" y="128" font-size="9" font-weight="700" fill="var(--accent-indigo)" class="mono">DYNAMIC SUFFIX (EVAL)</text>
+  <text x="730" y="128" font-size="10" font-weight="600" fill="var(--accent-indigo)">Only ~90 Tokens/check</text>
+
+  <rect x="572" y="140" width="295" height="26" rx="4" fill="var(--card-bg)" />
+  <text x="580" y="157" font-size="10" fill="var(--text-primary)" class="mono">&lt;candidate&gt; + &lt;rubric_prompt&gt;</text>
+
+  <!-- Lower Section: GPU Memory vs Fan-Out Evaluation -->
+  <!-- GPU KV-Cache Memory Box -->
+  <rect x="40" y="195" width="280" height="200" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
+  <rect x="40" y="195" width="5" height="200" rx="2" fill="var(--accent-emerald)" />
+  <text x="55" y="218" font-size="13" font-weight="700" fill="var(--text-primary)">GPU KV-Cache Memory</text>
+  <text x="55" y="234" font-size="10" fill="var(--text-muted)" class="mono">PrefixBroadcastLogitEvaluator</text>
+
+  <rect x="55" y="246" width="250" height="38" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
+  <text x="65" y="262" font-size="10" font-weight="700" fill="var(--accent-emerald)">Context Attention KV [PINNED]</text>
+  <text x="65" y="276" font-size="9" fill="var(--accent-emerald)">1,800 tokens keys &amp; values in VRAM</text>
+
+  <rect x="55" y="292" width="250" height="38" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
+  <text x="65" y="308" font-size="10" font-weight="700" fill="var(--accent-emerald)">User Query Attention KV [PINNED]</text>
+  <text x="65" y="322" font-size="9" fill="var(--accent-emerald)">80 tokens keys &amp; values in VRAM</text>
+
+  <text x="55" y="352" font-size="11" font-weight="600" fill="var(--text-primary)">Prefill Time: 68 ms (once)</text>
+  <text x="55" y="370" font-size="11" font-weight="700" fill="var(--accent-emerald)">Subsequent Check Overhead: 0 ms</text>
+  <text x="55" y="386" font-size="10" fill="var(--text-muted)">Supports Ollama, llama.cpp, vLLM</text>
+
+  <!-- Fan-out Slices on Right -->
+  <rect x="335" y="195" width="545" height="200" rx="8" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="1.5" />
+  <rect x="335" y="195" width="5" height="200" rx="2" fill="var(--accent-indigo)" />
+  <text x="350" y="218" font-size="13" font-weight="700" fill="var(--text-primary)">Multi-Rubric Parallel Verification</text>
+  <text x="350" y="234" font-size="10" fill="var(--text-muted)">Each rubric evaluates against the same cached context</text>
+
+  <!-- Slice 1 -->
+  <rect x="350" y="244" width="515" height="34" rx="4" fill="var(--card-subtle)" />
+  <circle cx="365" cy="261" r="5" fill="var(--accent-emerald)" />
+  <text x="380" y="265" font-size="11" font-weight="600" fill="var(--text-primary)">Rubric 1: Factual Grounding</text>
+  <text x="590" y="265" font-size="10" fill="var(--text-muted)" class="mono">+38 ms</text>
+  <text x="660" y="265" font-size="11" font-weight="700" fill="var(--accent-emerald)" class="mono">P = 0.96 &#x2192; PASS</text>
+
+  <!-- Slice 2 -->
+  <rect x="350" y="284" width="515" height="34" rx="4" fill="var(--card-subtle)" />
+  <circle cx="365" cy="301" r="5" fill="var(--accent-emerald)" />
+  <text x="380" y="305" font-size="11" font-weight="600" fill="var(--text-primary)">Rubric 2: Completeness / Recall</text>
+  <text x="590" y="305" font-size="10" fill="var(--text-muted)" class="mono">+36 ms</text>
+  <text x="660" y="305" font-size="11" font-weight="700" fill="var(--accent-emerald)" class="mono">P = 0.92 &#x2192; PASS</text>
+
+  <!-- Slice 3 -->
+  <rect x="350" y="324" width="515" height="34" rx="4" fill="var(--card-subtle)" />
+  <circle cx="365" cy="341" r="5" fill="var(--accent-rose)" />
+  <text x="380" y="345" font-size="11" font-weight="600" fill="var(--text-primary)">Rubric 3: Safety &amp; Policy Adherence</text>
+  <text x="590" y="345" font-size="10" fill="var(--text-muted)" class="mono">+35 ms</text>
+  <text x="660" y="345" font-size="11" font-weight="700" fill="var(--accent-emerald)" class="mono">P = 0.99 &#x2192; PASS</text>
+
+  <!-- Comparison bar -->
+  <rect x="350" y="364" width="515" height="24" rx="4" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald-border)" stroke-width="1" />
+  <text x="360" y="380" font-size="10" font-weight="700" fill="var(--accent-emerald)">
+    Total Time: 177 ms for 3 Rubrics vs 540 ms without Prefix Cache (3.1x Faster!)
+  </text>
+
+</svg>

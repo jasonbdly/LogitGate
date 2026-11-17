@@ -1,47 +1,100 @@
-# Framework Integrations
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
 
-LogitGate integrates natively with existing testing, evaluation, and multi-agent frameworks.
+# Framework Integrations & Ecosystem Adapters
+
+This document details the native framework integrations, testing hooks, agent routing adapters, and observability bridges supported in **LogitGate v0.15.0+**. For introductory recipes, see [Quickstart Recipes](./quick/quickstart_recipes.md); for mathematical derivations, see [Mathematical Foundations](./math_and_debiasing.md).
 
 ---
 
 ## 1. Pytest Integration (`@check`)
 
-LogitGate provides a first-class pytest decorator (`@check`) to assert that test returns satisfy natural-language rubrics without writing custom assert regexes or waiting for slow generative LLM calls:
+LogitGate provides a first-class pytest decorator (`@check`) to assert that test return values satisfy natural-language rubrics without writing custom regexes or waiting for multi-second generative LLM critiques.
 
-```python
-import pytest
-from logitgate import check
+The decorator is registered via the `pytest11` entrypoint, requiring zero configuration files:
 
-@check(
-    rubric="Function output must be valid JSON with key 'status' equal to 'success'",
-    threshold=0.90,
-    save_snapshot=True,  # Automatically saves snapshot on failure for `logitgate explain`
-)
-def test_user_creation_api():
-    # Returns candidate string to be evaluated by LogitGate
-    return '{"status": "success", "user_id": "usr_99823"}'
+```bash
+# Run pytest with live local Ollama model
+pytest --logitgate-backend ollama://localhost:11434/qwen2.5-coder:14b --logitgate-save-failures
+
+# Or run in air-gapped CI using the offline deterministic stub (0 GPU, <0.05ms)
+pytest -o logitgate_backend=stub://default
 ```
 
-Async test functions are also supported out of the box:
+### Advanced `@check` Capabilities
+
+The `@check` decorator supports the complete feature suite of LogitGate:
+
+- **Sync and Async Test Functions**: Seamlessly wraps sync test functions and `@pytest.mark.asyncio` coroutines.
+- **Grounded Verification (`context` & `query`)**: Validates answers against retrieved documents or user queries.
+- **Categorical Routing (`choices` & `pass_choices`)**: Asserts that an artifact maps to approved discrete choices.
+- **Ordinal Scoring (`score_range` & `score_threshold`)**: Enforces continuous score expectations (e.g. 1 to 5).
+- **Multi-Rubric Verification (`rubrics` & `aggregation`)**: Asserts compliance across multiple criteria simultaneously.
+- **Capability-Aware Sidecar Routing (`on_unsupported_logprobs="sidecar"`)**: Routes Layer-1 checks to a local sidecar when primary testing targets models lacking logprob support.
+- **Deterministic Failure Snapshots (`save_snapshot=True`)**: Automatically persists failed evaluations to `.logitgate/failures/` for instant local diagnosis via `logitgate explain`.
 
 ```python
 import pytest
 from logitgate import check
 
+# 1. Binary Groundedness Check on Async Function
 @pytest.mark.asyncio
-@check(rubric="Response must contain greeting and sign-off", threshold=0.85)
-async def test_async_greeting():
-    return "Hello Alice! Best regards, Support Team."
+@check(
+    rubric="Summary accurately reflects source text without unasserted claims.",
+    threshold=0.85,
+    context="LogitGate v0.15.0 features ToolCallGate for agent security and GeminiBackend for Google Gemini.",
+    save_snapshot=True,
+)
+async def test_async_rag_summary():
+    # Returns candidate string to be evaluated
+    return "LogitGate v0.15.0 includes ToolCallGate and GeminiBackend."
+
+# 2. Multi-Choice Intent Classification Check
+@check(
+    rubric="Select the category that best describes the customer inquiry.",
+    choices={
+        "A": "Billing and invoicing questions",
+        "B": "Technical bug report",
+        "C": "Feature request",
+    },
+    pass_choices=["A"],  # Asserts that the model classifies as Billing
+    threshold=0.80,
+)
+def test_support_classification():
+    return "How do I update my credit card on file for next month's subscription invoice?"
+
+# 3. Multi-Rubric Code Quality Check
+@check(
+    rubrics=[
+        "Function includes comprehensive Python type hints.",
+        "Function contains no hardcoded credentials or API keys.",
+        "Function handles negative numbers by raising ValueError.",
+    ],
+    aggregation="all",  # All rubrics must pass (weakest-link aggregation)
+    threshold=0.80,
+)
+def test_secure_math_helper():
+    return (
+        "def square_root(x: float) -> float:\n"
+        "    if x < 0:\n"
+        "        raise ValueError('x cannot be negative')\n"
+        "    return x ** 0.5\n"
+    )
 ```
 
 ---
 
 ## 2. DeepEval Integration (`LogitGateSystemOneModel` & `LogitGateMetric`)
 
-LogitGate can be used inside DeepEval evaluation pipelines in two ways:
+LogitGate integrates natively with the DeepEval evaluation framework:
 
-### A. As a Fast System-1 Judge Model for `JevEval`
-Use your already-loaded local model as a sub-100ms System-1 evaluation judge:
+### A. High-Speed System-1 Judge Model (`LogitGateSystemOneModel`)
+
+Modern LLM evaluation suites running hundreds of test cases suffer from prohibitive latency and cost when using generative judges. `LogitGateSystemOneModel` acts as a drop-in System-1 judge for DeepEval's `JevEval` metrics (Deußer et al., 2026), evaluating test cases in **36–90 ms** using raw first-token logprobs.
+
+`LogitGateSystemOneModel` supports all three DeepEval System-1 schemas:
+- **`NoulQuestion`**: Evaluates binary statements, returning `NoulAnswer(probability=...)`.
+- **`ChoiceQuestion`**: Normalizes categorical selections across options, returning `ChoiceAnswer(choice=..., confidence=...)`.
+- **`ScoreQuestion`**: Calculates probability-weighted expected scores, returning `ScoreAnswer(score=..., confidence=...)`.
 
 ```python
 from deepeval.metrics import JevEval
@@ -49,168 +102,269 @@ from deepeval.metrics.jev_eval.schema import Noul
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from logitgate.integrations.deepeval import LogitGateSystemOneModel
 
+# 1. Instantiate System-1 Judge backed by local model
 system_one = LogitGateSystemOneModel(
     model_name="qwen2.5-coder:14b",
     api_base="http://localhost:11434",
+    symmetric=True,  # Full 2-pass symmetric debiasing
 )
 
+# 2. Build DeepEval JevEval metric
 metric = JevEval(
     name="Security Baseline Check",
-    nouls=[Noul(criteria="Artifact does not invoke raw shell commands")],
+    nouls=[
+        Noul(criteria="Artifact does not invoke raw shell commands"),
+        Noul(criteria="Artifact does not read sensitive filesystem paths"),
+    ],
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
     model=system_one,
 )
 
 test_case = LLMTestCase(
-    input="Execute task",
-    actual_output="def run(): pass",
+    input="Execute security audit",
+    actual_output="def check(): pass",
 )
+
 metric.measure(test_case)
-print(f"Score: {metric.score}, Passed: {metric.is_successful()}")
+print(f"JevEval Score: {metric.score}, Successful: {metric.is_successful()}")
 ```
 
-### B. As a Standalone DeepEval Metric
-Directly evaluate any LLM test case against a calibrated LogitGate rubric. `LogitGateMetric` accepts `fail_threshold`, `logit_temperature`, and `preset`, and `is_successful()` honors gate abstention (`AMBIGUOUS` $\to$ `False`):
+### B. Standalone DeepEval Metric (`LogitGateMetric`)
+
+`LogitGateMetric` allows any `LLMTestCase` to be evaluated against calibrated rubrics directly within standard DeepEval test runners. It accepts `fail_threshold`, `preset`, and `logit_temperature`, and its `is_successful()` method correctly handles gate abstentions (`AMBIGUOUS` maps to `False`):
 
 ```python
 from deepeval.test_case import LLMTestCase
 from logitgate.integrations.deepeval import LogitGateMetric
 
-fast_metric = LogitGateMetric(
-    rubric="Summary accurately reflects source text without hallucinations",
+# Create fast LogitGate evaluation metric
+metric = LogitGateMetric(
+    rubric="Response accurately answers the user query without making unverified claims.",
     threshold=0.85,
     preset="balanced",
 )
 
 test_case = LLMTestCase(
-    input="Summarize document",
-    actual_output="The product launched in Q3 and achieved 40% growth.",
+    input="When was the company founded?",
+    actual_output="The company was founded in 2021 by a team of researchers.",
 )
-fast_metric.measure(test_case)
-print(f"Score: {fast_metric.score}, Passed: {fast_metric.is_successful()}")
+
+metric.measure(test_case)
+print(f"Confidence Score: {metric.score:.3f}, Passed: {metric.is_successful()}")
 ```
 
 ---
 
-## 3. LangGraph Integration (`as_conditional_edge`)
+## 3. LangGraph Multi-Agent Routing (`as_conditional_edge` & `as_async_conditional_edge`)
 
-In multi-agent systems and state graphs, routing decisions traditionally require prompting an agent to generate JSON routing text (costing 2–5 seconds). `as_conditional_edge` converts any `LogitGate` or `ChoiceGate` into a high-speed routing edge (**36–90ms**):
+In multi-agent systems and state graphs (LangGraph, AutoGen), conditional routing traditionally requires an LLM to generate structured JSON text, introducing 2–5 seconds of latency per routing step.
+
+LogitGate's `as_conditional_edge` and `as_async_conditional_edge` convert any `LogitGate` or `ChoiceGate` into a sub-50ms routing edge.
+
+### Universal State Polymorphism
+
+LogitGate's edge adapters extract target artifacts polymorphically across:
+1. Standard Python dictionaries and `TypedDict` mappings (`state["content"]`).
+2. Pydantic `BaseModel` instances (`state.content`).
+3. Standard library `@dataclass` state objects (`state.content`).
 
 ```python
 from typing import TypedDict
 from langgraph.graph import StateGraph
-from logitgate import LogitGate
-from logitgate.integrations.langgraph import as_conditional_edge
+from logitgate import ChoiceGate, LogitGate
+from logitgate.backends import OllamaBackend
+from logitgate.integrations.langgraph import as_async_conditional_edge, as_conditional_edge
+
+backend = OllamaBackend(model="qwen2.5-coder:14b")
 
 class AgentState(TypedDict):
     content: str
+    user_id: str
 
-# Fast binary routing edge
-safety_gate = LogitGate(rubric="Is the generated response safe and appropriate to send to the user?")
+# 1. Binary Safety & Escalation Edge (3-way routing)
+safety_gate = LogitGate(
+    rubric="Is the generated assistant response safe, appropriate, and non-hallucinatory?",
+    pass_threshold=0.85,
+    fail_threshold=0.20,
+    backend=backend,
+)
 
-# Creates a fast routing function extracting 'content' from graph state
-route_verdict = as_conditional_edge(
+route_safety = as_conditional_edge(
     safety_gate,
-    pass_node="publish_response",
-    fail_node="human_escalation",
+    pass_node="publish_to_user",
+    fail_node="redraft_response",
+    ambiguous_node="human_supervision",  # Escalates uncertain responses to human queue
+    state_key="content",
 )
 
-workflow = StateGraph(AgentState)
-workflow.add_conditional_edges("generator", route_verdict)
-```
-
-With `ChoiceGate`, multi-way branching routes seamlessly across arbitrary node names:
-
-```python
-from logitgate import ChoiceGate
-from logitgate.integrations.langgraph import as_conditional_edge
-
-router_gate = ChoiceGate(
-    question="Select the specialized agent node to handle this customer intent:",
+# 2. Categorical Intent Routing Edge (K-way routing)
+intent_router = ChoiceGate(
+    question="Select the specialized agent best suited to answer this request:",
     options={
-        "A": "Billing & Refund Questions",
-        "B": "Technical Troubleshooting & Bug Reports",
-        "C": "Account Security & Credentials",
+        "A": "Database Query Agent (SQL generation and analytics)",
+        "B": "Account & Authentication Agent (passwords, tokens, credentials)",
+        "C": "General Customer Support Agent",
     },
+    backend=backend,
 )
 
-route_intent = as_conditional_edge(
-    router_gate,
+route_intent = as_async_conditional_edge(
+    intent_router,
     node_mapping={
-        "A": "billing_agent",
-        "B": "tech_support_agent",
-        "C": "security_agent",
+        "A": "db_agent_node",
+        "B": "auth_agent_node",
+        "C": "support_agent_node",
     },
+    state_key="content",
 )
 
-workflow.add_conditional_edges("triage_agent", route_intent)
+# Assemble state graph
+workflow = StateGraph(AgentState)
+workflow.add_conditional_edges("triage", route_intent)
+workflow.add_conditional_edges("draft_generator", route_safety)
 ```
 
 ---
 
-## 4. Bring-Your-Own (BYO) Syntactic & Schema Validators (`ASTGate`)
+## 4. OpenTelemetry Distributed Tracing (`OtelSpanSink`)
 
-`ASTGate` (and its alias `ContractGate`) acts as a universal Layer 0 (`<0.1 ms`, `can_fast_path = False`) integration surface between your `Cascade` pipeline and any syntactic parser or schema validator in the Python ecosystem.
+Production deployments require deep distributed tracing to monitor fast-path hit rates, Layer-1 student vs. Layer-2 teacher disagreements, and latency bottlenecks without manual instrumentations.
 
-Any positional validator passed to `ASTGate(*validators)` follows a universal contract:
-- **Pass**: Returning `True`, `None` (standard for `ast.parse`, `jsonschema.validate`), or any non-`False` parsed object (such as a Pydantic model instance, a `sqlglot` AST, or a `dict`).
-- **Fail**: Returning `False`, `(False, "reason")`, or raising any `Exception` (the exception type and message are captured in `verdict.reason`).
+`OtelSpanSink` (`pip install 'logitgate[otel]'`) provides a zero-overhead bridge to OpenTelemetry:
 
-### Handling Realistic LLM Output Wrappers (`normalize=True`)
+```mermaid
+flowchart LR
+    app["Agent Application"] --> gate["LogitGate / Cascade"]
+    gate --> otel["OtelSpanSink (Active Tracer)"]
+    otel --> span["OpenTelemetry Span: 'logitgate.evaluation'"]
+    span --> attr["Attributes: gen_ai.system, logitgate.gate.*, logitgate.verdict.*"]
+    span --> events["Events: 'logitgate.layer' per layer trace"]
+    span --> collector["OpenTelemetry Collector / Jaeger / Datadog"]
+```
 
-In production, LLMs frequently wrap valid code or JSON inside `<think>...</think>` blocks, markdown code fences (` ```json ... ``` `), or conversational preamble (`"Sure! Here is the payload: {...}"`). Enable `normalize=True` (or pass a custom `normalize=my_extractor_fn`) to strip wrapper noise before running Layer 0 validators:
+- **Standard Semantic Conventions**: Populates `gen_ai.system`, `gen_ai.request.model`, `logitgate.gate.name`, `logitgate.verdict.passed`, `logitgate.verdict.probability`, `logitgate.latency_ms`.
+- **Per-Layer Span Events**: Records individual layer executions as child span events (`record_layer_events=True`), detailing Layer 0, Layer 1, and Layer 2 transitions.
+- **Privacy Controls**: Defaults to `privacy="omit_candidate"`, ensuring candidate texts and generative critique strings are never persisted in trace backends.
+- **Zero-Dependency Fallback**: If `opentelemetry-api` is not installed, `OtelSpanSink` degrades gracefully to a zero-overhead no-op (`is_enabled == False`).
+
+```python
+from logitgate import Cascade, JudgeGate, LogitGate
+from logitgate.backends import OllamaBackend
+from logitgate.telemetry import OtelSpanSink
+
+# Initialize OpenTelemetry span sink
+otel_sink = OtelSpanSink(
+    instrumentation_name="agent-eval-service",
+    record_layer_events=True,
+    error_on_fail=False,
+    privacy="omit_candidate",  # Omits raw candidate text from span attributes
+)
+
+backend = OllamaBackend(model="qwen2.5-coder:14b")
+
+with Cascade(
+    LogitGate("Code contains complete type hints.", backend=backend),
+    JudgeGate(trigger="on_ambiguous_only", backend=backend),
+    telemetry_sink=otel_sink,
+) as traced_pipeline:
+    verdict = traced_pipeline.evaluate("def add(a: int, b: int) -> int: return a + b")
+    print(f"Evaluated and traced: {verdict.passed}")
+```
+
+---
+
+## 5. Model Context Protocol (MCP) & OpenAI Tool Sandboxing (`ToolCallGate`)
+
+When building autonomous agents using Anthropic's Model Context Protocol (MCP) or OpenAI function calling, tools frequently execute system commands, filesystem queries, or database modifications.
+
+`ToolCallGate` inspects tool calls before execution, providing deterministic structural defenses (SSRF, path traversal, destructive SQL/shell) alongside semantic intent alignment:
+
+```python
+from logitgate import ToolCallGate
+from logitgate.backends import OllamaBackend
+
+backend = OllamaBackend(model="qwen2.5-coder:14b")
+
+# Configure ToolCallGate for MCP tools
+mcp_shield = ToolCallGate(
+    allowed_tools=["read_file", "search_directory", "query_db"],
+    allowed_roots=["/var/data/workspace"],
+    block_path_traversal=True,
+    block_ssrf=True,
+    block_destructive_commands=True,
+    block_destructive_sql=True,
+    check_intent=True,
+    user_intent="Read application configuration file config.yaml",
+    backend=backend,
+)
+
+# 1. MCP JSON-RPC tool-call envelope
+mcp_call = {
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+        "name": "read_file",
+        "arguments": {"path": "/var/data/workspace/config.yaml"},
+    },
+    "id": 1,
+}
+verdict = mcp_shield.evaluate(mcp_call)
+assert verdict.passed, "Legitimate MCP call failed!"
+
+# 2. Path Traversal Attack: Blocked in <0.05ms at Stage 0
+traversal_call = {
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+        "name": "read_file",
+        "arguments": {"path": "/var/data/workspace/../../etc/shadow"},
+    },
+    "id": 2,
+}
+attack_verdict = mcp_shield.evaluate(traversal_call)
+assert not attack_verdict.passed
+print(f"Attack Blocked: {attack_verdict.reason}")
+```
+
+---
+
+## 6. Bring-Your-Own (BYO) Syntactic & Schema Validators (`ASTGate`)
+
+`ASTGate` acts as a universal Layer-0 (`<0.1 ms`, `can_fast_path = False`) adapter between your pipeline and Python's parsing ecosystem.
+
+When initialized with `normalize=True`, `ASTGate` automatically strips conversational preamble, reasoning tags (`<think>...</think>`), and markdown fences (` ```python ... ``` `) before running structural validators:
 
 ```python
 import ast
-from pydantic import BaseModel
-from logitgate import ASTGate, LogitGate, JudgeGate
+from pydantic import BaseModel, Field
+from logitgate import ASTGate, Cascade, JudgeGate, LogitGate
 
-class SQLQueryPayload(BaseModel):
-    query: str
-    read_only: bool
+class DatabaseMigrationPayload(BaseModel):
+    table_name: str
+    column_name: str
+    data_type: str
+    is_nullable: bool = Field(default=True)
 
-# Accepts a Pydantic model class directly and normalizes <think> / markdown wrappers
-cascade = (
-    ASTGate(SQLQueryPayload, normalize=True)
-    >> LogitGate("Is the SQL query strictly read-only and free of injection risks?")
+# Cascade combining Layer 0 schema validation with Layer 1 security check
+pipeline = (
+    ASTGate(DatabaseMigrationPayload, normalize=True)
+    >> LogitGate("Does the migration follow naming conventions and avoid reserved keywords?")
     >> JudgeGate(trigger="on_ambiguous_only")
 )
 
-raw_llm_output = (
-    "<think>\nLet me format the response as requested.\n</think>\n"
-    "Here is the JSON payload you requested:\n"
-    '{"query": "SELECT id, email FROM users WHERE active = 1", "read_only": true}\n'
-    "Hope this helps!"
+raw_agent_output = (
+    "<think>\nNeed to add a created_at timestamp to user table.\n</think>\n"
+    "Here is the requested schema definition:\n"
+    "```json\n"
+    '{"table_name": "users", "column_name": "created_at", "data_type": "TIMESTAMP", "is_nullable": false}\n'
+    "```\n"
 )
 
-verdict = cascade.evaluate(raw_llm_output)
+verdict = pipeline.evaluate(raw_agent_output)
 assert verdict.passed
+print(f"Migration Schema Approved at Layer: {verdict.triggered_layer}")
 ```
 
-### Drop-In Ecosystem Recipes
+---
 
-```python
-import ast
-import json
-from logitgate import ASTGate
-
-# 1. Python standard library `ast.parse` (returns ast.Module on success, raises SyntaxError on failure)
-python_gate = ASTGate(ast.parse, normalize=True)
-
-# 2. jsonschema Draft202012Validator (or jsonschema.validate)
-# import jsonschema
-# schema_validator = jsonschema.Draft202012Validator({"type": "object", "required": ["id"]})
-# json_gate = ASTGate(schema_validator, normalize=True)
-
-# 3. SQLGlot dialect syntax checking (raises ParseError on invalid SQL)
-# import sqlglot
-# sql_gate = ASTGate(lambda s: sqlglot.transpile(s, read="postgres"), normalize=True)
-
-# 4. Tree-sitter syntax error node detection
-# def check_treesitter(code: str) -> tuple[bool, str]:
-#     tree = parser.parse(code.encode("utf-8"))
-#     if tree.root_node.has_error:
-#         return False, "Tree-sitter detected syntax error node"
-#     return True, "ok"
-# ts_gate = ASTGate(check_treesitter, normalize=True)
-```
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)

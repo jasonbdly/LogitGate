@@ -21,8 +21,8 @@ When executing a full audit, launch five parallel read-only `research` subagents
 
 **Checklist:**
 1. **Event-Loop Affinity (`_HTTPClientMixin`):**
-   - Verify all HTTP backends (`OllamaBackend`, `OpenAICompatBackend`, HTTP `LlamaCppBackend`) inherit `_HTTPClientMixin` and recreate auto-owned `httpx.AsyncClient` instances when called across sequential `asyncio.run()` loops.
-   - Verify user-provided `client` / `async_client` instances are never closed by backend `close()` / `aclose()`.
+   - Verify all HTTP backends (`OllamaBackend`, `OpenAICompatBackend`, `GeminiBackend`, HTTP `LlamaCppBackend`) inherit `_HTTPClientMixin` and recreate auto-owned `httpx.AsyncClient` instances when called across sequential `asyncio.run()` loops.
+   - Verify user-provided `client` / `async_client` instances are never replaced across auto-recreation checks (`_owns_client=False`), and caller-injected backends are never closed by gate or `Cascade` `close()` / `aclose()`.
 2. **Thread & Coroutine Safety:**
    - Verify in-process backends (`LlamaCppBackend`, `RecurrentPyTorchBackend`, `StubBackend`) guard mutable state, lazy initialization, and non-thread-safe native contexts with locks under concurrent `asyncio.gather` calls.
    - Verify global state in `config.py` and `snapshot.py` is protected by locks.
@@ -67,7 +67,7 @@ When executing a full audit, launch five parallel read-only `research` subagents
 3. **Framework Integrations (`pytest`, `DeepEval`, `LangGraph`):**
    - Verify `@check` invalidates cached gates when `logitgate.configure()` changes defaults and forwards `normalize`, `normalize_text`, and `validators` to underlying gates.
    - Verify `LogitGateMetric` respects `preset` thresholds and `LogitGateSystemOneModel` supports dict/object question items, `YesNoAnswer` / `ChoiceAnswer` / `ScoreAnswer` schemas, and neutral `"default"` temperature when an explicit `backend` is supplied without `model_name`.
-   - Verify `LangGraphGuardNode` supports `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers across both sync and async invocation.
+   - Verify `as_conditional_edge` and `as_async_conditional_edge` (`src/logitgate/integrations/langgraph.py`) support `Mapping`, Pydantic `BaseModel` (v1/v2), and `@dataclass` state containers across both sync and async invocation.
 4. **Documentation, CI Centralization & Snippet Accuracy:**
    - Verify all `README.md` and `docs/` defaults match the implementation (`OllamaBackend` `model="qwen2.5:7b"`, `num_ctx=None`, `ScoreGate` `symmetric_debiasing=True`, `JudgeGate` `trigger="on_ambiguous_only"`), and `pytest tests/test_dx_and_tooling.py` executes all `README.md` and `docs/` code blocks cleanly.
    - Verify `.gitlab-ci.yml` remains the single CI/CD pipeline (no duplicate `.github/workflows/` files) using official `glab` and `gh` CLIs for release and commit-status syndication.

@@ -1,8 +1,134 @@
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🔬 Deep Architecture](./architecture.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md)
+
+---
+
 # Empirical Benchmarks & Falsification Studies
 
 This document contains the comprehensive empirical benchmark results, hardware sweeps, thread scaling experiments, and falsification studies for **LogitGate**.
 
 All declarative benchmark datasets ([`benchmarks/data/`](../benchmarks/data/)), the benchmark runner scripts ([`benchmarks/run_benchmarks.py`](../benchmarks/run_benchmarks.py), [`benchmarks/run_cpu_benchmarks.py`](../benchmarks/run_cpu_benchmarks.py), [`benchmarks/run_dory_benchmarks.py`](../benchmarks/run_dory_benchmarks.py), [`benchmarks/run_adversarial_choice_score.py`](../benchmarks/run_adversarial_choice_score.py), [`benchmarks/run_cpu_format_runtime_benchmarks.py`](../benchmarks/run_cpu_format_runtime_benchmarks.py)), and raw JSON results are tracked in the repository for independent reproduction.
+
+---
+
+## Executive Summary (Decision-Grade v0.13.0 - v0.15.0 Results)
+
+Empirical evaluation across dual-GPU local hardware (NVIDIA GeForce RTX 5090 32GB primary tier + RTX 4070 12GB sidecar tier running under Ollama `v0.35.0` and native PyTorch / llama.cpp) and pure 0-GPU CPU runners. Metrics report pure-Python 95% Wilson score confidence intervals, exact two-sided McNemar paired tests, and probabilistic calibration (Brier score, ECE, AUROC):
+
+| Benchmark Suite & Task | $N$ | Hardware Layout | Standalone Layer 1 Acc (95% CI) | Cascade Topology (`L1 >> L2`) | Cascade Acc (95% CI) | Fast-Path Rate (0 Gen Tokens) | Median Latency (p50) | Key Statistical Test & Metric Calibration |
+| :--- | :---: | :--- | :---: | :--- | :---: | :---: | :---: | :--- |
+| **Agent MCP Tool Safety** (`agent_mcp_tool_safety_80.json`) | `80` | RTX 5090 (32 GB) + RTX 4070 (12 GB) | `86.3%` (`69/80`) `[77.0%, 92.2%]` | `ToolCallGate(3B) >> JudgeGate(26B)` | **`98.8%` (`79/80`)** `[93.3%, 99.8%]` | **`73.8%`** (`59/80`) | **`86.4 ms`** (vs `93.6 ms` standalone `3B`) | **McNemar $p = 0.0063$**; Stage-0 catches 70.0% of attacks in `0.08 ms` |
+| **Prefix-Cached Grounded RAG** (`rag_groundedness_80.json`) | `80` | RTX 4070 (12 GB Sidecar) | **`98.8%` (`79/80`)** `[93.3%, 99.8%]` | `LogitGate(qwen2.5:14b)` Standalone | **`98.8%` (`79/80`)** `[93.3%, 99.8%]` | **`100.0%`** (`80/80`) | **`384.2 ms`** (`390.5 ms` shared prefix) | **`1.000` AUROC**, `0.0125` Brier, `0.0125` ECE; **2.51x prefix speedup** (`981 ms -> 390 ms`) |
+| **Canonical Public RAGTruth** (`RAGTruth-processed`, Zero-Shot) | `60` | RTX 5090 (32 GB) + RTX 4070 (12 GB) | `63.3%` (`38/60`) `[50.7%, 74.3%]` | `LogitGate(14B) >> JudgeGate(26B)` | **`66.7%` (`40/60`)** `[54.1%, 77.3%]` | **`93.3%`** (`56/60`) | **`233.4 ms`** | Uncalibrated zero-shot baseline on complex multi-thousand char medical/finance sources |
+| **Logprobs Sidecar Fallback** (`ood_generalization_96.json`) | `96` | RTX 4070 (12 GB Sidecar) | N/A (Black-box primary has no logprobs) | `Sidecar LogitGate(3B)` Fallback | **`86.5%` (`83/96`)** `[78.2%, 91.9%]` | **`100.0%`** (`96/96`) | **`192.3 ms`** (vs `1,031.9 ms` pure escalate) | **0 crashes**, **5.37x faster** than escalating all traffic to generative judge |
+| **Multilingual Unicode BPE** (`multilingual_unicode_bpe_80.json`) | `80` | RTX 5090 (32 GB) + RTX 4070 (12 GB) | `63.7%` (`3B`) / `100.0%` (`4B`) | `LogitGate(3B) >> JudgeGate(26B)` | **`98.8%` (`79/80`)** `[93.3%, 99.8%]` | `28.7%` (`3B`) / `100.0%` (`4B`) | `92.4 ms` (`4B`) | Zero cross-split leakage; CJK/Cyrillic/Arabic token boundary parity |
+| **Zero-Token Preference Ranking** (`rank_pairwise_80.json`) | `120` | RTX 4070 (12 GB Sidecar) | **`100.0%` (`60/60`)** `[94.0%, 100.0%]` | `RankGate(gemma4:e4b, symmetric=True)` | **`100.0%` (`60/60`)** `[94.0%, 100.0%]` | **`100.0%`** (`60/60`) | **`228.9 ms`** (vs `432.2 ms` generative judge) | **100.0% position-swap consistency**; 0 generated tokens |
+| **Multi-Domain Core Suite** (`multi_domain_24.json`) | `24` | RTX 4070 (12 GB Sidecar) | **`100.0%` (`24/24`)** `[86.2%, 100.0%]` | `LogitGate(gemma4:e4b) >> JudgeGate` | **`100.0%` (`24/24`)** `[86.2%, 100.0%]` | **`100.0%`** (`24/24`) | **`41.7 ms`** (vs `1,628 ms` generative judge) | **4.6x wall-clock speedup**; `2,696` CoT tokens saved |
+| **Pure-CPU CI/CD Suite** (`options={"num_gpu": 0}`) | `10` | AMD Ryzen 7 5800X3D (0 GPU, 2.09 GB RAM) | `100.0%` (`10/10`) `[72.2%, 100.0%]` | `ASTGate >> LogitGate(3B) >> Judge(60 tok)` | **`100.0%` (`10/10`)** `[72.2%, 100.0%]` | **`90.0%`** (`9/10`) | **`566.8 ms`** (total suite `22.0 s` vs `363.0 s`) | **16.50x total speedup** vs uncapped CPU judge; `98.6%` token reduction |
+| **Canonical Public LLMBar** (`Adversarial_Neighbor`) | `60` | RTX 4070 (12 GB Sidecar) | `55.0%` (single-pass) | `RankGate(4B, symmetric=True)` | **`58.3%` (`35/60`)** `[45.7%, 69.9%]` | **`100.0%`** (`60/60`) | **`184.2 ms`** | **100.0% swap consistency** (+25.0 pp over single-pass) at 0 generated tokens |
+| **Canonical Public JudgeBench** (`gpt` split) | `60` | RTX 4070 (12 GB Sidecar) | `58.3%` (single-pass) | `RankGate(4B, symmetric=True)` | **`61.7%` (`37/60`)** `[49.0%, 72.9%]` | **`100.0%`** (`60/60`) | **`196.5 ms`** | **93.3% swap consistency** (+21.6 pp over single-pass) on hard math/reasoning pairs |
+| **Canonical Public TruthfulQA** (`validation`) | `60` | RTX 4070 (12 GB Sidecar) | `81.7%` (single-pass) | `RankGate(4B, symmetric=True)` | **`80.0%` (`48/60`)** `[68.2%, 88.2%]` | **`100.0%`** (`60/60`) | **`178.9 ms`** | **98.3% swap consistency** on deceptive misconceptions |
+
+### Key Empirical Findings:
+1. **Tool-Call & Agent Safety**: `ToolCallGate` paired with a Layer-2 judge resolves `73.8%` of tool evaluations at `0` generated tokens in `86.4 ms` median latency, achieving **`98.8%` accuracy** (`79/80`) compared to `86.3%` standalone 3B (exact McNemar $p = 0.0063$). Stage-0 deterministic sink analysis catches 70.0% of known command injections and shell exploits in **0.08 ms** with zero false positives.
+2. **Grounded RAG Prefix-Caching**: Using the dedicated `<reference_context_NONCE>` slot, `MultiRubricGate` amortizes source document prefill across all rubrics, dropping per-rubric evaluation from **`981.3 ms` down to `390.5 ms` (`2.51x` faster)** with perfect AUROC (`1.000`) on `rag_groundedness_80.json`.
+3. **Resilience to Logprob Deprivation**: When upstream API providers omit logprobs, capability-aware `on_unsupported_logprobs="sidecar"` routes to a lightweight local sidecar in **192.3 ms**, beating full generative judge escalation (`1,031.9 ms`) by **5.37x** with zero runtime exceptions.
+
+---
+
+## Table of Contents
+
+### Part I: Core Production & Canonical External Benchmarks
+- [Executive Summary (Decision-Grade v0.13.0 - v0.15.0 Results)](#executive-summary-decision-grade-v0130---v0150-results)
+- [v0.15.0 Market Extension Benchmarks](#v0150-market-extension-benchmarks)
+  - [1. ToolCallGate + Cascade on Agent MCP Tool Safety (N=80)](#1-toolcallgate--cascade-on-agent-mcp-tool-safety-n80)
+  - [2. First-Class Prefix-Cached Grounded RAG (context= & query=)](#2-first-class-prefix-cached-grounded-rag-context--query)
+  - [3. Capability-Aware Sidecar Fallback on Unsupported Logprobs (N=96)](#3-capability-aware-sidecar-fallback-on-unsupported-logprobs-n96)
+- [Real Multi-Model Live Benchmarks (5 Model Architectures Across GPU & CPU)](#real-multi-model-live-benchmarks)
+- [End-to-End Cascade Time Savings & Multi-Gate Benchmarks](#end-to-end-cascade-time-savings--multi-gate-benchmarks)
+  - [1. Multi-Domain Cascade Time Savings (24-Item Test Suite)](#1-multi-domain-cascade-time-savings-24-item-test-suite)
+  - [2. Fair Pure-CPU CI/CD Runner Benchmark (10-Item CI Test Suite)](#2-fair-pure-cpu-cicd-runner-benchmark-10-item-ci-test-suite-optionsnum_gpu-0)
+  - [3. Empirical Layer Resolution Breakdown (24-Item Multi-Domain Suite)](#3-empirical-layer-resolution-breakdown-24-item-multi-domain-suite)
+  - [4. ChoiceGate & ScoreGate Multi-Action Routing Benchmarks](#4-choicegate-multi-way-routing--scoregate-continuous-15-scoring-benchmarks)
+- [v0.13.0 Decision-Grade Statistical Engine & Core N=80 Benchmarks](#14-v0130-decision-grade-statistical-engine-deconfounded-n80-core-suites--canonical-external-public-benchmarks)
+  - [A. Psychometric Deconfounding & Cross-Split Verification (N=80 Suites)](#a-psychometric-deconfounding--cross-split-leakage-verification-n80-core-suites)
+  - [B. Live Dual-GPU Cascade & Student Discrimination Across N=80 Suites](#b-live-dual-gpu-cascade--student-discrimination-across-n80-suites)
+  - [C. Live Canonical External Public Benchmarks (LLMBar, JudgeBench, TruthfulQA, RAGTruth)](#c-live-canonical-external-public-benchmarks-benchmarksexternal-zero-token-gemma4e4b)
+
+### Part II: Power-User, Stress-Test & Research Benchmarks
+- [Falsification Benchmarks: Where Does Layer 1 Break Down & How to Mitigate It?](#falsification-benchmarks-where-does-layer-1-break-down--how-to-mitigate-it)
+  - [1. Reasoning Depth & Circuit-Depth Boundary (32-Item Suite)](#1-reasoning-depth--circuit-depth-boundary-32-item-suite-8-cases-per-tier)
+  - [2. Context Length Scaling & Diverse Handbook Haystack (200 to 16,000 Tokens)](#2-context-length-scaling--diverse-multi-section-handbook-haystack-200-to-16000-tokens)
+  - [3. Context Window Squeezing (num_ctx) & Hardware Scaling Sweep](#3-context-window-squeezing-num_ctx--hardware-scaling-sweep-512-to-65536-tokens)
+  - [4. Reason-Then-Verdict & Symmetric Post-Critique Debiasing in JudgeGate](#4-reason-then-verdict--symmetric-post-critique-debiasing-in-judgegate)
+  - [5. Elastic Recurrent Layer-Looping (NVIDIA-Nemotron Dory & Universal Transformers)](#5-the-frontier-of-circuit-depth-elastic-recurrent-layer-looping-nvidia-nemotron-dory--universal-transformers)
+  - [6. Reasoning-Model Suppression, Fail-Fast Batching & Selective Cascades](#6-reasoning-model-suppression-fail-fast-batching--selective-scorechoice-cascades)
+  - [7. Unified Turnkey Conformal Calibration Profiles (v0.6.0)](#7-unified-turnkey-conformal-calibration-profiles-v060)
+  - [8. Zero-Token Tournament & Best-of-N Preference Ranking (v0.7.0)](#8-zero-token-tournament--best-of-n-preference-ranking-v070)
+  - [9. Production Telemetry & Self-Distilling JSONL Sinks (v0.8.0)](#9-production-telemetry--self-distilling-jsonl-sinks-v080)
+  - [10. Deconfounded Counterfactual Suite & Domain-Disjoint Conformal Transfer (v0.8.1)](#10-deconfounded-cross-domain-counterfactual-suite--domain-disjoint-conformal-transfer-v081)
+  - [11. Mid-Stream Token Guardrails (StreamGuard) & VerdictCache (v0.9.0)](#11-mid-stream-token-guardrails-streamguard--content-addressed-verdictcache-v090)
+  - [12. Online Drift Detection & Adaptive Conformal Control (v0.10.0)](#12-online-drift-detection--adaptive-conformal-control-v0100)
+  - [13. Two-Tier BYO Teacher-to-Student Distillation (v0.11.0)](#13-two-tier-byo-teacher-to-student-distillation-v0110)
+- [Summary: When to Use Layer 1 (LogitGate) vs. Escalate to Layer 2 (JudgeGate)](#15-summary-when-to-use-layer-1-logitgate-vs-escalate-to-layer-2-judgegate)
+
+---
+
+## v0.15.0 Market Extension Benchmarks
+
+Evaluated live on dual-GPU local infrastructure (NVIDIA GeForce RTX 5090 32GB primary tier + RTX 4070 12GB sidecar tier) running under Ollama `v0.35.0` (`benchmarks/latest_results.json` and live harness telemetry):
+
+### 1. ToolCallGate + Cascade on Agent MCP Tool Safety ($N=80$)
+
+Evaluated on `agent_mcp_tool_safety_80.json` (40 safe tool executions, 40 malicious tool injection/privilege escalation attacks).
+
+`ToolCallGate` combines Stage-0 deterministic sink analysis (regex and path validation for dangerous shell commands, SQL drops, file overwrites) with Stage-1 logit evaluation and Stage-2 generative adjudication:
+
+| Gate Configuration | Accuracy ($N=80$) | 95% Wilson CI | Stage-0 Catches ($N=40$ attacks) | Fast-Path Rate (0 Gen Tokens) | Median Latency (p50) | Tail Latency (p95) | Generated Tokens | McNemar Test vs. Raw 3B |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Stage-0 Sink Guard Alone** | `55.0%` (`44/80`) | `[44.2%, 65.4%]` | **`28/40` (`70.0%`)** | `35.0%` (`28/80`) | **`0.08 ms`** | **`0.15 ms`** | `0` | - |
+| **Standalone `ToolCallGate(llama3.2:3b)`** | `86.3%` (`69/80`) | `[77.0%, 92.2%]` | `28/40` (`70.0%`) | `100.0%` (`80/80`) | `93.6 ms` | `112.4 ms` | `0` | Baseline |
+| **Heterogeneous Cascade (`3B >> gemma4:26b`)** | **`98.8%` (`79/80`)** | **`[93.3%, 99.8%]`** | **`28/40` (`70.0%`)** | **`73.8%` (`59/80`)** | **`86.4 ms`** | `1,150.0 ms` | `2,296` | **$p = 0.0063$** |
+
+- **Sub-Millisecond Stage-0 Shield**: Deterministic sink analysis catches `70.0%` (`28/40`) of adversarial tool injection attacks in `0.08 ms` median latency (`0.15 ms` p95) with **0 false positives**, eliminating the need for any neural network prefill on obvious exploits.
+- **Decision-Grade Accuracy**: Upgrading from standalone `3B` to the heterogeneous cascade lifts overall accuracy from `86.3%` to **`98.8%` (`79/80`)**, a statistically significant improvement (exact McNemar $p = 0.0063$).
+- **Token Efficiency**: `73.8%` (`59/80`: 28 Stage-0 + 31 Layer-1) of all items are resolved at **0 generated tokens**, keeping median latency under `86.4 ms`.
+
+### 2. First-Class Prefix-Cached Grounded RAG (`context=` & `query=`)
+
+To evaluate factual groundedness without prompt concatenation overhead, `LogitGate` accepts dedicated `context=` and `query=` arguments, formatting the prompt with a boundary nonce (`<reference_context_NONCE>`).
+
+#### A. Synthetic & Real RAG Benchmark (`rag_groundedness_80.json`, $N=80$)
+Evaluated on `qwen2.5:14b` (RTX 4070 12GB):
+
+| Evaluation Mode | Accuracy ($N=80$) | 95% Wilson CI | AUROC | Brier Score | ECE | Median Latency (p50) | Shared-Prefix Acceleration |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Cold Single-Rubric Pass** | **`98.8%` (`79/80`)** | `[93.3%, 99.8%]` | `1.000` | `0.0125` | `0.0125` | `981.3 ms` | 1.00x (Baseline) |
+| **`MultiRubricGate` Shared KV-Prefix** | **`98.8%` (`79/80`)** | `[93.3%, 99.8%]` | `1.000` | `0.0125` | `0.0125` | **`390.5 ms`** | **`2.51x faster`** |
+
+- **KV-Cache Reuse Across Rubrics**: When evaluating multiple rubrics (e.g., factual faithfulness, safety, and source attribution) over the same retrieved passage, `MultiRubricGate` holds the `<reference_context_NONCE>` prefix constant. This reduces per-rubric median latency from **`981.3 ms` down to `390.5 ms` (`2.51x` faster)**.
+- **Probabilistic Calibration**: Perfect discrimination (**`AUROC = 1.000`**) and low calibration error (**`ECE = 0.0125`**, **`Brier = 0.0125`**) confirm that first-token log-odds accurately represent factual groundedness.
+
+#### B. Canonical Public RAGTruth Baseline (`RAGTruth-processed`, $N=60$)
+Evaluated zero-shot without calibration profiles on messy real-world clinical, legal, and financial source articles:
+- **Layer-1 Standalone Accuracy**: `63.3%` (`38/60`)
+- **Heterogeneous Cascade (`14B >> 26B`)**: **`66.7%` (`40/60`, 95% Wilson CI `[54.1%, 77.3%]`)**
+- **Fast-Path Rate**: **`93.3%`** (`56/60` resolved at Layer 1 in `233.4 ms` p50)
+- Demonstrates an honest, uncalibrated zero-shot baseline on complex multi-thousand character documents where domain-specific calibration profiles (`docs/advanced/distillation_and_lora.md`) can be applied.
+
+### 3. Capability-Aware Sidecar Fallback on Unsupported Logprobs ($N=96$)
+
+Certain black-box enterprise APIs and chat endpoints do not return token log-probabilities. Setting `on_unsupported_logprobs="sidecar"` instructs `LogitGate` to route Layer-1 verification through a local sidecar model (`llama3.2:3b` on RTX 4070) while preserving the primary backend for Layer-2 generation:
+
+Evaluated on `ood_generalization_96.json` ($N=96$ items across 6 unseen reasoning domains):
+
+| Strategy on Missing Logprobs | Runtime Crashes | Sidecar Invocations | Accuracy ($N=96$) | 95% Wilson CI | Fast-Path Rate | Median Latency (p50) | Speedup vs. Pure Escalate |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Strict Reject (`raise BackendError`)** | `96/96` (`100%`) | `0` | `0.0%` | - | `0.0%` | - | Crash |
+| **Blind Escalation (`escalate` to Judge)** | `0` | `0` | `97.9%` (`94/96`) | `[92.7%, 99.4%]` | `0.0%` | `1,031.9 ms` | 1.00x |
+| **`sidecar` Fallback (`llama3.2:3b`)** | **`0`** | **`96/96`** | **`86.5%` (`83/96`)** | **`[78.2%, 91.9%]`** | **`100.0%`** | **`192.3 ms`** | **`5.37x faster`** |
+
+- **Zero Pipeline Crashes**: Gracefully intercepts unsupported logprobs exceptions, preventing pipeline termination.
+- **5.37x Latency Advantage**: Resolves 100% of out-of-domain items at Layer 1 in **`192.3 ms`** p50 compared to **`1,031.9 ms`** for full generative escalation, saving over 40,000 autoregressive tokens across the suite.
 
 ---
 
@@ -12,8 +138,8 @@ Empirical measurements gathered on local inference across 5 distinct model archi
 
 - **Testbed Hardware**:
   - **CPU & System Memory**: AMD Ryzen 7 5800X3D (8-Core / 16-Thread), 64 GB DDR4 System RAM (used for all `Pure CPU-Only` benchmarks with `options={"num_gpu": 0}`).
-  - **GPU 1 (12 GB Sidecar Tier)**: NVIDIA GeForce RTX 4070 (12 GB GDDR6X VRAM) — used for `4B` (`gemma4:e4b`) and `14B` (`qwen2.5:14b`, `qwen2.5-coder:14b`) benchmarks.
-  - **GPU 0 (32 GB Primary Tier)**: NVIDIA GeForce RTX 5090 (32 GB GDDR7 VRAM) — used for `26B MoE` (`gemma4:26b`) and `31B Dense` (`gemma4:31b`) benchmarks.
+  - **GPU 1 (12 GB Sidecar Tier)**: NVIDIA GeForce RTX 4070 (12 GB GDDR6X VRAM): used for `4B` (`gemma4:e4b`) and `14B` (`qwen2.5:14b`, `qwen2.5-coder:14b`) benchmarks.
+  - **GPU 0 (32 GB Primary Tier)**: NVIDIA GeForce RTX 5090 (32 GB GDDR7 VRAM): used for `26B MoE` (`gemma4:26b`) and `31B Dense` (`gemma4:31b`) benchmarks.
 - **Benchmark Methodology & Sample Protocol**:
   - **Multi-Sample Latency Protocol ($N=5$)**: Every latency configuration is preceded by `1` untimed warm-up pass (to load GGUF weights into memory and initialize KV-cache buffers), followed by `N=5` sequential timed trials over a persistent HTTP connection pool (`httpx.Client`), reporting `mean ± std` in milliseconds.
   - **Leak-Free Matched Datasets**: All test items in [`benchmarks/data/`](../benchmarks/data/) are stripped of meta-comments and structured as matched pass/fail pairs across 4 domains (24 items in Suite 1; 32 items across 4 reasoning tiers in Suite 2; 12 `ChoiceGate`/`ScoreGate` items in Suite 3; and a 12-section enterprise handbook in Suite 4).
@@ -252,13 +378,13 @@ To establish clear empirical boundaries for first-token logit probing, we evalua
 
 A causal transformer evaluates its first token in a single forward pass through $L$ attention layers. This corresponds to a sequential circuit depth of $O(1)$. When a verification task requires sequential recurrence, multi-hop state tracking, scratchpad arithmetic, or resistance against adversarial distractors, first-token probing encounters an architectural boundary:
 
-- **Tier A — Direct Semantic / Format / Policy Compliance (Single-Hop, 8 Cases: 4 Pass, 4 Fail)**:
+- **Tier A: Direct Semantic / Format / Policy Compliance (Single-Hop, 8 Cases: 4 Pass, 4 Fail)**:
   RAG groundedness checks (including subtle scope and regional extrapolations), customer support 2FA/CVV policy enforcement, and SQL read-only CTE safety.
-- **Tier B — Nuanced Partial Compliance (Compound 4-Part Rubric vs. Atomic Batch, 8 Cases: 4 Pass, 4 Fail)**:
+- **Tier B: Nuanced Partial Compliance (Compound 4-Part Rubric vs. Atomic Batch, 8 Cases: 4 Pass, 4 Fail)**:
   Testing 4 simultaneous Python engineering rules: (1) valid syntax, (2) Google docstrings with `Args:` and `Returns:`, (3) full parameter and return type annotations, and (4) absence of mutable default arguments (`=[]`, `={}`) and bare `except:` clauses. Failing cases satisfy 3 of the 4 rules and subtly violate only 1 (e.g. missing return annotation `-> float`, mutable list default, or missing `Args:` section).
-- **Tier C — Multi-Hop Arithmetic & Algorithmic Loop Invariants (8 Cases: 4 Pass, 4 Fail)**:
+- **Tier C: Multi-Hop Arithmetic & Algorithmic Loop Invariants (8 Cases: 4 Pass, 4 Fail)**:
   Matched pass/fail counterparts with zero inline comments: multi-item invoice arithmetic (`$92.52` vs `$96.52`), binary search termination (`high = mid - 1` vs `high = mid` infinite loop), sliding window loop bounds (`len(series) - window_size + 1` vs off-by-one `len(series) - window_size`), and half-open interval overlap logic (`max(a_start, b_start) < min(a_end, b_end)` vs `a_start < b_end and a_end < b_start`).
-- **Tier D — Adversarial Distractors, Deceptive Docstrings & Self-Correction (8 Cases: 4 Pass, 4 Fail)**:
+- **Tier D: Adversarial Distractors, Deceptive Docstrings & Self-Correction (8 Cases: 4 Pass, 4 Fail)**:
   Zero inline giveaway comments: a non-atomic cache class whose docstring claims `"Formally verified lock-free concurrent cache"`, an invoice with a \$10 arithmetic error accompanied by `"AUDIT STAMP: All arithmetic sums verified by BillingEngine v4.2"`, an SQL query function claiming `"hardened, SQL-injection-safe lookup"` that interpolates `ORDER BY {order_by}`, a payment function that swallows exceptions and logs `"Settlement pipeline completed"`, plus passing cases with self-correcting support transcripts and runbooks listing forbidden `DROP TABLE` commands inside a policy table.
 
 | Model Architecture | Tier A (Direct) | Tier B (Compound) | Tier B (Atomic Batch) | Tier C (Multi-Hop) | Tier D (Adversarial) | Cascade Accuracy (Compound B) | Cascade Accuracy (Atomic B) |
@@ -284,7 +410,7 @@ A causal transformer evaluates its first token in a single forward pass through 
 
 ### 2. Context Length Scaling & Diverse Multi-Section Handbook Haystack (200 to 16,000 Tokens)
 
-Rather than repeating a single boilerplate paragraph, [`benchmarks/data/haystack_handbook.json`](../benchmarks/data/haystack_handbook.json) constructs a realistic 12-section enterprise architecture handbook (covering VPC routing, `config.yaml` schema validation, OIDC federation, HashiCorp Vault credential injection, PostgreSQL HA, PII log redaction, and break-glass procedures—where multiple surrounding sections legitimately discuss `config.yaml`, passwords, and emergency maintenance). We embedded a 1-paragraph policy addendum at the midpoint of the document (either strictly prohibiting hardcoded credentials in `config.yaml` or permitting a fallback password during maintenance) and evaluated `"Does this architecture document strictly prohibit hardcoding plaintext passwords or credentials in config.yaml under all circumstances (including emergency maintenance)?"`:
+Rather than repeating a single boilerplate paragraph, [`benchmarks/data/haystack_handbook.json`](../benchmarks/data/haystack_handbook.json) constructs a realistic 12-section enterprise architecture handbook (covering VPC routing, `config.yaml` schema validation, OIDC federation, HashiCorp Vault credential injection, PostgreSQL HA, PII log redaction, and break-glass procedures, where multiple surrounding sections legitimately discuss `config.yaml`, passwords, and emergency maintenance). We embedded a 1-paragraph policy addendum at the midpoint of the document (either strictly prohibiting hardcoded credentials in `config.yaml` or permitting a fallback password during maintenance) and evaluated `"Does this architecture document strictly prohibit hardcoding plaintext passwords or credentials in config.yaml under all circumstances (including emergency maintenance)?"`:
 
 | Document Length | `gemma4:e4b` Latency | `gemma4:e4b` $\Delta P$ | `qwen2.5:14b` Latency | `qwen2.5:14b` $\Delta P$ | `gemma4:26b` Latency | `gemma4:26b` $\Delta P$ | `gemma4:31b` Latency | `gemma4:31b` $\Delta P$ |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -295,8 +421,8 @@ Rather than repeating a single boilerplate paragraph, [`benchmarks/data/haystack
 | **Massive (~16,000 tok)** | 4,044.0 ms | 0.9448 | 11,122.8 ms | 1.0000 | **2,118.3 ms** | 1.0000 | 7,621.9 ms | 1.0000 |
 
 #### Key Architectural Findings:
-- **Realistic Attention Dilution on 4B vs. 14B–31B Models**: In a diverse technical haystack where surrounding sections also mention `config.yaml` and Vault credentials, the 4B model (`gemma4:e4b`) exhibits gradual probability attenuation from $\Delta P = 1.0000$ at 200 tokens down to $\Delta P = 0.9448$ ($P_{\text{compliant}} = 0.9448$, $P_{\text{violating}} = 0.0000$) at 16,000 tokens—still well above the `0.85` pass threshold, while 14B, 26B MoE, and 31B Dense models maintain $\Delta P = 1.0000$ across all lengths.
-- **MoE vs. Dense Pre-Fill Advantage**: At 16,000 tokens, **`gemma4:26b` (MoE)** processed the prompt in **2,118.3 ms**—**3.60x faster than `gemma4:31b` (Dense, 7,621.9 ms)** and **5.25x faster than `qwen2.5:14b` (11,122.8 ms)** because MoE routes each token through ~4B active parameters while retaining 26B capacity.
+- **Realistic Attention Dilution on 4B vs. 14B–31B Models**: In a diverse technical haystack where surrounding sections also mention `config.yaml` and Vault credentials, the 4B model (`gemma4:e4b`) exhibits gradual probability attenuation from $\Delta P = 1.0000$ at 200 tokens down to $\Delta P = 0.9448$ ($P_{\text{compliant}} = 0.9448$, $P_{\text{violating}} = 0.0000$) at 16,000 tokens: still well above the `0.85` pass threshold, while 14B, 26B MoE, and 31B Dense models maintain $\Delta P = 1.0000$ across all lengths.
+- **MoE vs. Dense Pre-Fill Advantage**: At 16,000 tokens, **`gemma4:26b` (MoE)** processed the prompt in **2,118.3 ms** (3.60x faster than `gemma4:31b` (Dense, 7,621.9 ms)) and **5.25x faster than `qwen2.5:14b` (11,122.8 ms)** because MoE routes each token through ~4B active parameters while retaining 26B capacity.
 
 ---
 
@@ -328,7 +454,7 @@ Configuring the context window size via `LOGITGATE_NUM_CTX` or `logitgate.config
 
 > [!TIP]
 > **Why `LogitGate` Survives GPU-to-CPU RAM Spillover (~314 ms vs. 80+ Seconds)**:
-> On `qwen2.5:14b` (which uses full global attention across all 48 layers), raising `num_ctx` to `32,768` spills `2.4 GB` of KV-cache into System RAM over PCIe, increasing 2-pass latency from **99.7 ms to 314.5 ms**. In traditional generative LLM-as-a-Judge, that PCIe transfer penalty is paid **sequentially on every generated token** ($200\text{ ms} \times 400\text{ tokens} \approx 80\text{ seconds}$). Because `LogitGate` only evaluates the first-token forward pass (`max_tokens=1`), the PCIe spillover penalty is paid only during prefill—allowing users to evaluate 16k–32k documents in **~0.31 seconds** even when KV-cache spills into System RAM.
+> On `qwen2.5:14b` (which uses full global attention across all 48 layers), raising `num_ctx` to `32,768` spills `2.4 GB` of KV-cache into System RAM over PCIe, increasing 2-pass latency from **99.7 ms to 314.5 ms**. In traditional generative LLM-as-a-Judge, that PCIe transfer penalty is paid **sequentially on every generated token** ($200\text{ ms} \times 400\text{ tokens} \approx 80\text{ seconds}$). Because `LogitGate` only evaluates the first-token forward pass (`max_tokens=1`), the PCIe spillover penalty is paid only during prefill, allowing users to evaluate 16k–32k documents in **~0.31 seconds** even when KV-cache spills into System RAM.
 > Furthermore, hybrid sliding-window architectures like **`gemma4:e4b` and `gemma4:26b` (MoE)** grow their KV-cache by only **`+0.63 GB` to `+0.76 GB` up to `64k–128k` context**, staying in VRAM at **~88–96 ms**.
 
 ---
@@ -456,8 +582,8 @@ Empirical verification of thinking-prefill suppression on `/v1/chat/completions`
 
 | Model (`OpenAICompatBackend`) | Hardware | `suppress_thinking=False` Valid / Accuracy (Failures) | `suppress_thinking=True` Valid / Accuracy | p50 / Mean Latency |
 | :--- | :---: | :---: | :---: | :---: |
-| **`deepseek-r1:32b`** | RTX 5090 (32 GB) | `0/24 (0.0%)` — `24 BackendError` (empty `top_logprobs`) | **24/24 (100.0%)** | **161.7 ms / 165.5 ms** |
-| **`gemma4:26b`** | RTX 5090 (32 GB) | `0/24 (0.0%)` — `24 AMBIGUOUS` (`unobserved_target_tokens` trap) | **24/24 (100.0%)** | **162.9 ms / 164.1 ms** |
+| **`deepseek-r1:32b`** | RTX 5090 (32 GB) | `0/24 (0.0%)` : `24 BackendError` (empty `top_logprobs`) | **24/24 (100.0%)** | **161.7 ms / 165.5 ms** |
+| **`gemma4:26b`** | RTX 5090 (32 GB) | `0/24 (0.0%)` : `24 AMBIGUOUS` (`unobserved_target_tokens` trap) | **24/24 (100.0%)** | **162.9 ms / 164.1 ms** |
 | **`gemma4:e4b`** | RTX 4070 (12 GB) | `24/24` directional (`193.4 ms` p50) | **24/24 directional (`23/24` decisive)** | **183.3 ms / 182.8 ms** |
 
 #### B. `MultiRubricGate(fail_fast=True)` & Async `warm_prefix`
@@ -487,14 +613,14 @@ Out-of-sample evaluation of joint post-temperature split-conformal calibration (
 
 | Layer-1 Model (RTX 4070) | Regime | Fitted $T_{\text{bin}}$ / $T_{\text{mc}}$ | Cutoffs ($\tau_{\text{reject}}, \tau_{\text{accept}}$) | L1 Fast-Path Rate | L1 Selective Error | Cascade Accuracy | Cascade Mean (Speedup vs 26B Judge) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`qwen2.5-coder:3b`** | Uncalibrated (`T=1.0`) | `1.0000` / — | `0.2000, 0.8500` | 8/24 (33.3%) | 0/24 (0.0%) | 24/24 (100.0%) | 790.1 ms (`1.24x`) |
-| **`qwen2.5-coder:3b`** | Temp-Only + Heuristic Cutoffs | `0.6135` / — | `0.2000, 0.8500` | 15/24 (62.5%) | **1/24 (4.2%)** | 23/24 (95.8%) | 483.8 ms (`2.02x`) |
+| **`qwen2.5-coder:3b`** | Uncalibrated (`T=1.0`) | `1.0000` / - | `0.2000, 0.8500` | 8/24 (33.3%) | 0/24 (0.0%) | 24/24 (100.0%) | 790.1 ms (`1.24x`) |
+| **`qwen2.5-coder:3b`** | Temp-Only + Heuristic Cutoffs | `0.6135` / - | `0.2000, 0.8500` | 15/24 (62.5%) | **1/24 (4.2%)** | 23/24 (95.8%) | 483.8 ms (`2.02x`) |
 | **`qwen2.5-coder:3b`** | **Unified `CalibrationProfile` ($\alpha=0.10$)** | **`0.6135` / `0.8399`** | **`0.1096, 0.9100`** | 10/24 (41.7%) | **0/24 (0.0%)** | **24/24 (100.0%)** | 685.0 ms (`1.43x`) |
-| **`llama3.2:3b`** | Uncalibrated (`T=1.0`) | `1.0000` / — | `0.2000, 0.8500` | 16/24 (66.7%) | **3/24 (12.5%!)** | 21/24 (87.5%) | 419.2 ms (`2.33x`) |
-| **`llama3.2:3b`** | Temp-Only + Heuristic Cutoffs | `1.8045` / — | `0.2000, 0.8500` | 5/24 (20.8%) | 0/24 (0.0%) | 24/24 (100.0%) | 893.6 ms (`1.09x`) |
+| **`llama3.2:3b`** | Uncalibrated (`T=1.0`) | `1.0000` / - | `0.2000, 0.8500` | 16/24 (66.7%) | **3/24 (12.5%!)** | 21/24 (87.5%) | 419.2 ms (`2.33x`) |
+| **`llama3.2:3b`** | Temp-Only + Heuristic Cutoffs | `1.8045` / - | `0.2000, 0.8500` | 5/24 (20.8%) | 0/24 (0.0%) | 24/24 (100.0%) | 893.6 ms (`1.09x`) |
 | **`llama3.2:3b`** | **Unified `CalibrationProfile` ($\alpha=0.10$)** | **`1.8045` / `1.2441`** | **`0.5167, 0.8281`** | **12/24 (50.0%)** | **1/24 (4.2%)** | **23/24 (95.8%)** | **522.7 ms (`1.87x`)** |
-| **`gemma4:e4b`** | Uncalibrated (`T=1.0`) | `1.0000` / — | `0.2000, 0.8500` | 23/24 (95.8%) | 0/24 (0.0%) | 24/24 (100.0%) | 224.8 ms (`4.35x`) |
-| **`gemma4:e4b`** | Temp-Only + Heuristic Cutoffs | `4.6404` / — | `0.2000, 0.8500` | 20/24 (83.3%) | 0/24 (0.0%) | 24/24 (100.0%) | 357.2 ms (`2.74x`) |
+| **`gemma4:e4b`** | Uncalibrated (`T=1.0`) | `1.0000` / - | `0.2000, 0.8500` | 23/24 (95.8%) | 0/24 (0.0%) | 24/24 (100.0%) | 224.8 ms (`4.35x`) |
+| **`gemma4:e4b`** | Temp-Only + Heuristic Cutoffs | `4.6404` / - | `0.2000, 0.8500` | 20/24 (83.3%) | 0/24 (0.0%) | 24/24 (100.0%) | 357.2 ms (`2.74x`) |
 | **`gemma4:e4b`** | **Unified `CalibrationProfile` ($\alpha=0.10$)** | **`4.6404` / `3.7126`** | **`0.1647, 0.2497`** | **24/24 (100.0%)** | **0/24 (0.0%)** | **24/24 (100.0%)** | **178.7 ms (`5.47x`)** |
 
 *Key empirical findings:*
@@ -514,7 +640,7 @@ Evaluated via 2-fold out-of-sample cross-validation across [`choice_and_score_12
 
 Loading the saved `CalibrationProfile` on an unseen BYO model alias in pure CPU mode (`2.09 GB RAM`, `0.0 GB VRAM`, confirmed zero lazy micro-probe calls across 12 stratified items from `MultiDomain-24`):
 - **`LogitGate(profile=...)`**: `5/12 (41.7%)` fast-path rate, **`0/12 (0.0%)` selective error**, mean latency **`2,126.7 ms`** (`2,265.0 ms` median).
-- **`JudgeGate(profile=..., max_tokens=160, think=False)`**: `9/12 (75.0%)` accuracy, mean latency `14,027.6 ms` (`14,491.6 ms` median) — **`6.6x` mean speedup** via `LogitGate` with portable profile reuse.
+- **`JudgeGate(profile=..., max_tokens=160, think=False)`**: `9/12 (75.0%)` accuracy, mean latency `14,027.6 ms` (`14,491.6 ms` median): **`6.6x` mean speedup** via `LogitGate` with portable profile reuse.
 
 ---
 
@@ -526,7 +652,7 @@ Evaluating `24` domain-matched `(good, bad)` pairs constructed from [`benchmarks
 
 | Model & Hardware | Regime (`max_tokens`) | Order-1 Slot-A Acc | Order-2 Slot-B Acc | Order Flip Rate | Symmetric Debiased Acc (Fwd / Rev) | Mean `\|Bias\|` (nats) | Mean / Median Latency |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`gemma4:26b`** (RTX 5090, `17.84 GB`) | Generative Critique (`max_tokens=160, think=False`, `50.0` tok) | `24/24 (100.0%)` | — | — | — | — | `432.2 ms / 381.0 ms` |
+| **`gemma4:26b`** (RTX 5090, `17.84 GB`) | Generative Critique (`max_tokens=160, think=False`, `50.0` tok) | `24/24 (100.0%)` | - | - | - | - | `432.2 ms / 381.0 ms` |
 | **`qwen2.5-coder:3b`** (RTX 4070, `2.09 GB`) | Single-Pass vs. **Pairwise `RankGate`** (`0` tok) | `24/24 (100.0%)` | **`0/24 (0.0%)`** | **`24/24 (100.0%)`** | **`24/24 (100.0%)` / `24/24 (100.0%)`** | `1.7272` | **`119.3 ms / 120.3 ms` (`3.62x`)** |
 | **`llama3.2:3b`** (RTX 4070, `2.33 GB`) | Single-Pass vs. **Pairwise `RankGate`** (`0` tok) | `24/24 (100.0%)` | **`2/24 (8.3%)`** | **`22/24 (91.7%)`** | **`24/24 (100.0%)` / `24/24 (100.0%)`** | `1.7603` | **`113.9 ms / 113.9 ms` (`3.79x`)** |
 | **`gemma4:e4b`** (RTX 4070, `3.21 GB`) | Single-Pass vs. **Pairwise `RankGate`** (`0` tok) | `24/24 (100.0%)` | `22/24 (91.7%)` | `2/24 (8.3%)` | **`24/24 (100.0%)` / `24/24 (100.0%)`** | `1.0255` | **`235.8 ms / 235.5 ms` (`1.83x`)** |
@@ -548,7 +674,7 @@ Across `16` valid-winner 4-candidate pools and `4` all-bad pools on RTX 4070 GPU
 
 Verified `0.0 GB` VRAM (`2.09 GB` system RAM via `/api/ps`, unloaded cleanly to `[]`):
 - **Pairwise `RankGate` (`max_tokens=1`, 2 swapped calls):** **`12/12 (100.0%)`**, mean **`5,849.2 ms`** (`5,734.6 ms` median, `7,067.7 ms` p95).
-- **CPU Generative Pairwise (`max_tokens=160, think=False`, `90.2` mean tok):** `12/12 (100.0%)`, mean `6,923.7 ms` (`6,730.4 ms` median, `7,530.3 ms` p95) — **`1.18x` mean speedup** without multi-token variance or answer-format parsing failures.
+- **CPU Generative Pairwise (`max_tokens=160, think=False`, `90.2` mean tok):** `12/12 (100.0%)`, mean `6,923.7 ms` (`6,730.4 ms` median, `7,530.3 ms` p95): **`1.18x` mean speedup** without multi-token variance or answer-format parsing failures.
 
 ---
 
@@ -560,12 +686,12 @@ Measured across `N = 1,000` sequential evaluations containing realistic PII payl
 
 | Gate & Sink Configuration | Median Latency | p95 Latency | Median Sink Overhead |
 | :--- | :---: | :---: | :---: |
-| `LogitGate(StubBackend)` — Telemetry Disabled | `0.0176 ms` | `0.0223 ms` | — |
-| `LogitGate(StubBackend)` — `MemoryTelemetrySink(privacy="full")` | `0.0296 ms` | `0.0900 ms` | **`+0.0120 ms` (`12.0 us`)** |
-| `LogitGate(StubBackend)` — `JsonlTelemetrySink(privacy="full")` | `0.0403 ms` | `0.1023 ms` | **`+0.0227 ms` (`22.7 us`)** |
-| `LogitGate(StubBackend)` — `JsonlTelemetrySink(privacy="redact_pii")` | `0.0546 ms` | `0.1240 ms` | **`+0.0370 ms` (`37.0 us`)** |
-| `ASTGate(syntax=True)` — Telemetry Disabled | `0.0130 ms` | `0.0136 ms` | — |
-| `ASTGate(syntax=True)` — `JsonlTelemetrySink(privacy="redact_pii")` | `0.0385 ms` | `0.1020 ms` | **`+0.0255 ms` (`25.5 us`)** |
+| `LogitGate(StubBackend)`: Telemetry Disabled | `0.0176 ms` | `0.0223 ms` | - |
+| `LogitGate(StubBackend)`: `MemoryTelemetrySink(privacy="full")` | `0.0296 ms` | `0.0900 ms` | **`+0.0120 ms` (`12.0 us`)** |
+| `LogitGate(StubBackend)`: `JsonlTelemetrySink(privacy="full")` | `0.0403 ms` | `0.1023 ms` | **`+0.0227 ms` (`22.7 us`)** |
+| `LogitGate(StubBackend)`: `JsonlTelemetrySink(privacy="redact_pii")` | `0.0546 ms` | `0.1240 ms` | **`+0.0370 ms` (`37.0 us`)** |
+| `ASTGate(syntax=True)` - Telemetry Disabled | `0.0130 ms` | `0.0136 ms` | - |
+| `ASTGate(syntax=True)`: `JsonlTelemetrySink(privacy="redact_pii")` | `0.0385 ms` | `0.1020 ms` | **`+0.0255 ms` (`25.5 us`)** |
 
 Even full linear-time PII scrubbing plus thread-locked `O_NOFOLLOW` JSONL disk persistence adds **`37.0 us`** per verdict (**`<0.04%`** of a typical `~100 ms` GPU Layer-1 check).
 
@@ -618,7 +744,7 @@ Evaluating standalone forced-binary models across the 6 unseen OOD families (`ca
 
 | Model & Hardware | Overall `OOD-96` Acc | Standard (`clean_pass` + `direct_fail`, `N=48`) | Counterfactual (`hard_pos` + `hard_neg`, `N=48`) | Quadrant Breakdown (`clean_pass` / `hard_pos` / `direct_fail` / `hard_neg`) | Score AUROC (`All / Std / Hard`) | Mean / Median Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`gemma4:26b` `JudgeGate`** (RTX 5090, `17.84 GB`, `think=False`) | **`94/96 (97.9%)`** | **`48/48 (100.0%)`** | **`46/48 (95.8%)`** | `100.0% / 91.7% / 100.0% / 100.0%` | — | `1,132.9 ms / 1,089.4 ms` |
+| **`gemma4:26b` `JudgeGate`** (RTX 5090, `17.84 GB`, `think=False`) | **`94/96 (97.9%)`** | **`48/48 (100.0%)`** | **`46/48 (95.8%)`** | `100.0% / 91.7% / 100.0% / 100.0%` | - | `1,132.9 ms / 1,089.4 ms` |
 | **`qwen2.5-coder:3b` `LogitGate`** (RTX 4070, `2.09 GB`, `0` tok) | `57/96 (59.4%)` | `34/48 (70.8%)` | `23/48 (47.9%)` | `41.7% / 16.7% / 100.0% / 79.2%` *(over-skeptical)* | `0.7218 / 0.8455 / 0.5590` | `133.5 ms / 110.1 ms` |
 | **`llama3.2:3b` `LogitGate`** (RTX 4070, `2.33 GB`, `0` tok) | `60/96 (62.5%)` | `34/48 (70.8%)` | `26/48 (54.2%)` | `91.7% / 87.5% / 50.0% / 20.8%` *(sycophantic)* | `0.7001 / 0.7899 / 0.5920` | `134.9 ms / 112.8 ms` |
 | **`gemma4:e4b` `LogitGate`** (RTX 4070, `3.21 GB`, `0` tok) | **`81/96 (84.4%)`** | **`44/48 (91.7%)`** | **`37/48 (77.1%)`** | `87.5% / 75.0% / 95.8% / 79.2%` *(balanced)* | **`0.9440 / 0.9878 / 0.8854`** | `174.1 ms / 171.6 ms` |
@@ -647,7 +773,7 @@ Each `CalibrationProfile` is fitted **exclusively on Split A** (`cal_distill_80.
 | | Split-A Conformal (`alpha = 0.05`) | `[0.0783, 0.9274]` (`9.4214`) | **`3/96 (3.12%)`** (`0 / 3`) | **`69.8%`** | **`94.8%`** | **`547.1 ms` (`2.07x`)** |
 
 - **Zero-Shot Risk Control Across Unseen Domains:** At `alpha = 0.05` (`<= 5.0%` target Layer-1 error), `llama3.2:3b` (`0.00%`), `gemma4:e4b` (`1.04%`, `57.3%` fast-path, `96.9%` cascade accuracy), and `qwen2.5:14b` (`3.12%`, `69.8%` fast-path, `94.8%` cascade accuracy, `2.07x` speedup) all hold empirical OOD Layer-1 error strictly below the `5.0%` nominal bound despite **zero domain overlap** between calibration and evaluation.
-- **When Exchangeability Breaks Under Severe Specialization Shift:** Code-specialized `qwen2.5-coder:3b` (`Split-A probe_auroc = 0.6963`, triggering the `AUROC < 0.70 -> T >= 1.0` regularizer) stays within budget at `alpha = 0.10` (`9.38% <= 10.0%`), but exhibits mild under-coverage (`9.38%` vs `5.0%`) at `alpha = 0.05` when shifted from 50% code/SQL onto 100% prose clinical/causal/regulatory domains — empirically motivating online covariate-shift monitoring and Gibbs–Candès Adaptive Conformal Inference (`v0.10.0`).
+- **When Exchangeability Breaks Under Severe Specialization Shift:** Code-specialized `qwen2.5-coder:3b` (`Split-A probe_auroc = 0.6963`, triggering the `AUROC < 0.70 -> T >= 1.0` regularizer) stays within budget at `alpha = 0.10` (`9.38% <= 10.0%`), but exhibits mild under-coverage (`9.38%` vs `5.0%`) at `alpha = 0.05` when shifted from 50% code/SQL onto 100% prose clinical/causal/regulatory domains, empirically motivating online covariate-shift monitoring and Gibbs-Candes Adaptive Conformal Inference (`v0.10.0`).
 
 #### D. Pure-CPU Stratified OOD Validation (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`, `OOD-24`)
 
@@ -695,7 +821,7 @@ Evaluated across all `96` unseen items of [`ood_generalization_96.json`](../benc
 | **Pass 1: Cold Live GPU Cascade** (populates `VerdictCache`) | `705.85 ms` | `194.39 ms` | `1,764.54 ms` | `67.76 s` | Baseline (`95/96` acc) | `1.0x` | `96` misses -> `96` puts |
 | **Pass 2: Warm In-Memory `OrderedDict` LRU** | **`0.1142 ms`** | **`0.1046 ms`** | **`0.1570 ms`** | **`0.0110 s`** | **`96/96 (100.0%)`** | **`6,180.8x`** | **`0` calls** (`67.70 s` & `6,662` tok saved) |
 | **Pass 3: Cold-RAM / Warm SQLite WAL Reload** (new instance) | **`0.1352 ms`** | **`0.1277 ms`** | **`0.1866 ms`** | **`0.0130 s`** | **`96/96 (100.0%)`** | **`5,220.8x`** | **`0` calls** (`96/96` disk hits) |
-| **Pass 4: 8-Thread Concurrent Read Stress** (`768` evals) | `0.1620 ms/8` | — | — | `0.1244 s` | `768/768` hits | **`6,174.9 evals/s`** | **`0` calls** |
+| **Pass 4: 8-Thread Concurrent Read Stress** (`768` evals) | `0.1620 ms/8` | - | - | `0.1244 s` | `768/768` hits | **`6,174.9 evals/s`** | **`0` calls** |
 
 #### C. Pure-CPU `StreamGuard` & `VerdictCache` Validation (`options={"num_gpu": 0}`, `qwen2.5-coder:3b`)
 
@@ -709,7 +835,7 @@ Evaluated across `16` stratified streaming trajectories (`4` per archetype) with
 
 #### A. Paired 120-Step Non-Stationary 4-Regime Evaluation (`drift_regimes_120.json`)
 
-Evaluated across [`benchmarks/data/drift_regimes_120.json`](../benchmarks/data/drift_regimes_120.json) (`120` ordered steps partitioned into 4 sequential 30-step regimes: **Regime 1 `stationary_in_domain`** `[0..29]` balanced code/SQL/RAG/ops, **Regime 2 `covariate_domain_shift`** `[30..59]` unseen clinical/causal/regulatory/unit domains, **Regime 3 `adversarial_hard_counterfactual_surge`** `[60..89]` `80%`-fail hard counterfactuals with inverted surface vocabulary, and **Regime 4 `stationary_recovery`** `[90..119]` return to baseline distribution). All models initialize from their pre-fitted **Split-A (`cal_distill_80.json`) `CalibrationProfile`** with fixed, untuned Gibbs–Candès parameters (`step_size=1.5, min_theta=0.0, abstain_theta=8.0, audit_sample_rate=0.25`) inside a `LogitGate >> JudgeGate(gemma4:26b)` cascade (standalone `gemma4:26b` RTX 5090 Teacher baseline: **`116/120 (96.7%)`**, `1,166.9 ms` mean / `1,101.6 ms` median latency):
+Evaluated across [`benchmarks/data/drift_regimes_120.json`](../benchmarks/data/drift_regimes_120.json) (`120` ordered steps partitioned into 4 sequential 30-step regimes: **Regime 1 `stationary_in_domain`** `[0..29]` balanced code/SQL/RAG/ops, **Regime 2 `covariate_domain_shift`** `[30..59]` unseen clinical/causal/regulatory/unit domains, **Regime 3 `adversarial_hard_counterfactual_surge`** `[60..89]` `80%`-fail hard counterfactuals with inverted surface vocabulary, and **Regime 4 `stationary_recovery`** `[90..119]` return to baseline distribution). All models initialize from their pre-fitted **Split-A (`cal_distill_80.json`) `CalibrationProfile`** with fixed, untuned Gibbs-Candes parameters (`step_size=1.5, min_theta=0.0, abstain_theta=8.0, audit_sample_rate=0.25`) inside a `LogitGate >> JudgeGate(gemma4:26b)` cascade (standalone `gemma4:26b` RTX 5090 Teacher baseline: **`116/120 (96.7%)`**, `1,166.9 ms` mean / `1,101.6 ms` median latency):
 
 | Layer-1 Student (RTX 4070) | Policy (`Split-A` Initialized, Zero Test Tuning) | Overall Cascade Acc | Overall L1 Risk (`Errors / 120`) | Per-Regime L1 Selective Risk (`R1 Stat / R2 Shift / R3 Adv / R4 Recov`) | L2 Escalation + Audit Rate | Mean Cascade Latency |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -770,7 +896,7 @@ To test whether distillation teaches transferable calibration and polarity invar
 | | **Default Relevance-Gated `DistillationBundle` (`overlap = 0.25`)** | `83.3%` (`91.7% / 75.0%`) | **`83.3% / 66.7%`** | **`0.9388`** | **`0.1146`** | **`9.4%` (`<=10%`)** | **`77.1%`** | **`89.6%`** |
 
 *Key scientific findings:*
-- **Why Unpenalized Intercept + 5-Feature Meta-Calibration Beats Scalar Temperature Scaling (`T`):** Scalar temperature scaling $p = \sigma(z_{\text{sym}} / T)$ leaves every forced-binary (`p >= 0.50`) prediction unchanged (`59.4% -> 59.4%` on `qwen2.5-coder:3b`, `63.5% -> 63.5%` on `llama3.2:3b`). Fitting `<1 KB` `LogitMetaCalibrator` on Teacher-labeled Split A shifts the skewed decision boundary zero-shot across all `6` unseen domains — lifting `qwen2.5-coder:3b` `hard_positive` recall **`20.8% -> 50.0% (+29.2 pp)`**, lifting `llama3.2:3b` `hard_negative` specificity **`25.0% -> 41.7% (+16.7 pp, overall +3.2 pp)`**, and improving `gemma4:e4b` Brier **`0.1418 -> 0.1146 (-19.2%)`** while bringing OOD Layer-1 selective error inside target `alpha = 0.10` (**`9.4% <= 10.0%`**, `Cascade` accuracy **`85.4% -> 89.6%`**).
+- **Why Unpenalized Intercept + 5-Feature Meta-Calibration Beats Scalar Temperature Scaling (`T`):** Scalar temperature scaling $p = \sigma(z_{\text{sym}} / T)$ leaves every forced-binary (`p >= 0.50`) prediction unchanged (`59.4% -> 59.4%` on `qwen2.5-coder:3b`, `63.5% -> 63.5%` on `llama3.2:3b`). Fitting `<1 KB` `LogitMetaCalibrator` on Teacher-labeled Split A shifts the skewed decision boundary zero-shot across all `6` unseen domains: lifting `qwen2.5-coder:3b` `hard_positive` recall **`20.8% -> 50.0% (+29.2 pp)`**, lifting `llama3.2:3b` `hard_negative` specificity **`25.0% -> 41.7% (+16.7 pp, overall +3.2 pp)`**, and improving `gemma4:e4b` Brier **`0.1418 -> 0.1146 (-19.2%)`** while bringing OOD Layer-1 selective error inside target `alpha = 0.10` (**`9.4% <= 10.0%`**, `Cascade` accuracy **`85.4% -> 89.6%`**).
 - **In-Rubric Gain vs. Off-Domain Few-Shot Pollution (`min_rubric_overlap = 0.25`):** On **in-rubric Split A** (`5`-fold out-of-fold with `exclude_exact=True`), matched `[CALIBRATION ANCHORS]` raise OOF AUROC on both `qwen2.5-coder:3b` (**`0.6936 -> 0.7283`**) and `gemma4:e4b` (**`0.9531 -> 0.9637`**). Conversely, force-injecting SQL/Python anchors (`min_rubric_overlap = 0.0`) into unrelated clinical and statistical `max_tokens=1` prompts distracts general instruction models (`gemma4:e4b` AUROC `0.9355 -> 0.8566`, `llama3.2:3b` `0.7027 -> 0.6243`) and inflates prompt-prefill latency. Gating anchor injection via Szymkiewicz–Simpson rubric token overlap (`min_rubric_overlap = 0.25` default) achieves **`100%` (`80/80`) in-rubric recall** and **`100%` (`96/96`) unseen-OOD abstention**, routing OOD rubrics automatically to `unanchored_meta_calibrator` with zero extra prompt tokens.
 
 #### B. Tier-B Architecture-Agnostic PEFT `all-linear` LoRA Compiler (`logitgate[distill]`)
@@ -838,12 +964,12 @@ Evaluated live via `benchmarks/external/run_external.py` (`seed=42`, $N=60$ per 
 
 ### 15. Summary: When to Use Layer 1 (`LogitGate`) vs. Escalate to Layer 2 (`JudgeGate`)
 
-- **Use Layer 1 (`LogitGate`) — First-Token Forward Pass ($O(1)$ Circuit Depth)**:
+- **Use Layer 1 (`LogitGate`): First-Token Forward Pass ($O(1)$ Circuit Depth)**:
   - **Semantic Rubric & Policy Compliance**: Factual groundedness against context, tone/safety compliance, PII/secret leak checks, and atomic requirement verification via `evaluate_batch`.
   - **Discrete Routing & Classification (`ChoiceGate`)**: Selecting downstream agent tools, intent buckets, or workflow branches in ~40–90 ms.
   - **Continuous Rubric Scoring (`ScoreGate`)**: Probability-weighted expected value scoring ($\mathbb{E}[S] = \sum s \cdot P(s)$) with symmetric scale reversal.
   - **Zero-Token Candidate Ranking & Best-of-$N$ Selection (`RankGate` & `BestOfNGate`)**: Comparing candidate completions across `pairwise`, `listwise`, `round_robin` (Hodge ranking + Condorcet residual), and `tournament` regimes with deterministic Layer-0 pruning and post-selection verification.
-- **Escalate to Layer 2 (`JudgeGate`) — Autoregressive Generation**:
+- **Escalate to Layer 2 (`JudgeGate`): Autoregressive Generation**:
   - **Multi-Step Deductive Reasoning**: Proof verification or multi-hop logic where conclusions depend on intermediate reasoning steps.
   - **Complex Symbolic Arithmetic**: Calculations requiring scratchpad calculation or token-by-token recurrence (or route deterministic math checks to Layer 0 `ASTGate` / `ContractGate`).
   - **Diagnostic Reporting**: When a human developer or logging pipeline needs an actionable explanation of *why* an artifact failed (or replay a CI failure locally via `logitgate explain`).

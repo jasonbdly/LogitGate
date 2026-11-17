@@ -1,241 +1,338 @@
-# Production Use Cases & Prompting Best Practices
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
 
-This document provides role-based setup guides, production patterns, and prompting best practices for **LogitGate**.
+# Production Use Cases & Execution Recipes
+
+This document provides role-based architecture guides, production execution recipes, and prompting best practices for **LogitGate v0.15.0+**. For introductory tutorials, see [Quickstart Recipes](./quick/quickstart_recipes.md); for weight distillation, see [Distillation & LoRA](./advanced/distillation_and_lora.md).
 
 ---
 
-## Role-Based Setup & Use-Case Guides
+## 1. CI/CD Final Merge Gate vs. Local Developer Inner Loop
 
-LogitGate is designed to fit directly into diverse software engineering and AI workflows across general and non-SDLC domains:
+In modern software delivery, **local iteration loops** and **CI/CD merge gates** optimize for different objective functions:
+- **Local Developer Loop**: Prioritizes sub-second iteration speed and low-overhead triage (~40–90 ms on GPU, ~160 ms 1-pass on CPU).
+- **CI/CD Merge Gate**: Prioritizes strict correctness, zero false passes, and reproducible failure snapshots without generating 400-token conversational LLM critiques on clear verdicts.
 
-### 1. CI/CD Final Merge Gate vs. Local Developer Inner Loop (Speed vs. Correctness)
-
-In production engineering, **local iteration** and **CI/CD merge gates** have different priorities:
-- **CI/CD is your final quality gate**: Correctness and minimizing false passes are paramount. However, you do not need to wait 5–20 seconds per test to generate a 400-token LLM essay when Layer 1 already reached a decisive, non-ambiguous conclusion (`P >= 0.85` pass or `P <= 0.20` fail).
-- **Local execution is your fast inner loop**: Developers iterating on code or live agent routers want ~40–90ms GPU feedback (or ~170ms 1-pass triage on CPU-only laptops).
-
-| Dimension | Local Inner-Loop / Live Agent Triage | CI/CD Final Merge Gate (Recommended) |
+| Dimension | Local Developer Inner Loop | CI/CD Merge Gate (Recommended) |
 | :--- | :--- | :--- |
-| **Primary Goal** | Fast developer feedback / low-latency routing | **High correctness & minimal false passes** without waiting for LLM essays on clear verdicts |
-| **Preset & Debiasing** | `preset="balanced"` on GPU (`~86ms`), or `preset="fast_triage"` (`1-pass`, `~170ms`) on CPU-only laptops | **`preset="balanced"` or `"strict"` (`symmetric_debiasing=True`)** — always cancel prior token bias |
-| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `MultiRubricGate`** (weakest-link aggregation, shared-prefix KV-cache reuse, avoids compound dilution) |
-| **Layer 2 (`JudgeGate`) Trigger** | Omit `JudgeGate`, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 CoT tokens on decisive pass *or* decisive fail; only invokes `JudgeGate` to adjudicate ambiguous borderline cases) |
+| **Primary Goal** | Real-time agent feedback / instant triage | **High correctness & zero false passes** without stalling runners on verbose essays |
+| **Preset & Debiasing** | `preset="balanced"` (GPU ~85 ms) or `preset="fast_triage"` (CPU 1-pass ~160 ms) | **`preset="balanced"` or `"strict"` (`symmetric_debiasing=True`)** - always cancel prior token bias |
+| **Multi-Part Rubrics** | Single rubric or `ChoiceGate` | **Atomic rubrics via `MultiRubricGate`** (weakest-link aggregation, shared-prefix KV reuse) |
+| **Layer 2 (`JudgeGate`) Trigger** | Omitted, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 CoT tokens on clear verdicts; invokes judge only when ambiguous) |
+| **Caching** | In-memory `VerdictCache(max_entries=500)` | **Persistent `VerdictCache(storage_path=".cache/logitgate.db")`** for instant re-runs |
+
+### Production CI Merge Gate Recipe
 
 ```python
-from logitgate import ASTGate, LogitGate, JudgeGate, OllamaBackend
+from logitgate import ASTGate, Cascade, JudgeGate, LogitGate
+from logitgate.backends import OllamaBackend
+from logitgate.cache import VerdictCache
 
-# Pure CPU CI Runner configuration (0 GPU, ~3.2 GB RAM for 3B models / ~9.4 GB RAM for gemma4:e4b)
+# 1. Configure backend for CPU CI runner (0 GPU, ~3.2 GB RAM for 3B / ~9.4 GB RAM for gemma4:e4b)
 backend = OllamaBackend(
-    model="gemma4:e4b",
-    options={"num_gpu": 0, "num_thread": 4},
+    model="qwen2.5-coder:14b",
+    options={"num_ctx": 4096},
     keep_alive="5m",
 )
 
-# Correctness-first CI Merge Gate:
-# - Layer 0 catches syntax/import errors in <0.1ms (no LLM call)
-# - Layer 1 runs full 2-pass symmetric debiasing (no CoT tokens on clear pass OR clear fail)
-# - Layer 2 ONLY fires when Layer 1 is ambiguous (0.20 < P < 0.85)
-ci_pipeline = (
-    ASTGate(syntax=True, forbidden_imports=["pickle", "subprocess"])
-    >> LogitGate(
-        rubric="Candidate code must be clean, secure, and handle edge cases.",
-        preset="balanced",  # Full 2-pass symmetric log-odds debiasing for CI correctness
-        save_on_fail=True,  # Saves .logitgate/failures/*.json on fail for local `logitgate explain`
-        backend=backend,
-    )
-    >> JudgeGate(
-        max_tokens=80,
-        trigger="on_ambiguous_only",  # Skip generative essays on non-ambiguous verdicts
-        backend=backend,
-    )
-)
+# 2. Wire deterministic cache to eliminate redundant CI re-evaluations
+cache = VerdictCache(path=".cache/logitgate.db", max_entries=5000)
 
-candidate_code = "def add_numbers(a: int, b: int) -> int:\n    return a + b\n"
-verdict = ci_pipeline.evaluate(candidate_code)
-assert verdict.passed, f"CI Gate Failed at {verdict.triggered_layer}: {verdict.reason}"
+# 3. Assemble 3-Layer Gate with deterministic context management
+with Cascade(
+    # Layer 0: Catch syntax and dangerous imports in <0.1ms without LLM calls
+    ASTGate(syntax=True, forbidden_imports=["pickle", "subprocess", "shutil"]),
+    # Layer 1: Full 2-pass symmetric debiasing (0 CoT tokens on clear pass OR clear fail)
+    LogitGate(
+        rubric="Candidate code must be clean, secure, type-hinted, and handle edge cases.",
+        preset="balanced",
+        save_on_fail=True,  # Freezes .logitgate/failures/*.json on failure
+        backend=backend,
+        cache=cache,
+    ),
+    # Layer 2: Fires ONLY when Layer 1 confidence is ambiguous (0.20 < P < 0.85)
+    JudgeGate(
+        max_tokens=100,
+        trigger="on_ambiguous_only",
+        backend=backend,
+        cache=cache,
+    ),
+) as ci_pipeline:
+    candidate_code = (
+        "def compute_interest(principal: float, rate: float, periods: int) -> float:\n"
+        "    if principal < 0 or rate < 0 or periods < 0:\n"
+        "        raise ValueError('Parameters must be non-negative')\n"
+        "    return principal * ((1 + rate) ** periods)\n"
+    )
+    verdict = ci_pipeline.evaluate(candidate_code)
+    assert verdict.passed, f"CI Gate Failed at {verdict.triggered_layer}: {verdict.reason}"
 ```
 
-- **Resource Footprint**: Runs in ~2.2–3.2 GB System RAM (`qwen2.5:3b` / `llama3.2:3b`) or ~9.4 GB System RAM (`gemma4:e4b`) with 0 VRAM overhead—fitting comfortably inside a standard 16 GB GitHub Actions (`ubuntu-latest`) VM.
-- **Cost Savings**: Runs on standard CPU CI runners without requiring \$0.50–\$2.00/hr GPU instances.
+### Reproducing CI Failures Locally (`VerdictSnapshot` & `logitgate explain`)
 
-#### Reproducing Non-Deterministic App Failures Locally (`VerdictSnapshot` & `logitgate explain`)
+When non-deterministic LLM applications fail in CI, re-running them locally often produces a different completion, making bugs difficult to reproduce.
 
-When testing non-deterministic LLM applications in CI using `trigger="on_ambiguous_only"` or `@check`, clear failures fail immediately at Layer 1 without generating a long critique in CI. However, if a developer re-runs their non-deterministic application locally to debug, the LLM may generate a different output, making reproduction difficult.
-
-LogitGate solves this with deterministic **Verdict Snapshots**:
-1. When a test fails in CI (with `LOGITGATE_SAVE_FAILURES=1` or `@check(save_snapshot=True)`), LogitGate freezes the exact candidate output, rubric, and telemetry to `.logitgate/failures/fail_<timestamp>_<test>_<id>.json` (and updates `.logitgate/failures/latest.json`).
-2. Developers can replay and diagnose the exact failure locally with a single CLI command without re-running their non-deterministic application:
+LogitGate solves this via **Deterministic Verdict Snapshots**:
+1. When a test fails in CI (with `save_on_fail=True` or `LOGITGATE_SAVE_FAILURES=1`), LogitGate freezes the exact candidate text, rubric, and telemetry to `.logitgate/failures/fail_<timestamp>_<id>.json` (updating `.logitgate/failures/latest.json`).
+2. Developers diagnose the exact failure locally with a single CLI command without re-running the application:
 
 ```bash
 # Replay and explain the latest failure with full System-2 reasoning
 logitgate explain
 
-# Or explain a specific failure snapshot with custom tokens
-logitgate explain .logitgate/failures/fail_20261102_150648_test_rag_a1b2c3d4.json --max-tokens 150
+# Or explain a specific snapshot with custom token limit
+logitgate explain .logitgate/failures/latest.json --max-tokens 150
 ```
 
-Programmatic replay and inspection via Python:
+Programmatic snapshot replay via Python:
+
 ```python
 from logitgate import VerdictSnapshot
 
-# Load frozen snapshot from CI
+# Load frozen snapshot generated during CI failure
 snapshot = VerdictSnapshot.load(".logitgate/failures/latest.json")
 
-# Re-run fast Layer-1 logit evaluation on the frozen candidate
+# Replay fast Layer-1 logit evaluation on the exact frozen candidate
 replay_verdict = snapshot.replay()
 
 # Or generate a deep Layer-2 diagnostic critique with reasoning enabled
 explanation = snapshot.explain(model="qwen2.5-coder:14b", think=True)
-print(explanation.reason)
+print(f"Diagnostic critique: {explanation.reason}")
 ```
 
 ---
 
-### 2. RAG & Chatbot Engineers (Hallucination & Groundedness Gating)
-Detect hallucinations and verify factual groundedness before streaming an answer to the end user:
+## 2. Grounded RAG & Hallucination Guardrails
+
+In Retrieval-Augmented Generation (RAG), verification must ensure answers are strictly supported by retrieved context documents without hallucinations.
+
+LogitGate provides dedicated `context` and `query` parameters on `LogitGate` and `evaluate()`. These place reference documents into the prompt prefix ahead of the candidate answer, preserving KV-cache reuse while ensuring unidirectional causal attention focuses on the grounding source:
+
 ```python
 from logitgate import ContractGate, LogitGate
+from logitgate.backends import OllamaBackend
 
-retrieved_docs = "LogitGate v0.1.0 requires Python 3.10 or higher and supports Ollama, vLLM, and OpenAI."
-generated_response = "LogitGate v0.1.0 supports Python 3.10+ and runs on Ollama, vLLM, and OpenAI."
+backend = OllamaBackend(model="qwen2.5-coder:14b")
 
-# Layer 0 ensures reasonable length bounds in 0ms; Layer 1 verifies grounding in ~45ms
-rag_gate = (
+# Layer 0 verifies reasonable character bounds; Layer 1 verifies factual grounding
+rag_verifier = (
     ContractGate(min_length=20, max_length=2000)
     >> LogitGate(
-        rubric="Does the candidate answer strictly contain only facts asserted in the context snippet?",
-        preset="balanced",
+        rubric="Does the candidate answer strictly contain only facts asserted in the reference context?",
+        preset="strict",  # 90% confidence threshold for high-stakes grounding
+        backend=backend,
     )
 )
 
-context_payload = f"[CONTEXT]\n{retrieved_docs}\n\n[ANSWER]\n{generated_response}"
-verdict = rag_gate.evaluate(context_payload)
+retrieved_context = (
+    "LogitGate v0.15.0 introduces ToolCallGate for agent sandboxing, GeminiBackend for zero-dependency "
+    "Google Gemini REST integration, and capability-aware sidecar routing for models lacking logprobs."
+)
+user_query = "What features were added in LogitGate v0.15.0?"
+generated_answer = "LogitGate v0.15.0 added ToolCallGate, GeminiBackend, and sidecar routing."
+
+# Pass context and query directly into evaluate()
+verdict = rag_verifier.evaluate(
+    generated_answer,
+    context=retrieved_context,
+    query=user_query,
+)
 
 if not verdict.passed:
     # Trigger fallback or retrieve secondary sources
-    generated_response = "I cannot verify that from the documentation. Let me connect you with an agent."
+    generated_answer = "I cannot verify that answer against official documentation."
+print(f"Groundedness Verified: {verdict.passed} (P = {verdict.probability:.2f})")
 ```
 
 ---
 
-### 3. AI Agent & LangGraph Builders (Fast Guardrails & Routing)
-Enforce structured JSON output contracts in **<0.1ms** and perform ~40–90ms conditional routing:
+## 3. Autonomous AI Agent & Tool-Call Sandboxing (`ToolCallGate`)
+
+Autonomous agents frequently execute tools across APIs, databases, and local operating systems. Indirect prompt injection attacks or hallucinations can cause agents to emit catastrophic parameters: SSRF requests against cloud metadata endpoints (`169.254.169.254`), path traversal outside the project directory, or destructive SQL commands.
+
+`ToolCallGate` provides a dual-stage deterministic and semantic barrier:
+
 ```python
-from pydantic import BaseModel
-from logitgate import ContractGate, ChoiceGate
+from logitgate import Cascade, JudgeGate, ToolCallGate
+from logitgate.backends import OllamaBackend
 
-class ToolCallPayload(BaseModel):
-    tool_name: str
-    arguments: dict
-    confirm_action: bool
+backend = OllamaBackend(model="qwen2.5-coder:14b")
 
-# Layer 0 validates JSON schema in <0.1ms; Layer 1 routes intent in ~40-90ms
-agent_router = (
-    ContractGate(json_schema=ToolCallPayload)
-    >> ChoiceGate(
-        question="Select the appropriate downstream handler for this user intent:",
-        options={
-            "A": "Database Query Execution (read-only safe queries)",
-            "B": "Account Management & Authentication changes",
-            "C": "General Customer Q&A Response",
-        },
-    )
+# Configure hybrid ToolCallGate:
+# - Stage 0 (<0.1ms): Blocks path traversal, SSRF against metadata/internal IPs, destructive SQL
+# - Stage 1 (~45ms): Assesses semantic alignment against user intent
+tool_guard = ToolCallGate(
+    allowed_tools=["fetch_url", "read_file", "execute_sql"],
+    allowed_roots=["/home/user/workspace/app"],
+    block_path_traversal=True,
+    block_ssrf=True,
+    block_destructive_commands=True,
+    block_destructive_sql=True,
+    check_intent=True,
+    user_intent="Retrieve user profile data for user_id 42",
+    backend=backend,
 )
 
-agent_raw_json = '{"tool_name": "run_sql", "arguments": {"query": "SELECT count(*) FROM users"}, "confirm_action": false}'
-verdict = agent_router.evaluate(agent_raw_json)
-next_node = {"A": "db_node", "B": "auth_node", "C": "qa_node"}[verdict.choice]
+# Connect to Cascade for escalation if semantic intent is ambiguous
+agent_firewall = Cascade(
+    tool_guard,
+    JudgeGate(trigger="on_ambiguous_only", backend=backend),
+)
+
+# Safe tool call:
+safe_call = {
+    "name": "execute_sql",
+    "arguments": {"query": "SELECT username, email FROM users WHERE id = 42;"},
+}
+assert agent_firewall.evaluate(safe_call).passed
+
+# Malicious SSRF call: Blocked immediately at Stage 0 in <0.05ms (0 LLM calls)
+ssrf_call = {
+    "name": "fetch_url",
+    "arguments": {"url": "http://169.254.169.254/latest/meta-data/"},
+}
+verdict_blocked = agent_firewall.evaluate(ssrf_call)
+assert not verdict_blocked.passed
+print(f"Blocked malicious tool call: {verdict_blocked.reason}")
 ```
 
 ---
 
-### 4. QA & Evaluation Engineers (Pytest & Multi-Criteria Rubrics)
-Unrecognized Bring-Your-Own (BYO) models automatically run lazy task-separated calibration on their first live `.evaluate()` / `.aevaluate()` call (`LOGITGATE_AUTO_CALIBRATE=1`), while `logitgate calibrate` pre-computes or custom-fits profiles ahead of time for CI warm starts:
-```bash
-# Pre-calibrate and cache your model's binary + multiclass temperatures offline
-logitgate calibrate --backend "ollama://localhost:11434" --model "qwen2.5:14b"
+## 4. Real-Time Mid-Stream Token Guardrails (`StreamGuard`)
+
+Post-hoc verification waits for an upstream generator to finish producing 100% of its tokens before running a check. On a 500-token response, this wastes compute on toxic or violating responses, delays time-to-first-token (TTFT), and risks leaking unsafe tokens to the client.
+
+`StreamGuard` (`logitgate.streaming`) wraps synchronous (`Iterable`) and asynchronous (`AsyncIterable`) token streams:
+
+![StreamGuard Mid-Stream Abort](./assets/stream_guard_abort.svg)
+
+- **Clause-Aligned Stride Scheduling**: Checkpoints trigger every `stride_chars` characters, waiting up to `max_wait_chars` for a natural clause boundary (`.`, `!`, `?`, `\n`, `}`, `;`) to avoid evaluating mid-word fragments.
+- **Delivery Modes**:
+  - `delivery="optimistic"`: Yields tokens immediately with zero buffering latency, aborting and canceling the upstream generator via `.close()` / `await .aclose()` as soon as a violation triggers, saving **40%–50%+** of downstream tokens.
+  - `delivery="buffered"`: Holds tokens in a bounded window, flushing them to the client only when a checkpoint returns `passed=True`, guaranteeing **0% violating token leakage**.
+
+### Asynchronous Stream Guarding Recipe
+
+```python
+import asyncio
+from typing import AsyncIterable
+from logitgate import LogitGate
+from logitgate.backends import OllamaBackend
+from logitgate.streaming import aguard_stream
+
+async def mock_streaming_llm() -> AsyncIterable[str]:
+    chunks = [
+        "To configure the database, ",
+        "execute the following shell command: ",
+        "rm -rf / --no-preserve-root. ",
+        "This will reset your system environment completely.",
+    ]
+    for chunk in chunks:
+        await asyncio.sleep(0.05)
+        yield chunk
+
+async def run_stream() -> None:
+    backend = OllamaBackend(model="qwen2.5-coder:14b")
+    gate = LogitGate("Ensure response does not recommend destructive system commands.", backend=backend)
+
+    # Wrap the generator in StreamGuard
+    guarded = aguard_stream(
+        mock_streaming_llm(),
+        gate,
+        stride_chars=30,
+        delivery="buffered",  # 0% violating token leakage
+    )
+
+    try:
+        async for safe_token in guarded:
+            print(safe_token, end="", flush=True)
+    except Exception as exc:
+        print(f"\n[STREAM INTERCEPTED & HALTED]: {exc}")
+
+if __name__ == "__main__":
+    asyncio.run(run_stream())
 ```
+
+---
+
+## 5. Heterogeneous Model Routing for Non-Logprob APIs (`on_unsupported_logprobs="sidecar"`)
+
+Frontier proprietary models (Anthropic Claude 3.5 Sonnet, OpenAI `o3-mini`) do not expose raw token logprobs. If an application uses Claude as its primary generator, LogitGate can route Layer-1 logprob verification to a local sidecar model while using Claude for Layer-2 generative critiques.
+
+```python
+from logitgate import Cascade, JudgeGate, LogitGate
+from logitgate.backends import OllamaBackend, OpenAICompatBackend
+
+# Primary backend: High-capability generative model lacking logprobs
+primary_backend = OpenAICompatBackend(
+    model="o3-mini",
+    api_key="your-api-key",
+    base_url="https://api.openai.com/v1",
+)
+
+# Sidecar backend: Local compact model providing fast first-token logprobs
+local_sidecar = OllamaBackend(model="qwen2.5-coder:14b")
+
+# Configure Cascade with transparent sidecar offloading:
+with Cascade(
+    LogitGate(
+        rubric="Is the financial report accurate and free of arithmetic discrepancies?",
+        backend=primary_backend,
+        on_unsupported_logprobs="sidecar",  # Routes Layer 1 to local sidecar!
+        sidecar_backend=local_sidecar,
+    ),
+    JudgeGate(
+        trigger="on_ambiguous_only",  # Invokes o3-mini only when ambiguous
+        backend=primary_backend,
+    ),
+) as hybrid_pipeline:
+    candidate_report = "Revenue increased by 15% from $10M to $11.5M. Net margin was 20% ($2.3M)."
+    verdict = hybrid_pipeline.evaluate(candidate_report)
+    print(f"Passed: {verdict.passed} (Layer: {verdict.triggered_layer})")
+```
+
+---
+
+## 6. Atomic Multi-Criteria Evaluation (`MultiRubricGate`)
+
+When an artifact must satisfy several independent requirements (e.g. style, security, type safety, test coverage), cramming all criteria into a single compound prompt causes logprob dilution.
+
+`MultiRubricGate` executes atomic rubrics against a shared candidate context using weakest-link aggregation:
 
 ```python
 from logitgate import MultiRubricGate
+from logitgate.backends import OllamaBackend
+
+backend = OllamaBackend(model="qwen2.5-coder:14b")
 
 rubrics = [
-    "Is the customer support reply polite and professional?",
-    "Does the assistant enforce multi-factor authentication before updating credentials?",
-    "Does the response adhere to the company return and refund policy?",
+    "Candidate code is strictly formatted according to PEP 8 standards.",
+    "Candidate code contains comprehensive Google-style docstrings.",
+    "Candidate code includes complete, non-Any Python type annotations.",
+    "Candidate code does not perform unchecked file or shell operations.",
 ]
 
-# Atomic multi-rubric gate with weakest-link aggregation:
 evaluator = MultiRubricGate(
-    rubrics,
-    logit_temperature="auto",  # Automatically uses cached calibrated temperature
+    rubrics=rubrics,
+    backend=backend,
+    fail_fast=True,  # Short-circuits remaining rubrics on first failure
 )
 
-support_transcript = (
-    "Customer: Please update my account email and process a refund for order #402.\n"
-    "Agent: I would be happy to help! Before I can update your email, please complete "
-    "the 2FA verification sent to your phone. Your refund for order #402 has been initiated "
-    "per our 30-day return policy."
+sample_code = (
+    "def add_items(items: list[int]) -> int:\n"
+    "    '''Sums all integers in the provided list.\n\n"
+    "    Args:\n"
+    "        items: List of integers.\n\n"
+    "    Returns:\n"
+    "        The computed integer sum.\n"
+    "    '''\n"
+    "    return sum(items)\n"
 )
 
-# Evaluates all 3 rubrics in a single batch reusing the shared prompt prefix in KV-cache
-verdict = evaluator(support_transcript)
+# Evaluates all rubrics, reusing the shared candidate prefix in GPU KV-cache
+verdict = evaluator.evaluate(sample_code)
 print(f"Overall Passed: {verdict.passed} | Reason: {verdict.reason}")
-
-# Or inspect individual per-rubric verdicts:
-for r, v in zip(rubrics, evaluator.evaluate_each(support_transcript)):
-    print(f"[{'PASS' if v.passed else 'FAIL'}] P={v.probability:.2f} | {r}")
 ```
 
 ---
 
-## Best Practices: Prompting, Context Length, & Model Sizing
-
-### 1. Document Context Length & When to Chunk
-- **Zero-Chunking Sweet Spot (Up to 16,000–32,000 Tokens)**: As shown in our needle-in-a-haystack benchmarks in [`benchmarks.md`](benchmarks.md), modern causal transformers (`gemma4`, `qwen2.5`) maintain strong probability separation ($\Delta P > 0.993$) up to **16,000+ tokens** without manual chunking, and sliding-window/MoE architectures scale cleanly to **32k–64k tokens** in VRAM.
-- **When to Chunk (50,000+ Token Codebases or Books)**: If a document exceeds your model's configured context window (`num_ctx`) or exceeds 32k–50k tokens on a dense attention model, split the document into logical sections or files and call `gate.evaluate(chunk)` on each section independently.
-- **Multi-Rubric KV Sharing (`evaluate_batch`)**: `gate.evaluate_batch(candidate, rubrics)` is designed for evaluating **multiple atomic rubrics against a single candidate artifact** (sharing the `[CANDIDATE ARTIFACT]` root prefix across all $K$ rubrics in the KV-cache), rather than evaluating multiple documents against one rubric.
-
-### 2. Best Practice vs. Anti-Pattern: Candidate-Prefix Isolated Batching (`evaluate_batch`)
-
-When evaluating complex systems, users often wonder whether to write one large prompt or multiple smaller ones, and how to execute them efficiently:
-
-#### The Anti-Patterns
-1. **Monolithic Compound Rubrics**: Cramming multiple orthogonal requirements into a single giant rubric prompt (e.g. *"Ensure valid syntax, Google docstrings, full type hints, no mutable defaults, and SQL safety"*). When a candidate complies with 4 of 5 requirements but subtly violates 1 (e.g. an omitted return type annotation on a typed function), first-token logits experience signal dilution, resulting in $P \approx 0.82–0.89$ which can either slip through as an uninspected false pass or trigger inconsistent escalation.
-2. **Monolithic Prompt-Prefix Concatenation**: Concatenating all $K$ rubrics together into a single shared prompt block (`[EVALUATION RUBRICS]\nRubric #1...\nRubric #K...`) preceding the candidate. When evaluating 50 to 500 rubrics, this injects thousands of rubric tokens before the candidate artifact, blowing the context window on lightweight models and causing severe **cross-rubric attention contamination** (attention heads judging Rubric #1 become distracted by text in Rubric #47).
-
-#### The Best Practice: Candidate-Prefix Isolated Batching
-LogitGate solves both problems via **Candidate-Prefix Isolated Batching** (`compile_batch_binary_prompt(..., query_first=False)`):
-
-```mermaid
-flowchart TD
-    prefix["Token 0: Shared Static Prefix (95–99% of prompt tokens)<br/><b>[CANDIDATE ARTIFACT]</b> {candidate}<br/><i>(KV-Cached ONCE in Attention Memory)</i>"]
-    
-    prefix --> S1["Isolated Suffix #1<br/>Rubric #1<br/>Mapping P1 / P2"]
-    prefix --> S2["Isolated Suffix #2<br/>Rubric #2<br/>Mapping P1 / P2"]
-    prefix --> SK["Isolated Suffix #K<br/>Rubric #K<br/>Mapping P1 / P2"]
-```
-
-- **Candidate Anchored at Token 0**: The candidate artifact (500 to 10,000+ tokens) forms the shared static root prefix across all $K$ rubrics and both forward/reverse debiasing passes ($2K$ forward passes total).
-- **100% Suffix Rubric Isolation**: Each rubric is appended in complete isolation at the very end of the prompt. It never sees or attends to any other rubric.
-- **Zero Cross-Rubric Attention Contamination**: Because causal attention is strictly unidirectional, the candidate context cannot attend forward to future tokens. The candidate representation is computed and KV-cached once. Each isolated rubric query suffix only attends back to the candidate document.
-- **Zero Context Bloat & Linear Scalability**: Evaluating 2 rubrics or 500 rubrics requires the exact same context window length ($|\text{candidate}| + |\text{rubric}_k| + |\text{mapping}|$).
-- **Near-Instant Execution**: Across all $2K$ forward passes, inference engines (vLLM, Ollama, llama.cpp) hit the prefix cache for 95–99% of total tokens, dropping per-rubric warm latency to ~20–40ms.
-
-### 3. Defense-in-Depth: Combining Temperature Calibration with Strict Operational Thresholds
-
-A common question in production gating is whether temperature calibration makes strict confidence thresholds redundant, or vice versa. In LogitGate, they serve two distinct, complementary functions:
-
-1. **Temperature Calibration ($T$) Repairs Intrinsic Model Distortion**:
-   Different model families have distinct confidence distributions. An uncalibrated model might output a raw probability of $0.93$ when its actual empirical precision on that task is only $75\%$, or conversely remain underconfident ($P=0.79$) on unambiguous passes. Post-hoc temperature scaling ($\bar{L} / T$) rescales the symmetric log-odds so that a reported $P=0.85$ mathematically corresponds to an empirical 85% probability of correctness. Calibration normalizes the meaning of confidence across diverse models (`gemma4:e4b`, `qwen2.5:14b`, `llama3`).
-2. **Operational Thresholds (`pass_threshold`, `fail_threshold`) Enforce Risk Tolerance**:
-   Operational thresholds govern the system's escalation policy (the width of the ambiguity/escalation band):
-   - **`preset="fast_triage"` (`pass_threshold=0.80`, `fail_threshold=0.20`)**: Maximizes short-circuiting speed for local developer loops, agent routing, and high-throughput classification.
-   - **`preset="strict"` (`pass_threshold=0.90`, `fail_threshold=0.25`)**: Enforces defense-in-depth for mission-critical CI merge gates, financial transactions, or automated security reviews. Any candidate with less than 90% calibrated confidence is classified as `AMBIGUOUS` and escalated to Layer 2 (`JudgeGate`) for full step-by-step System-2 diagnostic critique.
-
-**Conclusion**: Temperature calibration ensures that $P=0.90$ actually means 90% certainty; strict operational thresholds ensure that your pipeline never bypasses System-2 reasoning on anything less than 90% certainty.
-
-### 4. Escalation Mechanics: How Symmetric Log-Odds Handle Model Uncertainty
-- **Decisive Signal**: When a model is confident that an artifact passes, both forward ($L_1 = s + b$) and reverse ($L_2 = s - b$) log-odds are positive, yielding calibrated probability $P \ge 0.85$ (fast-path pass, no Layer 2 critique).
-- **Decisive Failure**: When an artifact clearly violates the rubric, both forward and reverse log-odds are negative, yielding $P \le 0.20$ (decisive failure).
-- **Ambiguity & Escalation**: When small models (e.g. 3B–4B) or complex edge cases yield borderline log-odds (between 0.20 and 0.85), LogitGate flags the item as `AMBIGUOUS` and triggers Layer 2 (`JudgeGate`) to generate an autoregressive critique.
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)

@@ -18,7 +18,9 @@ def _sanitize_nonce(boundary_nonce: str | None) -> str:
 def _format_bounded_block(content: str, tag: str, safe_nonce: str) -> str:
     if not safe_nonce:
         return content
-    return f"<{tag}_{safe_nonce}>\n{content}\n</{tag}_{safe_nonce}>"
+    closing_tag = f"</{tag}_{safe_nonce}>"
+    escaped = content.replace(closing_tag, f"<\\/{tag}_{safe_nonce}>")
+    return f"<{tag}_{safe_nonce}>\n{escaped}\n{closing_tag}"
 
 
 def render_reference_context(context: str | Sequence[str] | None) -> str:

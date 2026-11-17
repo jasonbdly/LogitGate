@@ -348,10 +348,6 @@ class Cascade(BaseGate):
         for g in self.gates:
             if hasattr(g, "close") and callable(g.close):
                 g.close()
-            if self._owns_gates and hasattr(g, "backend"):
-                b = getattr(g, "backend", None)
-                if b is not None and hasattr(b, "close") and callable(b.close):
-                    b.close()
         for b in getattr(self, "_replay_extra_backends", ()):
             if hasattr(b, "close") and callable(b.close):
                 b.close()
@@ -380,13 +376,6 @@ class Cascade(BaseGate):
                 await g.aclose()
             elif hasattr(g, "close") and callable(g.close):
                 g.close()
-            if self._owns_gates and hasattr(g, "backend"):
-                b = getattr(g, "backend", None)
-                if b is not None:
-                    if hasattr(b, "aclose") and callable(b.aclose):
-                        await b.aclose()
-                    elif hasattr(b, "close") and callable(b.close):
-                        b.close()
         for b in getattr(self, "_replay_extra_backends", ()):
             if hasattr(b, "aclose") and callable(b.aclose):
                 await b.aclose()
