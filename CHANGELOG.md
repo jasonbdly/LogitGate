@@ -7,15 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.14.0] - 2026-11-16
+## [0.15.0] - 2026-11-16
 
 ### Added
-
-### Changed
-
-### Fixed
-
----
+- **First-Class Prefix-Cached Grounded RAG Evaluation (`context` & `query`):** Added `render_reference_context()` (`str` or `Sequence[str]` of retrieved chunks) and optional `context` and `query` parameters across `compile_binary_prompt()`, `compile_cot_binary_prompt()`, `compile_batch_binary_prompt()`, `compile_choice_prompt()`, and `compile_score_prompt()`, as well as constructors and per-call `evaluate()` / `aevaluate()` overrides on `LogitGate`, `ChoiceGate`, `ScoreGate`, `MultiRubricGate`, `JudgeGate`, and `Cascade`. Wraps retrieved sources in `<reference_context_{nonce}>` and user questions in `<user_query_{nonce}>` inside the shared KV-cache prefix before `<candidate_{nonce}>`, isolates distinct contexts/queries in `VerdictCache`, preserves them across `VerdictSnapshot.replay()` / `explain()`, and adds `--context`, `--context-file`, and `--query` to `logitgate eval` and `@check`.
+- **Pre-Execution Agent & MCP Tool Guard (`ToolCallGate`, `logitgate.gates.tool_call_gate`):** Added `ToolCallGate`, `NormalizedToolCall`, `ToolCallFailureCode`, and `normalize_tool_calls()` (re-exported at `logitgate` and `logitgate.gates`), plus `logitgate eval --tool-call` (`--allowed-tool`, `--allowed-root`, `--allowed-host`). Unpacks OpenAI `tool_calls` / `function_call`, MCP `CallToolRequest` (`tools/call`), Anthropic `tool_use`, and transcript payloads; validates JSON Schema contracts and blocks path traversal, SSRF / cloud-metadata / private-IP targets, destructive shell commands, and destructive/tautology SQL in sub-millisecond Stage-0 checks (short-circuiting `Cascade` even under `JudgeGate(trigger="adjudicate")`) before optional Stage-1 semantic intent alignment (`check_intent=True`).
+- **Capability-Aware Logprob Fallback Routing & Native `GeminiBackend` (`logitgate.backends.gemini`):** Added zero-dependency `GeminiBackend` (`gemini://` URI scheme, `x-goog-api-key` header auth, `responseLogprobs` clamping `[1, 20]`, automatic `thinkingBudget=0` on Gemini 2.5 first-token reads, and thought-part filtering in `generate()`), `UnsupportedLogprobsError(BackendError)` detection in `OpenAICompatBackend` (for reasoning models and providers that reject or strip `logprobs`), `StubBackend(supports_logprobs=False)` (`stub://no-logprobs`), and gate-level `on_unsupported_logprobs="raise" | "escalate" | "sidecar"` + `sidecar_backend` across `LogitGate`, `ChoiceGate`, `ScoreGate`, `MultiRubricGate`, `Cascade`, `@check`, and `logitgate eval`.
 
 ## [0.14.0] - 2026-11-16
 
