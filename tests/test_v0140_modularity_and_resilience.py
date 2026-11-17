@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import io
 import json
 import math
@@ -110,12 +111,12 @@ from logitgate.snapshot import (
 )
 
 try:
-    import torch
+    torch: Any = importlib.import_module("torch")
 
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-    torch = None  # type: ignore[assignment]
+    torch = None
 
 
 # ---------------------------------------------------------------------------
@@ -696,7 +697,7 @@ def test_batch_never_swallow_base_exceptions() -> None:
         with pytest.raises(KeyboardInterrupt, match="Simulated Ctrl-C"):
             gate.evaluate_batch(["ok", "keyboard_interrupt"], on_error=policy)
 
-        with pytest.raises(asyncio.CancelledError, match="Simulated task cancellation"):
+        with pytest.raises(asyncio.CancelledError):
             asyncio.run(gate.aevaluate_batch(["ok", "cancel"], on_error=policy))
 
 

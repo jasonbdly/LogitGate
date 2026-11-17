@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import math
 import sys
@@ -46,11 +47,11 @@ from logitgate.exceptions import (
 from logitgate.hardware.memory_guard import PCIeSpilloverGuard, VRAMWatermarkStatus
 
 try:
-    import torch
+    torch: Any = importlib.import_module("torch")
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-    torch = None  # type: ignore[assignment]
+    torch = None
 
 
 # ===========================================================================

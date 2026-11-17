@@ -18,6 +18,7 @@ Targets 12 modules:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import math
 import os
@@ -33,11 +34,10 @@ import pydantic
 import pytest
 
 try:
-    import torch
-
+    torch: Any = importlib.import_module("torch")
     HAS_TORCH = True
 except ImportError:
-    torch = None  # type: ignore[assignment]
+    torch = None
     HAS_TORCH = False
 
 import logitgate.telemetry.distill as distill_telemetry

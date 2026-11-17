@@ -313,22 +313,17 @@ def run_full_check(root: Path, *, allow_major_bump: bool = False) -> bool:
     if not run_command(["uv", "run", "pytest"], root, "Pytest test suite (full environment)"):
         return False
 
-    slim_check_code = (
-        "import sys, pytest\n"
-        "BLOCKED = {'torch', 'deepeval', 'langgraph', 'llama_cpp', 'transformers', 'peft', 'safetensors', 'huggingface_hub', 'opentelemetry'}\n"
-        "class BlockOptionalImports:\n"
-        "    def find_spec(self, fullname, path, target=None):\n"
-        "        top = fullname.split('.')[0]\n"
-        "        if top in BLOCKED:\n"
-        "            raise ModuleNotFoundError(f\"No module named '{top}'\", name=top)\n"
-        "        return None\n"
-        "sys.meta_path.insert(0, BlockOptionalImports())\n"
-        "raise SystemExit(pytest.main(['tests', '-q']))\n"
-    )
     if not run_command(
-        ["uv", "run", "python", "-c", slim_check_code],
+        ["uv", "run", "--isolated", "--extra", "test", "--with", "mypy", "mypy", "src/logitgate", "tests"],
         root,
-        "Pytest test suite (slim CI environment without optional extras)",
+        "Mypy type check (isolated slim CI environment without optional extras)",
+    ):
+        return False
+
+    if not run_command(
+        ["uv", "run", "--isolated", "--extra", "test", "pytest", "tests", "-q"],
+        root,
+        "Pytest test suite (isolated slim CI environment without optional extras)",
     ):
         return False
 

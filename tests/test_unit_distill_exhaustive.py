@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import os
@@ -11,11 +12,11 @@ import pytest
 from pydantic import ValidationError
 
 try:
-    import torch
-    import transformers
+    torch: Any = importlib.import_module("torch")
+    transformers: Any = importlib.import_module("transformers")
 except ImportError:
-    torch = None  # type: ignore[assignment]
-    transformers = None  # type: ignore[assignment]
+    torch = None
+    transformers = None
 
 _TorchModule: Any = torch.nn.Module if torch is not None else object
 

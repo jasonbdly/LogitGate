@@ -14,6 +14,7 @@ Targets all 8 modules in Wave 2C:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -32,10 +33,11 @@ from logitgate.hardware.memory_guard import PCIeSpilloverGuard, VRAMWatermarkSta
 from logitgate.models import DecisionStatus, Verdict
 from logitgate.streaming import StreamGuard
 
+dory_pytorch: Any = None
 try:
-    import torch
+    torch: Any = importlib.import_module("torch")
 
-    from logitgate.backends import dory_pytorch
+    from logitgate.backends import dory_pytorch as _dory_mod
     from logitgate.backends.dory_pytorch import (
         DoryAttention,
         DoryForCausalLM,
@@ -44,11 +46,11 @@ try:
         load_dory_model,
         slerp_alpha,
     )
+    dory_pytorch = _dory_mod
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-    torch = None  # type: ignore[assignment]
-    dory_pytorch = None  # type: ignore[assignment]
+    torch = None
 
 
 # ============================================================================

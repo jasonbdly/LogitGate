@@ -324,12 +324,12 @@ def load_dory_model(
                 state_dict[f"layers.{i}.suv_up"] = f.get_tensor(prefix + "mixer.suv_up")
 
     model.load_state_dict(state_dict, strict=True)
-    model = model.to(device)
-    model.eval()
+    moved_model: DoryForCausalLM = model.to(device)
+    moved_model.eval()
     elapsed = time.perf_counter() - t0
     import logging
 
     logging.getLogger(__name__).info(
         "Loaded Dory model (%d loops) onto %s in %.2fs", num_loops, device, elapsed
     )
-    return model
+    return moved_model

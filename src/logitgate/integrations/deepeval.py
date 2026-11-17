@@ -65,13 +65,30 @@ except ImportError:
             self.statement = statement or instructions
 
     class ChoiceQuestion:  # type: ignore[no-redef]
-        def __init__(self, question: str = "", options: dict[str, str] | None = None) -> None:
-            self.question = question
+        def __init__(
+            self,
+            question: str = "",
+            options: dict[str, str] | None = None,
+            instructions: str = "",
+            statement: str = "",
+        ) -> None:
+            self.question = question or instructions or statement
+            self.instructions = instructions or question or statement
+            self.statement = statement or question or instructions
             self.options = options or {}
 
     class ScoreQuestion:  # type: ignore[no-redef]
-        def __init__(self, rubric: str = "", min_score: int = 1, max_score: int = 5) -> None:
-            self.rubric = rubric
+        def __init__(
+            self,
+            rubric: str = "",
+            min_score: int = 1,
+            max_score: int = 5,
+            instructions: str = "",
+            statement: str = "",
+        ) -> None:
+            self.rubric = rubric or instructions or statement
+            self.instructions = instructions or rubric or statement
+            self.statement = statement or rubric or instructions
             self.min_score = min_score
             self.max_score = max_score
 
@@ -446,7 +463,7 @@ class LogitGateMetric(BaseMetric):
             preset=preset,
             save_on_fail=False,
         )
-        self.threshold = self.gate.pass_threshold
+        self.threshold: float | None = self.gate.pass_threshold
         self.async_mode = async_mode
         self.score: float | None = None
         self.reason: str | None = None

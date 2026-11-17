@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import math
 from pathlib import Path
@@ -10,10 +11,10 @@ import httpx
 import pytest
 
 try:
-    import torch
+    torch: Any = importlib.import_module("torch")
     HAS_TORCH = True
 except ImportError:
-    torch = None  # type: ignore[assignment]
+    torch = None
     HAS_TORCH = False
 
 from logitgate.backends.base import resolve_logit_backend, strip_reasoning_blocks
