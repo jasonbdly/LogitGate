@@ -48,7 +48,7 @@ print(f"Tokens generated: {verdict.total_tokens_generated}")  # 0
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Standard LLM evaluators generate 200+ tokens of critique before saying yes or no. LogitGate stops immediately after the prompt prefill (`max_tokens=1`) and inspects the model's first-token logits. A 2-pass swap (Pass 1: A=Yes, B=No; Pass 2: A=No, B=Yes) analytically cancels the model's affirmative token bias and first-line position preference. See [How LogitGate Works](../eli5/how_logitgate_works.md).
+Standard AI evaluators write 200+ words of explanation before saying yes or no. LogitGate stops right after the model reads the prompt and checks its next-word probabilities directly. Running two quick passes with the labels swapped (`A = Pass, B = Fail`, then `A = Fail, B = Pass`) cancels out any built-in habit of picking `"A"` or `"Yes"`. See [How LogitGate Works](../eli5/how_logitgate_works.md).
 </details>
 
 [🔬 Mathematical Proofs & Log-Odds Cancellation](../math_and_debiasing.md)

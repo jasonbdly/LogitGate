@@ -190,31 +190,31 @@ def generate_logit_vs_text_svg() -> str:
     body = """
   <!-- Title -->
   <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">What Is a Logit vs. Naive Text Output?</text>
-  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">1 prefill exposes next-token probabilities before any word is printed</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Reading the prompt once already scores every possible next word</text>
 
-  <!-- Top Stage: Prefill -> lm_head Prism -> Vocabulary Distribution -->
+  <!-- Top Stage: Read Prompt -> Final Scoring Layer -> Word Odds -->
   <rect x="24" y="88" width="120" height="58" rx="29" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
   <text x="84" y="112" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text-primary)">Prompt Input</text>
-  <text x="84" y="130" text-anchor="middle" font-size="12" fill="var(--text-muted)">1 prefill pass</text>
+  <text x="84" y="130" text-anchor="middle" font-size="12" fill="var(--text-muted)">read all at once</text>
 
   <line x1="144" y1="117" x2="170" y2="117" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
 
-  <!-- Transformer + lm_head Trapezoid -->
-  <polygon points="176,78 298,94 298,140 176,156" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
-  <circle cx="196" cy="102" r="4" fill="var(--accent-indigo)" />
-  <circle cx="196" cy="117" r="4" fill="var(--accent-indigo)" />
-  <circle cx="196" cy="132" r="4" fill="var(--accent-indigo)" />
-  <line x1="200" y1="102" x2="222" y2="117" stroke="var(--accent-indigo)" stroke-width="1.2" opacity="0.6" />
-  <line x1="200" y1="117" x2="222" y2="117" stroke="var(--accent-indigo)" stroke-width="1.2" opacity="0.6" />
-  <line x1="200" y1="132" x2="222" y2="117" stroke="var(--accent-indigo)" stroke-width="1.2" opacity="0.6" />
-  <circle cx="226" cy="117" r="5" fill="var(--accent-purple)" class="anim-pulse" />
-  <text x="263" y="113" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent-indigo)" class="mono">lm_head</text>
-  <text x="263" y="130" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">logits</text>
+  <!-- Final Scoring Layer Trapezoid -->
+  <polygon points="174,78 302,92 302,142 174,156" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
+  <circle cx="190" cy="102" r="4" fill="var(--accent-indigo)" />
+  <circle cx="190" cy="117" r="4" fill="var(--accent-indigo)" />
+  <circle cx="190" cy="132" r="4" fill="var(--accent-indigo)" />
+  <line x1="194" y1="102" x2="212" y2="117" stroke="var(--accent-indigo)" stroke-width="1.2" opacity="0.6" />
+  <line x1="194" y1="117" x2="212" y2="117" stroke="var(--accent-indigo)" stroke-width="1.2" opacity="0.6" />
+  <line x1="194" y1="132" x2="212" y2="117" stroke="var(--accent-indigo)" stroke-width="1.2" opacity="0.6" />
+  <circle cx="215" cy="117" r="5" fill="var(--accent-purple)" class="anim-pulse" />
+  <text x="261" y="113" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-indigo)">Final Layer</text>
+  <text x="261" y="130" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">word scores</text>
 
-  <line x1="298" y1="117" x2="324" y2="117" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="302" y1="117" x2="324" y2="117" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
 
-  <!-- Vocabulary Probability Histogram -->
-  <text x="330" y="76" font-size="12.5" font-weight="700" fill="var(--text-primary)">Next-Token Probabilities</text>
+  <!-- Next-Word Probability Histogram -->
+  <text x="330" y="76" font-size="12.5" font-weight="700" fill="var(--text-primary)">Next-Word Odds</text>
   <line x1="368" y1="84" x2="368" y2="164" stroke="var(--border-muted)" stroke-width="1.5" />
 
   <text x="362" y="99" text-anchor="end" font-size="12" font-weight="700" fill="var(--text-primary)" class="mono">"A"</text>
@@ -242,30 +242,30 @@ def generate_logit_vs_text_svg() -> str:
 
   <!-- LEFT BRANCH: Naive Text Output -->
   <text x="138" y="236" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent-rose)">Naive Text ("A or B")</text>
-  <text x="138" y="254" text-anchor="middle" font-size="12" fill="var(--text-secondary)">argmax collapses distribution</text>
+  <text x="138" y="254" text-anchor="middle" font-size="12" fill="var(--text-secondary)">picks top bar, discards the rest</text>
 
   <!-- Collapsing Funnel Polygon -->
-  <polygon points="48,270 228,270 172,320 104,320" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.5" />
+  <polygon points="44,270 232,270 188,320 88,320" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.5" />
   <text x="138" y="290" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)" class="mono">52% vs 46%</text>
-  <text x="138" y="309" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--accent-rose)" class="mono">argmax</text>
+  <text x="138" y="309" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--accent-rose)">top 1 wins</text>
 
   <line x1="138" y1="320" x2="138" y2="338" stroke="var(--accent-rose)" stroke-width="2" marker-end="url(#arrow-rose)" />
 
-  <!-- Rigid Opaque Stamp -->
+  <!-- Rigid Stamp -->
   <rect x="92" y="344" width="92" height="58" rx="8" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="2" />
   <text x="138" y="376" text-anchor="middle" font-size="22" font-weight="700" fill="var(--accent-rose)" class="mono">"A"</text>
-  <text x="138" y="394" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)">opaque string</text>
+  <text x="138" y="394" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)">plain text only</text>
 
   <!-- Warnings -->
   <text x="138" y="428" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">Looks 100% certain</text>
   <text x="138" y="450" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Hides 52% vs 46% coin flip</text>
-  <text x="138" y="470" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Splits on "Yes" / " yes"</text>
-  <text x="138" y="490" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" font-weight="600">No escalation signal</text>
+  <text x="138" y="470" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Misses "Yes" vs " yes"</text>
+  <text x="138" y="490" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" font-weight="600">Cannot spot borderline cases</text>
   <text x="138" y="520" text-anchor="middle" font-size="12" fill="var(--text-muted)" class="mono">Blind rubber stamp</text>
 
   <!-- RIGHT BRANCH: LogitGate Readout -->
   <text x="402" y="236" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent-emerald)">LogitGate Readout</text>
-  <text x="402" y="254" text-anchor="middle" font-size="12" fill="var(--text-secondary)">reads log P(A) - log P(B)</text>
+  <text x="402" y="254" text-anchor="middle" font-size="12" fill="var(--text-secondary)">reads exact A vs. B odds</text>
 
   <!-- Semicircular Confidence Gauge (center 402, 355, radius 68) -->
   <!-- Red arc (0.0 to 0.20) -->
@@ -289,7 +289,7 @@ def generate_logit_vs_text_svg() -> str:
   <circle cx="402" cy="355" r="6" fill="var(--text-primary)" />
 
   <text x="402" y="390" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent-amber)" class="mono">P = 0.53</text>
-  <text x="402" y="410" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">0 tokens decoded</text>
+  <text x="402" y="410" text-anchor="middle" font-size="11.5" fill="var(--text-muted)">0 extra words written</text>
 
   <!-- Outcome -->
   <rect x="296" y="424" width="212" height="58" rx="8" fill="var(--accent-amber-bg)" stroke="var(--accent-amber)" stroke-width="1.5" />
@@ -327,8 +327,8 @@ def generate_cascade_flow_svg() -> str:
   <!-- Stage 0 Sieve Mesh (y=170..210) -->
   <rect x="148" y="166" width="244" height="36" rx="4" fill="var(--accent-sky-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
   <line x1="154" y1="202" x2="386" y2="202" stroke="var(--accent-sky)" stroke-width="2.5" stroke-dasharray="6 4" />
-  <text x="270" y="183" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Stage 0: AST / Schema Sieve</text>
-  <text x="270" y="198" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt; 0.1 ms | CPU | 0 LLM calls</text>
+  <text x="270" y="183" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Stage 0: Code &amp; Format Check</text>
+  <text x="270" y="198" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt; 0.1 ms | CPU | 0 AI calls</text>
 
   <!-- Stage 0 Left Chute (15 Blocked) -->
   <path d="M 148 184 L 112 184 Q 82 184 82 214 L 82 228" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
@@ -337,29 +337,29 @@ def generate_cascade_flow_svg() -> str:
   <text x="82" y="271" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Bad syntax / rules</text>
 
   <!-- Passing down to Stage 1 -->
-  <text x="270" y="238" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text-primary)">85 valid pass mesh</text>
+  <text x="270" y="238" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text-primary)">85 structurally valid</text>
   <line x1="270" y1="244" x2="270" y2="266" stroke="var(--flow-line)" stroke-width="2" marker-end="url(#arrow)" />
 
   <!-- Stage 1 Optical Logit Gauge (y=272..326) -->
-  <rect x="182" y="272" width="176" height="54" rx="6" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <rect x="168" y="272" width="204" height="54" rx="6" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
   <text x="270" y="292" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">Stage 1: LogitGate</text>
-  <text x="270" y="309" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">~40-90 ms | 0 tok gen</text>
-  <line x1="194" y1="319" x2="346" y2="319" stroke="var(--accent-emerald)" stroke-width="2" class="anim-pulse" />
+  <text x="270" y="309" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">~40-90 ms | 0 words written</text>
+  <line x1="184" y1="319" x2="356" y2="319" stroke="var(--accent-emerald)" stroke-width="2" class="anim-pulse" />
 
   <!-- Stage 1 Left Chute (12 Clear Fails) -->
-  <path d="M 182 302 L 112 302 Q 82 302 82 332 L 82 346" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
+  <path d="M 168 302 L 112 302 Q 82 302 82 332 L 82 346" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
   <rect x="18" y="352" width="128" height="46" rx="6" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.5" />
   <text x="82" y="372" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-rose)">12 Fast Fail</text>
   <text x="82" y="389" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">P &lt;= 0.20</text>
 
   <!-- Stage 1 Right Chute (60 Confident Passes) -->
-  <path d="M 358 298 L 428 298 Q 458 298 458 328 L 458 346" fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" marker-end="url(#arrow-emerald)" />
+  <path d="M 372 298 L 428 298 Q 458 298 458 328 L 458 346" fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" marker-end="url(#arrow-emerald)" />
   <rect x="394" y="352" width="128" height="46" rx="6" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
   <text x="458" y="372" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">60 Fast Pass</text>
   <text x="458" y="389" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">P &gt;= 0.85</text>
 
   <!-- Neck -> Stage 2 Lens -->
-  <text x="270" y="366" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent-amber)">13 Uncertain</text>
+  <text x="270" y="366" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent-amber)">13 Borderline</text>
   <text x="270" y="383" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">0.20 &lt; P &lt; 0.85</text>
   <line x1="270" y1="392" x2="270" y2="438" stroke="var(--accent-amber)" stroke-width="2.5" class="anim-dash" marker-end="url(#arrow-amber)" />
 
@@ -367,10 +367,10 @@ def generate_cascade_flow_svg() -> str:
   <circle cx="228" cy="482" r="34" fill="var(--accent-amber-bg)" stroke="var(--accent-amber)" stroke-width="3" />
   <circle cx="228" cy="482" r="24" fill="none" stroke="var(--accent-amber)" stroke-width="1.2" opacity="0.55" />
   <line x1="253" y1="507" x2="274" y2="528" stroke="var(--accent-amber)" stroke-width="5" stroke-linecap="round" />
-  <text x="228" y="486" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">CoT</text>
+  <text x="228" y="486" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-amber)">Review</text>
 
   <text x="282" y="468" font-size="14" font-weight="700" fill="var(--text-primary)">Stage 2: JudgeGate</text>
-  <text x="282" y="487" font-size="12" fill="var(--text-secondary)" class="mono">~1500 ms | 200 tok critique</text>
+  <text x="282" y="487" font-size="12" fill="var(--text-secondary)" class="mono">~1500 ms | written review</text>
   <text x="282" y="506" font-size="12" font-weight="600" fill="var(--accent-amber)">11 Pass / 2 Fail (edge cases)</text>
 
   <!-- Bottom Outcome Strip -->
@@ -410,7 +410,7 @@ def generate_symmetric_debiasing_svg() -> str:
 
   <!-- Pass 2 Vector Bar -->
   <text x="24" y="192" font-size="13.5" font-weight="700" fill="var(--accent-purple)">Pass 2: Inverted (A = Fail, B = Pass)</text>
-  <text x="516" y="192" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)" class="mono">99% shared KV prefix</text>
+  <text x="516" y="192" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)">99% prompt reused</text>
   <line x1="40" y1="224" x2="500" y2="224" stroke="var(--border-muted)" stroke-width="1.5" />
   <line x1="220" y1="202" x2="220" y2="248" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="3 3" />
   <text x="220" y="262" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">0</text>
@@ -438,7 +438,7 @@ def generate_symmetric_debiasing_svg() -> str:
   <circle cx="270" cy="348" r="5" fill="var(--accent-indigo)" />
   <text x="270" y="340" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent-indigo)" class="mono">0</text>
 
-  <text x="270" y="400" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)" class="mono">L_net = (L1 + L2) / 2T = s / T</text>
+  <text x="270" y="400" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent-emerald)" class="mono">Average = ((s + b) + (s - b)) / 2 = pure signal s</text>
 
   <!-- Injection Neutralization Strip -->
   <rect x="24" y="418" width="492" height="102" rx="8" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.5" />
@@ -460,8 +460,8 @@ def generate_conformal_bands_svg() -> str:
 
     body = """
   <!-- Title -->
-  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Calibrated Tolerance Bands (alpha = 0.05)</text>
-  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Empirical cutoffs from labeled samples bound false-pass and false-reject tails</text>
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Calibrated Tolerance Bands (5% Error Budget)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Cutoffs measured on labeled test cases cap false passes and false rejects</text>
 
   <!-- Plot Background & Band Shading (x=46..494, width=448; P=0.20 -> x=136, P=0.85 -> x=427) -->
   <rect x="46" y="84" width="90" height="190" fill="var(--accent-rose-bg)" opacity="0.7" />
@@ -488,7 +488,7 @@ def generate_conformal_bands_svg() -> str:
 
   <!-- Curve Labels -->
   <text x="90" y="124" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-rose)">True Fail</text>
-  <text x="450" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">True Pass</text>
+  <text x="462" y="122" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">True Pass</text>
 
   <!-- Vertical Dashed Quantile Cutoffs -->
   <line x1="136" y1="84" x2="136" y2="296" stroke="var(--accent-rose)" stroke-width="2" stroke-dasharray="5 4" />
@@ -496,7 +496,7 @@ def generate_conformal_bands_svg() -> str:
 
   <!-- Tail Risk Callouts -->
   <text x="144" y="218" font-size="11.5" font-weight="600" fill="var(--accent-rose)">&lt;= 2.5% tail</text>
-  <text x="419" y="218" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)">&lt;= 2.5% tail</text>
+  <text x="406" y="218" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)">&lt;= 2.5% tail</text>
 
   <!-- Horizontal Probability Gauge Track -->
   <line x1="46" y1="274" x2="494" y2="274" stroke="var(--text-primary)" stroke-width="2" />
@@ -517,15 +517,15 @@ def generate_conformal_bands_svg() -> str:
   <text x="427" y="316" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">0.85</text>
   <text x="494" y="316" text-anchor="middle" font-size="12" fill="var(--text-muted)" class="mono">1.0</text>
 
-  <text x="136" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">tau_reject</text>
-  <text x="427" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-emerald)" class="mono">tau_accept</text>
+  <text x="136" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)">Reject cutoff</text>
+  <text x="427" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-emerald)">Pass cutoff</text>
 
   <!-- Bottom 3 Summary Columns (clean top accent rules) -->
   <line x1="24" y1="364" x2="174" y2="364" stroke="var(--accent-rose)" stroke-width="3" />
   <text x="24" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Fast Reject</text>
   <text x="24" y="406" font-size="12" font-weight="600" fill="var(--accent-rose)" class="mono">P &lt;= 0.20</text>
   <text x="24" y="426" font-size="12" fill="var(--text-secondary)">False-reject &lt;= 2.5%</text>
-  <text x="24" y="444" font-size="12" fill="var(--text-muted)">0 tokens generated</text>
+  <text x="24" y="444" font-size="12" fill="var(--text-muted)">0 words written</text>
 
   <line x1="194" y1="364" x2="346" y2="364" stroke="var(--accent-amber)" stroke-width="3" />
   <text x="194" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Escalation Band</text>
@@ -553,52 +553,52 @@ def generate_rag_prefix_cache_svg() -> str:
 
     body = """
   <!-- Title -->
-  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Prefix-Cached RAG: Prefill Once, Check Often</text>
-  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Pin retrieved context in GPU KV-cache instead of re-reading it on every check</text>
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Document Memory Cache: Read Once, Check Often</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Keep reference docs in GPU reading memory instead of re-reading them every time</text>
 
   <!-- TOP TIMELINE: Without Prefix Sharing -->
-  <text x="24" y="88" font-size="13.5" font-weight="700" fill="var(--accent-rose)">Without Prefix Sharing (~540 ms total)</text>
+  <text x="24" y="88" font-size="13.5" font-weight="700" fill="var(--accent-rose)">Without Shared Memory (~540 ms total)</text>
 
   <text x="24" y="116" font-size="12" fill="var(--text-secondary)" class="mono">Check 1</text>
   <rect x="92" y="100" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">2,000-tok Docs + Query</text>
+  <text x="237" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">2,000-token Docs + Question</text>
   <rect x="386" y="100" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)" class="mono">80t</text>
+  <text x="413" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
   <text x="448" y="115" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
   <text x="24" y="146" font-size="12" fill="var(--text-secondary)" class="mono">Check 2</text>
   <rect x="92" y="130" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Recomputed 2,000-tok Docs</text>
+  <text x="237" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads 2,000-token Docs</text>
   <rect x="386" y="130" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)" class="mono">80t</text>
+  <text x="413" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
   <text x="448" y="145" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
   <text x="24" y="176" font-size="12" fill="var(--text-secondary)" class="mono">Check 3</text>
   <rect x="92" y="160" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Recomputed 2,000-tok Docs</text>
+  <text x="237" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads 2,000-token Docs</text>
   <rect x="386" y="160" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)" class="mono">80t</text>
+  <text x="413" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
   <text x="448" y="175" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
-  <text x="270" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)">6,000 prefix tokens processed repeatedly</text>
+  <text x="270" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)">Reads 6,000 document tokens total (3x duplicate work)</text>
 
   <!-- Divider -->
   <line x1="24" y1="224" x2="516" y2="224" stroke="var(--border-muted)" stroke-width="1.5" stroke-dasharray="4 4" />
 
   <!-- BOTTOM ARCHITECTURE: LogitGate Shared Prefix -->
-  <text x="24" y="254" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">LogitGate Shared Prefix (~177 ms total, 3.1x faster)</text>
+  <text x="24" y="254" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">LogitGate Shared Memory (~177 ms total, 3.1x faster)</text>
 
-  <!-- Pinned GPU KV-Cache Memory Block -->
+  <!-- Pinned GPU Reading Memory Block -->
   <rect x="24" y="280" width="246" height="132" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="2" />
   <!-- Lock icon -->
   <rect x="40" y="302" width="16" height="13" rx="2" fill="var(--accent-emerald)" />
   <path d="M 43 302 L 43 297 A 5 5 0 0 1 53 297 L 53 302" fill="none" stroke="var(--accent-emerald)" stroke-width="2" />
-  <text x="64" y="313" font-size="12.5" font-weight="700" fill="var(--accent-emerald)">PINNED KV-CACHE</text>
+  <text x="64" y="313" font-size="12.5" font-weight="700" fill="var(--accent-emerald)">SAVED IN GPU MEMORY</text>
 
-  <text x="40" y="338" font-size="12" font-weight="600" fill="var(--text-primary)" class="mono">&lt;reference_context&gt;</text>
-  <text x="40" y="356" font-size="12" font-weight="600" fill="var(--text-primary)" class="mono">&lt;user_query&gt;</text>
-  <text x="40" y="380" font-size="12" fill="var(--text-secondary)">2,000 tokens prefilled ONCE</text>
-  <text x="40" y="399" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">~68 ms initial prefill</text>
+  <text x="40" y="338" font-size="12" font-weight="600" fill="var(--text-primary)">Reference Policy Doc</text>
+  <text x="40" y="356" font-size="12" font-weight="600" fill="var(--text-primary)">Customer Question</text>
+  <text x="40" y="380" font-size="12" fill="var(--text-secondary)">2,000 tokens read ONCE</text>
+  <text x="40" y="399" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">~68 ms initial read</text>
 
   <!-- Fan-out Paths to 3 Lightweight Suffix Probes -->
   <path d="M 270 318 C 304 318, 304 296, 336 296" fill="none" stroke="var(--accent-emerald)" stroke-width="2" class="anim-dash" marker-end="url(#arrow-emerald)" />
@@ -626,7 +626,7 @@ def generate_rag_prefix_cache_svg() -> str:
   <!-- Bottom Comparison Strip -->
   <rect x="24" y="442" width="492" height="52" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
   <text x="270" y="464" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">68 + 38 + 36 + 35 = 177 ms (3.1x faster than 540 ms)</text>
-  <text x="270" y="483" text-anchor="middle" font-size="12" fill="var(--text-secondary)">PrefixBroadcastLogitEvaluator · Ollama · llama.cpp · vLLM</text>
+  <text x="270" y="483" text-anchor="middle" font-size="12" fill="var(--text-secondary)">Works automatically on Ollama, vLLM, SGLang, and llama.cpp</text>
 """
     return _svg_envelope(title, desc, body, height=520)
 
@@ -675,21 +675,21 @@ def generate_toolcall_shield_svg() -> str:
   <line x1="270" y1="122" x2="270" y2="394" stroke="var(--accent-emerald)" stroke-width="2.5" class="anim-dash" marker-end="url(#arrow-emerald)" />
 
   <!-- Ring Labels (rendered above rays with clean surface backing so arrows never cross text) -->
-  <rect x="142" y="241" width="256" height="40" rx="6" fill="var(--surface-bg)" opacity="0.94" />
-  <text x="270" y="258" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Stage 0: Sink Filter (&lt;0.1 ms, CPU)</text>
-  <text x="270" y="275" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Paths · SSRF · Destructive CLI · SQL</text>
+  <rect x="136" y="241" width="268" height="40" rx="6" fill="var(--surface-bg)" opacity="0.94" />
+  <text x="270" y="258" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Ring 1: Instant Rule Filter (&lt;0.1 ms, CPU)</text>
+  <text x="270" y="275" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Blocked paths, private URLs, unsafe commands</text>
 
   <rect x="158" y="323" width="224" height="40" rx="6" fill="var(--surface-bg)" opacity="0.94" />
-  <text x="270" y="340" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-indigo)">Stage 1: Logit Intent (~40 ms)</text>
-  <text x="270" y="357" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Did user authorize this call?</text>
+  <text x="270" y="340" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-indigo)">Ring 2: Intent Check (~40 ms)</text>
+  <text x="270" y="357" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Did the user actually ask for this?</text>
 
   <!-- Core Label -->
-  <text x="270" y="424" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">SAFE CORE</text>
-  <text x="270" y="444" text-anchor="middle" font-size="11.5" fill="var(--text-primary)">FS · Net · DB</text>
+  <text x="270" y="424" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">SAFE TOOLS</text>
+  <text x="270" y="444" text-anchor="middle" font-size="11.5" fill="var(--text-primary)">Files · Web · Database</text>
 
   <!-- Bottom Footer Strip -->
   <rect x="24" y="476" width="492" height="44" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
-  <text x="270" y="503" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">OpenAI tools · Anthropic tool_use · MCP JSON-RPC (&lt;45 ms total)</text>
+  <text x="270" y="503" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">Protects OpenAI, Anthropic, and MCP agent tool calls (&lt;45 ms)</text>
 """
     return _svg_envelope(title, desc, body, height=540)
 
@@ -737,8 +737,8 @@ def generate_stream_guard_abort_svg() -> str:
   <rect x="216" y="96" width="290" height="208" fill="var(--surface-subtle)" opacity="0.65" />
   <path d="M 216 293 C 268 296, 330 288, 396 294 C 446 298, 476 290, 502 296"
         fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-dasharray="4 5" opacity="0.6" />
-  <text x="364" y="160" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">455 Tokens Prevented</text>
-  <text x="364" y="180" text-anchor="middle" font-size="12" fill="var(--text-secondary)">91% GPU decode saved</text>
+  <text x="364" y="160" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">455 Words Prevented</text>
+  <text x="364" y="180" text-anchor="middle" font-size="12" fill="var(--text-secondary)">91% GPU work saved</text>
 
   <!-- Live Confidence Waveform (Tok 0..45) -->
   <path d="M 66 112 L 126 108 L 186 115 L 204 185 L 216 293"
@@ -763,22 +763,22 @@ def generate_stream_guard_abort_svg() -> str:
   <circle cx="216" cy="356" r="4" fill="var(--accent-rose)" />
   <line x1="216" y1="356" x2="246" y2="338" stroke="var(--accent-rose)" stroke-width="3" stroke-linecap="round" />
   <circle cx="252" cy="356" r="4" fill="var(--border-muted)" />
-  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER OPEN -&gt; StreamAbortedError</text>
+  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER TRIPS -&gt; Stream Stopped Early</text>
 
   <!-- Bottom 3 Outcome Summaries -->
   <line x1="24" y1="386" x2="174" y2="386" stroke="var(--accent-rose)" stroke-width="3" />
   <text x="24" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">Instant Halt</text>
-  <text x="24" y="428" font-size="12" fill="var(--text-secondary)">Aborts at clause 3</text>
-  <text x="24" y="446" font-size="12" fill="var(--text-muted)">Token 45 of 500</text>
+  <text x="24" y="428" font-size="12" fill="var(--text-secondary)">Stops at sentence 3</text>
+  <text x="24" y="446" font-size="12" fill="var(--text-muted)">Word 45 of 500</text>
 
   <line x1="194" y1="386" x2="346" y2="386" stroke="var(--accent-emerald)" stroke-width="3" />
   <text x="194" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">Clean UX</text>
-  <text x="194" y="428" font-size="12" fill="var(--text-secondary)">Halts before claim</text>
-  <text x="194" y="446" font-size="12" fill="var(--text-muted)">Zero context poison</text>
+  <text x="194" y="428" font-size="12" fill="var(--text-secondary)">Stops before bad claim</text>
+  <text x="194" y="446" font-size="12" fill="var(--text-muted)">User never sees error</text>
 
   <line x1="366" y1="386" x2="516" y2="386" stroke="var(--accent-sky)" stroke-width="3" />
   <text x="366" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">GPU Recovery</text>
-  <text x="366" y="428" font-size="12" fill="var(--text-secondary)">Frees KV-cache early</text>
+  <text x="366" y="428" font-size="12" fill="var(--text-secondary)">Frees GPU memory early</text>
   <text x="366" y="446" font-size="12" fill="var(--text-muted)">455 steps saved</text>
 """
     return _svg_envelope(title, desc, body, height=500)

@@ -168,8 +168,8 @@
   <rect x="216" y="96" width="290" height="208" fill="var(--surface-subtle)" opacity="0.65" />
   <path d="M 216 293 C 268 296, 330 288, 396 294 C 446 298, 476 290, 502 296"
         fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-dasharray="4 5" opacity="0.6" />
-  <text x="364" y="160" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">455 Tokens Prevented</text>
-  <text x="364" y="180" text-anchor="middle" font-size="12" fill="var(--text-secondary)">91% GPU decode saved</text>
+  <text x="364" y="160" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">455 Words Prevented</text>
+  <text x="364" y="180" text-anchor="middle" font-size="12" fill="var(--text-secondary)">91% GPU work saved</text>
 
   <!-- Live Confidence Waveform (Tok 0..45) -->
   <path d="M 66 112 L 126 108 L 186 115 L 204 185 L 216 293"
@@ -194,22 +194,22 @@
   <circle cx="216" cy="356" r="4" fill="var(--accent-rose)" />
   <line x1="216" y1="356" x2="246" y2="338" stroke="var(--accent-rose)" stroke-width="3" stroke-linecap="round" />
   <circle cx="252" cy="356" r="4" fill="var(--border-muted)" />
-  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER OPEN -&gt; StreamAbortedError</text>
+  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER TRIPS -&gt; Stream Stopped Early</text>
 
   <!-- Bottom 3 Outcome Summaries -->
   <line x1="24" y1="386" x2="174" y2="386" stroke="var(--accent-rose)" stroke-width="3" />
   <text x="24" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">Instant Halt</text>
-  <text x="24" y="428" font-size="12" fill="var(--text-secondary)">Aborts at clause 3</text>
-  <text x="24" y="446" font-size="12" fill="var(--text-muted)">Token 45 of 500</text>
+  <text x="24" y="428" font-size="12" fill="var(--text-secondary)">Stops at sentence 3</text>
+  <text x="24" y="446" font-size="12" fill="var(--text-muted)">Word 45 of 500</text>
 
   <line x1="194" y1="386" x2="346" y2="386" stroke="var(--accent-emerald)" stroke-width="3" />
   <text x="194" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">Clean UX</text>
-  <text x="194" y="428" font-size="12" fill="var(--text-secondary)">Halts before claim</text>
-  <text x="194" y="446" font-size="12" fill="var(--text-muted)">Zero context poison</text>
+  <text x="194" y="428" font-size="12" fill="var(--text-secondary)">Stops before bad claim</text>
+  <text x="194" y="446" font-size="12" fill="var(--text-muted)">User never sees error</text>
 
   <line x1="366" y1="386" x2="516" y2="386" stroke="var(--accent-sky)" stroke-width="3" />
   <text x="366" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">GPU Recovery</text>
-  <text x="366" y="428" font-size="12" fill="var(--text-secondary)">Frees KV-cache early</text>
+  <text x="366" y="428" font-size="12" fill="var(--text-secondary)">Frees GPU memory early</text>
   <text x="366" y="446" font-size="12" fill="var(--text-muted)">455 steps saved</text>
 
 </svg>

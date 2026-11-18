@@ -18,11 +18,11 @@
 ---
 
 <details>
-<summary>💡 <b>Intuition: Worked Reference Examples (Tier A) vs. Fine-Tuning Muscle Memory (Tier B)</b></summary>
+<summary>💡 <b>Plain-Language Intuition: Open-Book Cheat Sheet (Tier A) vs. Practice Drills (Tier B)</b></summary>
 
-> - **Standard `LogitGate`**: Runs the base model against your rubric as-is and escalates uncertain log-odds to a Layer-2 judge.
-> - **Tier A (`DistillationBundle`, Worked Reference Examples)**: Leaves model weights untouched. Before scoring a new prompt, it prepends 1 matched pass/fail reference pair from past telemetry (`DistilledAnchorBank`, gated so off-domain examples never pollute unrelated prompts) and passes the raw log-odds through a `<1 KB` logistic bias-correction head (`LogitMetaCalibrator`) to cancel systematic skepticism or sycophancy. Because weights never change, the same JSON bundle runs on Ollama, vLLM, llama.cpp, or pure CPU.
-> - **Tier B (`train_distillation_lora`, Fine-Tuning Muscle Memory)**: Trains a lightweight rank-8 LoRA adapter on 2x symmetric (`A/B` and `B/A`) first-token examples so the model internalizes the domain boundary directly in its linear projections, removing the need for reference anchors in the prompt prefix.
+> - **Standard check**: Runs a small model as-is and hands uncertain cases to a larger reviewer.
+> - **Tier A (Open-Book Cheat Sheet, zero GPU training)**: Leaves the small model's weights untouched. Before grading a new item, LogitGate shows the small model one relevant pass/fail example from past reviews (skipping the example if the topic does not match) and adjusts the final score with a tiny correction table to fix any habit of grading too harshly or too softly. Because it is just a tiny JSON file, it works anywhere, including local Ollama or CPU.
+> - **Tier B (Practice Drills, lightweight fine-tuning)**: Trains a small add-on adapter from past reviews so the model learns your grading boundary directly in its own instincts, needing zero extra examples in the prompt at runtime.
 </details>
 
 ---

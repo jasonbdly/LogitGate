@@ -62,7 +62,7 @@ gate = LogitGate("Does the code follow PEP 8?", backend=b_ollama)
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-LogitGate speaks the native logprob format of each engine (Ollama's top_logprobs array, OpenAI's content logprobs, and Gemini's top_candidates). You can swap between a local 3B model on your laptop and a cluster endpoint with one URI string.
+Different model servers format their next-word probability scores differently under the hood. LogitGate translates Ollama, OpenAI/vLLM, llama.cpp, and Gemini responses into one common score automatically, so you can switch between a small model on your laptop and a cloud server by changing a single connection string.
 </details>
 
 [🔬 Systems Architecture & Client Pooling](../architecture.md)
@@ -164,7 +164,7 @@ print(f"Passed: {verdict.passed} via escalated critique")
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Frontier models like o3 or Claude excel at complex generation, but their APIs do not return internal token probabilities. A sidecar lets a compact 3B local model or `GeminiBackend` score the candidate's first-token logits quickly, keeping your test suite fast without needing logprobs from the closed provider.
+Large closed models like Claude or OpenAI `o3` are great at writing answers, but their APIs hide internal word probabilities. Sidecar mode lets a fast helper model (such as a compact 3B local model or Gemini Flash) handle the quick pass/fail gauge read, keeping checks under 100 ms even when your main model is closed.
 </details>
 
 [🔬 Production Use Cases & Sidecar Deployments](../use_cases.md)

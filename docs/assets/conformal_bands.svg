@@ -136,8 +136,8 @@
   <rect width="540" height="480" fill="var(--canvas-bg)" rx="12" />
 
   <!-- Title -->
-  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Calibrated Tolerance Bands (alpha = 0.05)</text>
-  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Empirical cutoffs from labeled samples bound false-pass and false-reject tails</text>
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Calibrated Tolerance Bands (5% Error Budget)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Cutoffs measured on labeled test cases cap false passes and false rejects</text>
 
   <!-- Plot Background & Band Shading (x=46..494, width=448; P=0.20 -> x=136, P=0.85 -> x=427) -->
   <rect x="46" y="84" width="90" height="190" fill="var(--accent-rose-bg)" opacity="0.7" />
@@ -164,7 +164,7 @@
 
   <!-- Curve Labels -->
   <text x="90" y="124" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-rose)">True Fail</text>
-  <text x="450" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">True Pass</text>
+  <text x="462" y="122" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">True Pass</text>
 
   <!-- Vertical Dashed Quantile Cutoffs -->
   <line x1="136" y1="84" x2="136" y2="296" stroke="var(--accent-rose)" stroke-width="2" stroke-dasharray="5 4" />
@@ -172,7 +172,7 @@
 
   <!-- Tail Risk Callouts -->
   <text x="144" y="218" font-size="11.5" font-weight="600" fill="var(--accent-rose)">&lt;= 2.5% tail</text>
-  <text x="419" y="218" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)">&lt;= 2.5% tail</text>
+  <text x="406" y="218" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--accent-emerald)">&lt;= 2.5% tail</text>
 
   <!-- Horizontal Probability Gauge Track -->
   <line x1="46" y1="274" x2="494" y2="274" stroke="var(--text-primary)" stroke-width="2" />
@@ -193,15 +193,15 @@
   <text x="427" y="316" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">0.85</text>
   <text x="494" y="316" text-anchor="middle" font-size="12" fill="var(--text-muted)" class="mono">1.0</text>
 
-  <text x="136" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">tau_reject</text>
-  <text x="427" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-emerald)" class="mono">tau_accept</text>
+  <text x="136" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)">Reject cutoff</text>
+  <text x="427" y="334" text-anchor="middle" font-size="11.5" fill="var(--accent-emerald)">Pass cutoff</text>
 
   <!-- Bottom 3 Summary Columns (clean top accent rules) -->
   <line x1="24" y1="364" x2="174" y2="364" stroke="var(--accent-rose)" stroke-width="3" />
   <text x="24" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Fast Reject</text>
   <text x="24" y="406" font-size="12" font-weight="600" fill="var(--accent-rose)" class="mono">P &lt;= 0.20</text>
   <text x="24" y="426" font-size="12" fill="var(--text-secondary)">False-reject &lt;= 2.5%</text>
-  <text x="24" y="444" font-size="12" fill="var(--text-muted)">0 tokens generated</text>
+  <text x="24" y="444" font-size="12" fill="var(--text-muted)">0 words written</text>
 
   <line x1="194" y1="364" x2="346" y2="364" stroke="var(--accent-amber)" stroke-width="3" />
   <text x="194" y="386" font-size="13" font-weight="700" fill="var(--text-primary)">Escalation Band</text>

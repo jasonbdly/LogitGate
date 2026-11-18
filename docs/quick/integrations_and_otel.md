@@ -75,7 +75,7 @@ logitgate explain .logitgate/failures/latest.json
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Instead of writing 50 lines of flaky regexes to test model outputs, @check runs a first-token logit check in milliseconds. When a test passes, it costs zero output tokens. If a test fails, you can run `logitgate explain` to generate a full paragraph explaining why it failed.
+Instead of writing brittle string-matching rules to test AI outputs, `@check` reads the model's pass/fail confidence in milliseconds with zero explanation words written when tests pass. Whenever a test fails, you can run `logitgate explain` to get a plain written explanation of what went wrong.
 </details>
 
 [🔬 Framework Integration Guide](../integrations.md) · [🔬 Production CI/CD Gate Patterns](../use_cases.md)

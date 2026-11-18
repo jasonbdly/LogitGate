@@ -100,9 +100,9 @@ A common systems question is what happens if a chat-tuned model attempts to emit
 <details>
 <summary>🌱 <b>Plain-Language Intuition: Reading the continuous gauge instead of a binary stamp</b></summary>
 <blockquote>
-Asking an LLM for `"YES"` or `"NO"` text output is like throwing away an analog pressure gauge and replacing it with a rubber stamp that prints `"OK"` whenever pressure is above 50 PSI. Both 50.1 PSI (barely passing, about to fail) and 99.9 PSI (solidly safe) get the exact same `"OK"` stamp, so your downstream system cannot tell when to ask for a second opinion.
+Asking an AI model for `"YES"` or `"NO"` text output is like throwing away an analog pressure gauge and replacing it with a rubber stamp that prints `"OK"` whenever pressure is above 50 PSI. Both 50.1 PSI (barely passing, about to fail) and 99.9 PSI (solidly safe) get the exact same `"OK"` stamp, so your system cannot tell when to ask for a second opinion.
 
-Reading `top_logprobs` inspects the continuous needle *before* the stamp comes down. You get the exact log-odds gap between `A` and `B`, you can average out any mechanical zero-offset in the gauge by flipping the `A`/`B` scale on a cached second pass, and you only call the slow human/CoT inspector when the needle sits in the uncertain middle band.
+LogitGate inspects the continuous needle *before* the stamp comes down. You see the exact gap between `A` and `B`, you can cancel out any built-in lean in the gauge by flipping the `A`/`B` labels on a cached second pass, and you only call the slow written reviewer when the needle sits in the middle gray zone.
 </blockquote>
 </details>
 
@@ -315,11 +315,11 @@ When evaluating $K$ atomic rubrics against one candidate document:
 - Evaluating 20 rubrics reuses the cached candidate embedding 20 times, reducing per-rubric latency from ~90 ms down to ~20–35 ms on modern GPUs.
 
 <details>
-<summary>🌱 <b>Plain-Language Intuition: Why prefix layout saves GPU memory</b></summary>
+<summary>🌱 <b>Plain-Language Intuition: Why putting the shared text first saves GPU memory</b></summary>
 <blockquote>
-In a causal Transformer, every token's attention state (Key and Value vectors) depends only on the tokens that came before it. If you put the 20-token `[DECISION MAPPING]` at the start of the prompt and flip `A` and `B` on Pass 2, every token after it changes its position context, forcing the GPU to recompute the attention keys and values for the entire 4,000-token candidate document from scratch.
+Language models read prompts strictly from top to bottom: each word's saved reading state depends only on the words that came *before* it. If you put the 20-word `A` vs. `B` instructions at the very top of the prompt and swap `A` and `B` on Pass 2, every word below it shifts context, forcing the GPU to re-read the entire 4,000-word document from scratch.
 
-By anchoring the rubric, context, and candidate at the front and placing `[DECISION MAPPING]` at the very end, tokens `0..N-30` are byte-identical across Pass 1 and Pass 2. The inference engine keeps those computed K/V tensors pinned in GPU cache and only runs attention over the final ~30-token suffix.
+By keeping the rule, reference document, and candidate draft at the top and placing the `A` vs. `B` label mapping at the very bottom, the first 99% of the prompt is identical across both passes. The model server keeps the long document's reading memory open on the GPU and only processes the ~30 changed words at the end.
 </blockquote>
 </details>
 

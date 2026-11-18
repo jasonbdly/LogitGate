@@ -48,16 +48,13 @@ $$P(\text{Pass}) = \sigma(\bar{L}) = \frac{1}{1 + e^{-\bar{L}}}$$
 <details>
 <summary>🌱 <b>Plain-Language Intuition: Taring a biased balance scale by swapping pans</b></summary>
 <blockquote>
-Consider a two-pan analytical balance whose left arm is slightly longer than its right arm, adding an unknown mechanical offset $+b$ to whatever sits on the left pan.
+Imagine a two-pan balance scale whose left arm is slightly heavier than its right arm, adding an unknown `+5` gram tilt to whatever sits on the left pan.
 
-To weigh an object whose true mass differential is $s = +2$ units against a $b = +5$ scale offset:
-1. **Pass 1 (Object on Left Pan / Option A)**: The scale reads $2 + 5 = +7$.
-2. **Pass 2 (Object on Right Pan / Option B)**: You swap the sample and reference weights. The mechanical asymmetry still favors the left pan, so the reading relative to the object is $2 - 5 = -3$.
+To weigh an object whose true advantage is `+2` grams despite that `+5` scale defect:
+1. **Pass 1 (Object on Left Pan / Option A)**: The scale reads `2 + 5 = +7`.
+2. **Pass 2 (Object on Right Pan / Option B)**: You swap the two sides. The scale still tilts toward the left pan, so relative to your object it now reads `2 - 5 = -3`.
 
-Looking at either pass alone gives a distorted reading ($+7$ vs. $-3$). Averaging the two measurements in linear scale space gives:
-$$\frac{+7 + (-3)}{2} = \frac{4}{2} = +2$$
-
-This classical double-weighing trick (Gauss transposition) cancels the unknown instrument offset $b$ analytically without needing to measure $b$ beforehand.
+Either single pass gives a skewed number (`+7` or `-3`), but averaging the two readings cancels the uneven arm completely: `(+7 + (-3)) / 2 = +2`, recovering the true weight without needing to measure the scale's defect ahead of time.
 </blockquote>
 </details>
 

@@ -78,7 +78,7 @@ print(f"All RAG rubrics passed: {suite_verdict.passed}")
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Retrieved context is often large. Instead of re-reading the whole document twice, LogitGate keeps the trusted document in the GPU's memory cache and swaps only the answer-slot labels at the end of the prompt. The second pass and extra rubrics evaluate on the cached prefix.
+Reference documents are often much longer than the AI's short answer. Instead of making the GPU re-read a 20-page document from scratch on every check, LogitGate pins the document at the top of the prompt so it stays in the GPU's reading memory while only the short question or label mapping at the bottom changes.
 </details>
 
 [🔬 Mathematical Debiasing & Prefix Mechanics](../math_and_debiasing.md) · [🔬 Production RAG Architectures](../use_cases.md)
@@ -152,7 +152,7 @@ print(f"Blocked SSRF: {v_ssrf.reason}")
 <details>
 <summary>🌱 <b>ELI5 / Why this works</b></summary>
 
-Never let an LLM directly execute file paths or shell commands. ToolCallGate inspects the tool call stringently in Python memory before your runtime ever touches the filesystem or database. 70% of attacks are caught deterministically in 0.08 ms without calling an LLM.
+Never let an AI model pass file paths, URLs, or terminal commands straight to your operating system. `ToolCallGate` inspects the proposed action in plain Python memory first, catching ~70% of dangerous paths, private URLs, and destructive commands in under `0.1 ms` before touching a file, network socket, or AI model.
 </details>
 
 [🔬 Security Threat Models & Adversarial Defense](../deep/security_and_adversarial.md)

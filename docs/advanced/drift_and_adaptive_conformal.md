@@ -16,14 +16,14 @@
 ---
 
 <details>
-<summary>💡 <b>Intuition: A Feedback Control Loop That Widens Margins in Heavy Rain</b></summary>
+<summary>💡 <b>Plain-Language Intuition: Cruise Control That Leaves Extra Following Distance in Heavy Rain</b></summary>
 
-> Think of static conformal thresholds like cruise control calibrated for dry pavement: as long as road conditions match calibration, a fixed following distance holds safely.
+> Static pass/fail cutoffs are like cruise control tuned for dry pavement: as long as live traffic looks like your test set, a fixed following distance stays safe.
 >
-> When sudden rain or heavy traffic hits (covariate shift or adversarial evasion), a fixed distance is no longer safe:
-> - **`RollingDriftMonitor` (Road Sensor)**: Continuously compares rolling windows of incoming log-odds, positional bias, and escalation rate against your baseline distribution using quantile-binned PSI and two-sample KS tests.
-> - **`AdaptiveConformalController` (Feedback Controller)**: Maintains a dynamic log-odds offset $\theta_t$. Every time Layer 1 misses an item, $\theta_t$ steps up by $\eta(1 - \alpha^*)$, widening the ambiguous band so borderline items escalate to Layer 2 `JudgeGate`. When predictions hold steady, $\theta_t$ decays smoothly by $\eta \alpha^*$ back toward baseline throughput.
-> - **`cascade_audit` (Horvitz-Thompson Spot Checks)**: Ground-truth labels rarely exist in real time. Instead, the controller randomly audits a small fraction $p$ (e.g., `5%` to `25%`) of fast-path Layer-1 decisions with Layer-2 `JudgeGate` and scales any detected discrepancy by $1/p$, keeping the error estimator unbiased with zero human labeling.
+> When sudden rain or unfamiliar road conditions arrive (new user topics or adversarial prompts), a fixed margin is too tight:
+> - **Road Sensor (Drift Monitor)**: Watches a rolling window of live scores to spot when incoming requests look noticeably different from normal traffic.
+> - **Automatic Following-Distance Adjuster (Adaptive Controller)**: Whenever the fast check makes a mistake, it widens the middle gray zone so more borderline items get a careful Stage-2 review. Once requests settle back down, it gradually narrows the gray zone back toward normal speed.
+> - **Random Spot Checks (Zero Human Labeling)**: Because humans are not grading live traffic in real time, the system randomly double-checks a small slice (say `10%`) of fast-lane decisions with the full Stage-2 reviewer to keep its error estimate honest automatically.
 </details>
 
 ---

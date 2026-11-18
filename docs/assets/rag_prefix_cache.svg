@@ -136,52 +136,52 @@
   <rect width="540" height="520" fill="var(--canvas-bg)" rx="12" />
 
   <!-- Title -->
-  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Prefix-Cached RAG: Prefill Once, Check Often</text>
-  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Pin retrieved context in GPU KV-cache instead of re-reading it on every check</text>
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Document Memory Cache: Read Once, Check Often</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Keep reference docs in GPU reading memory instead of re-reading them every time</text>
 
   <!-- TOP TIMELINE: Without Prefix Sharing -->
-  <text x="24" y="88" font-size="13.5" font-weight="700" fill="var(--accent-rose)">Without Prefix Sharing (~540 ms total)</text>
+  <text x="24" y="88" font-size="13.5" font-weight="700" fill="var(--accent-rose)">Without Shared Memory (~540 ms total)</text>
 
   <text x="24" y="116" font-size="12" fill="var(--text-secondary)" class="mono">Check 1</text>
   <rect x="92" y="100" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">2,000-tok Docs + Query</text>
+  <text x="237" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">2,000-token Docs + Question</text>
   <rect x="386" y="100" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)" class="mono">80t</text>
+  <text x="413" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
   <text x="448" y="115" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
   <text x="24" y="146" font-size="12" fill="var(--text-secondary)" class="mono">Check 2</text>
   <rect x="92" y="130" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Recomputed 2,000-tok Docs</text>
+  <text x="237" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads 2,000-token Docs</text>
   <rect x="386" y="130" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)" class="mono">80t</text>
+  <text x="413" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
   <text x="448" y="145" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
   <text x="24" y="176" font-size="12" fill="var(--text-secondary)" class="mono">Check 3</text>
   <rect x="92" y="160" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Recomputed 2,000-tok Docs</text>
+  <text x="237" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads 2,000-token Docs</text>
   <rect x="386" y="160" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)" class="mono">80t</text>
+  <text x="413" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
   <text x="448" y="175" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
-  <text x="270" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)">6,000 prefix tokens processed repeatedly</text>
+  <text x="270" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)">Reads 6,000 document tokens total (3x duplicate work)</text>
 
   <!-- Divider -->
   <line x1="24" y1="224" x2="516" y2="224" stroke="var(--border-muted)" stroke-width="1.5" stroke-dasharray="4 4" />
 
   <!-- BOTTOM ARCHITECTURE: LogitGate Shared Prefix -->
-  <text x="24" y="254" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">LogitGate Shared Prefix (~177 ms total, 3.1x faster)</text>
+  <text x="24" y="254" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">LogitGate Shared Memory (~177 ms total, 3.1x faster)</text>
 
-  <!-- Pinned GPU KV-Cache Memory Block -->
+  <!-- Pinned GPU Reading Memory Block -->
   <rect x="24" y="280" width="246" height="132" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="2" />
   <!-- Lock icon -->
   <rect x="40" y="302" width="16" height="13" rx="2" fill="var(--accent-emerald)" />
   <path d="M 43 302 L 43 297 A 5 5 0 0 1 53 297 L 53 302" fill="none" stroke="var(--accent-emerald)" stroke-width="2" />
-  <text x="64" y="313" font-size="12.5" font-weight="700" fill="var(--accent-emerald)">PINNED KV-CACHE</text>
+  <text x="64" y="313" font-size="12.5" font-weight="700" fill="var(--accent-emerald)">SAVED IN GPU MEMORY</text>
 
-  <text x="40" y="338" font-size="12" font-weight="600" fill="var(--text-primary)" class="mono">&lt;reference_context&gt;</text>
-  <text x="40" y="356" font-size="12" font-weight="600" fill="var(--text-primary)" class="mono">&lt;user_query&gt;</text>
-  <text x="40" y="380" font-size="12" fill="var(--text-secondary)">2,000 tokens prefilled ONCE</text>
-  <text x="40" y="399" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">~68 ms initial prefill</text>
+  <text x="40" y="338" font-size="12" font-weight="600" fill="var(--text-primary)">Reference Policy Doc</text>
+  <text x="40" y="356" font-size="12" font-weight="600" fill="var(--text-primary)">Customer Question</text>
+  <text x="40" y="380" font-size="12" fill="var(--text-secondary)">2,000 tokens read ONCE</text>
+  <text x="40" y="399" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">~68 ms initial read</text>
 
   <!-- Fan-out Paths to 3 Lightweight Suffix Probes -->
   <path d="M 270 318 C 304 318, 304 296, 336 296" fill="none" stroke="var(--accent-emerald)" stroke-width="2" class="anim-dash" marker-end="url(#arrow-emerald)" />
@@ -209,6 +209,6 @@
   <!-- Bottom Comparison Strip -->
   <rect x="24" y="442" width="492" height="52" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
   <text x="270" y="464" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">68 + 38 + 36 + 35 = 177 ms (3.1x faster than 540 ms)</text>
-  <text x="270" y="483" text-anchor="middle" font-size="12" fill="var(--text-secondary)">PrefixBroadcastLogitEvaluator · Ollama · llama.cpp · vLLM</text>
+  <text x="270" y="483" text-anchor="middle" font-size="12" fill="var(--text-secondary)">Works automatically on Ollama, vLLM, SGLang, and llama.cpp</text>
 
 </svg>

@@ -20,14 +20,14 @@
 ---
 
 <details>
-<summary>💡 <b>Intuition: Re-Reading Before Answering vs. Speaking Out Loud, and VRAM Headroom vs. Swap-Thrashing</b></summary>
+<summary>💡 <b>Plain-Language Intuition: Re-Reading Silently Before Answering, and Checking Free Memory Early</b></summary>
 
-> When evaluating a dense logical constraint, you have three execution options:
-> 1. **1-Pass Feed-Forward**: Answer immediately after a single read-through (`O(1)` circuit depth). Fast, but prone to missing multi-step dependencies.
-> 2. **Chain-of-Thought (`JudgeGate`)**: Talk through every intermediate step out loud token by token before answering. Accurate, but bound by autoregressive memory bandwidth.
-> 3. **Elastic Recurrent Looping (`RecurrentPyTorchBackend`)**: Re-read the passage silently $K$ times (looping hidden states through the same recurrent block) before emitting token 1. At $K=2$, a 4B model gets the effective depth of an 8B pass with a 4B memory footprint and `0` generated tokens.
+> When checking a tricky multi-step rule, an AI has three ways to work:
+> 1. **Single Glance**: Read the prompt once and answer right away. Very fast, but easy to miss a two-step logical catch.
+> 2. **Thinking Out Loud**: Write out 200 words of notes before giving the verdict. Accurate, but slow because writing words one by one takes seconds.
+> 3. **Re-Reading Silently (Recurrent Looping)**: Pass the prompt through the model's middle layers twice in silence before scoring the first word. A compact 4B model gets a second look at the logic without using extra GPU memory or writing a single word out loud.
 >
-> Meanwhile, **`PCIeSpilloverGuard`** works like checking physical RAM before launching a heavy compiler job so the OS never starts swap-thrashing to disk: by verifying free physical VRAM (plus estimated KV-cache) and reclaiming fragmented PyTorch blocks beforehand, it keeps prefill inside high-bandwidth GPU memory rather than falling off the PCIe bus cliff.
+> Meanwhile, the **VRAM Headroom Guard** works like checking free laptop memory before opening a huge project so your computer never freezes while swapping to a slow disk: by clearing leftover GPU scratch memory ahead of time, it prevents sudden `10x-50x` slowdowns when memory gets tight.
 </details>
 
 ---
