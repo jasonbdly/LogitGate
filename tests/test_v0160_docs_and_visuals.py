@@ -114,6 +114,10 @@ def test_animated_svgs_valid_xml_dark_light_accessible_and_script_free() -> None
         assert font_sizes and min(font_sizes) >= 11.0, (
             f"SVG {svg_name} uses tiny font-size < 11px ({min(font_sizes) if font_sizes else 'none'})"
         )
+        if svg_name == "logit_vs_text.svg":
+            assert 'class="anim-needle"' in text
+            assert "rotate(" in text
+            assert 'class="anim-probe"' not in text
 
 
 def test_generate_visuals_script_is_byte_deterministic_and_enforces_guards(
@@ -359,4 +363,41 @@ def test_pre_v1_audit_resource_ownership_and_nonce_hardening() -> None:
     assert wrapped.count("</candidate_abc123>") == 1
     assert "<\\/candidate_abc123>" in wrapped
     assert wrapped.endswith("\n</candidate_abc123>")
+
+
+def test_grounded_rubric_examples_always_supply_reference_context() -> None:
+    """Any Python or wire-prompt example asking about a reference/retrieved context supplies it."""
+    md_files = [README_PATH, *sorted(DOCS_DIR.rglob("*.md"))]
+    missing: list[str] = []
+    block_re = re.compile(r"^```(?:python|json)\n(.*?)^```", flags=re.DOTALL | re.MULTILINE)
+    triggers = (
+        "reference context",
+        "source context",
+        "retrieved passage",
+        "retrieved policy",
+        "reference knowledge",
+    )
+    for md_path in md_files:
+        rel = md_path.relative_to(REPO_ROOT).as_posix()
+        text = md_path.read_text(encoding="utf-8")
+        for idx, block in enumerate(block_re.findall(text)):
+            lower = block.lower()
+            if any(t in lower for t in triggers) and not (
+                "context=" in block or "[REFERENCE CONTEXT]" in block or "--context" in block
+            ):
+                missing.append(f"{rel}[block {idx}]")
+
+        # Also check wire-prompt ```text blocks that contain [EVALUATION RUBRIC]
+        for idx, tblock in enumerate(
+            re.findall(r"^```text\n(.*?)^```", text, flags=re.DOTALL | re.MULTILINE)
+        ):
+            if (
+                "[EVALUATION RUBRIC]" in tblock
+                and any(t in tblock.lower() for t in triggers)
+                and "[REFERENCE CONTEXT]" not in tblock
+            ):
+                missing.append(f"{rel}[text block {idx}]")
+
+    assert missing == [], f"Grounded rubric examples missing reference context: {missing}"
+
 

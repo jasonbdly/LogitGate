@@ -108,6 +108,10 @@ COMMON_STYLE: Final[str] = """
     .anim-probe {
       animation: probeSweep 3s ease-in-out infinite alternate;
     }
+    .anim-needle {
+      transform-origin: 0px 0px;
+      animation: needleRotate 2.8s ease-in-out infinite alternate;
+    }
     @keyframes dashMove {
       to {
         stroke-dashoffset: -22;
@@ -127,6 +131,14 @@ COMMON_STYLE: Final[str] = """
       }
       100% {
         transform: translateX(8px);
+      }
+    }
+    @keyframes needleRotate {
+      0% {
+        transform: rotate(-14deg);
+      }
+      100% {
+        transform: rotate(14deg);
       }
     }
 """
@@ -268,11 +280,13 @@ def generate_logit_vs_text_svg() -> str:
   <text x="402" y="278" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">0.50</text>
   <text x="482" y="370" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">1.0</text>
 
-  <!-- Needle pointing slightly right of top (P = 0.53) -->
-  <g class="anim-probe">
-    <line x1="402" y1="355" x2="408" y2="296" stroke="var(--text-primary)" stroke-width="3" stroke-linecap="round" />
-    <circle cx="402" cy="355" r="6" fill="var(--text-primary)" />
+  <!-- Needle pivoting around (402, 355) pointing slightly right of top (P = 0.53) -->
+  <g transform="translate(402, 355)">
+    <g class="anim-needle">
+      <line x1="0" y1="0" x2="6" y2="-59" stroke="var(--text-primary)" stroke-width="3" stroke-linecap="round" />
+    </g>
   </g>
+  <circle cx="402" cy="355" r="6" fill="var(--text-primary)" />
 
   <text x="402" y="390" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent-amber)" class="mono">P = 0.53</text>
   <text x="402" y="410" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">0 tokens decoded</text>

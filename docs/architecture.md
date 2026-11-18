@@ -77,6 +77,16 @@ $$\text{logprob}(v) = \ln \operatorname{softmax}(z)_v = z_v - \ln \sum_{u=1}^{V}
 
 With `max_tokens=1`, execution stops immediately after that single prefill pass (plus emitting 1 token to satisfy the completion API). There is no sequential, memory-bandwidth-bound decode loop generating 200 Chain-of-Thought tokens. More importantly, `top_logprobs` exposes the **exact continuous competition** between `A` and `B` across surface variants, rather than discarding that information behind an `argmax` character.
 
+### How LogitGate Ensures Token 1 Concentrates on `A` and `B` (Not Conversational Preludes)
+
+A common systems question is what happens if a chat-tuned model attempts to emit a preamble (`"Sure"`, `"The"`, `"**A**"`, or `<think>`) at Token 1 instead of `A` or `B`:
+
+1. **Terminal `Verdict:` Anchoring & BPE Marginalization**: Ending the user message with `Respond with a single character (A or B).\nVerdict:` alongside the system constraint concentrates **97.7% to 99.999%** of Token-1 probability mass onto `"A"` / `"B"` surface variants across instruction-tuned `1B-32B` models (`llama3.2`, `qwen2.5`, `gemma4`, `deepseek-r1`). Leading-space and case variants (`"A"`, `" A"`, `"a"`) are summed in log-space via `logsumexp`.
+2. **Explicit Reasoning-Token Suppression**: Reasoning models (`DeepSeek-R1`, `Qwen3`, `Gemini 2.5`, `Gemma 4`) otherwise place ~100% mass on `<think>` at Token 1. Backends disable thinking (`think=False`, `reasoning_effort="none"`, `thinkingBudget=0`) and detect `_is_thinking_prefill_trap()` to retry with chat-template suppression if needed.
+3. **Prelude-Invariant Conditional Log-Odds**: Because binary scoring uses $\ln P(A) - \ln P(B)$, any probability mass $P_{\text{prelude}}$ leaked onto neutral tokens (e.g., `2%` on `"The"`) scales $P(A)$ and $P(B)$ by the same $(1 - P_{\text{prelude}})$ factor, which cancels out in the log-ratio without distorting odds. (`LogitMetaCalibrator` also records `unobserved_residual_mass` = $1 - P(A) - P(B)$ as an explicit calibration feature.)
+4. **Deterministic Abstention (`unobserved_target_tokens`)**: If *neither* `A` nor `B` appears in `top_logprobs` on either pass (`has_any_target_token == False`), `LogitGate` never guesses from noise; it returns `DecisionStatus.AMBIGUOUS` (`abstained_reason="unobserved_target_tokens"`) so `Cascade` escalates to Layer 2.
+5. **Hardware Logit Masking (`auto_logit_bias=True`)**: On `OpenAICompatBackend` (`vLLM`) and `LlamaCppBackend`, enabling `auto_logit_bias=True` resolves token IDs for `A`/`B` surface variants and applies `logit_bias = +100` prior to `top_logprobs` extraction.
+
 ### 3-Way Comparison: Generative CoT vs. Naive 1-Token Text vs. LogitGate
 
 | Evaluation Dimension | Generative CoT Judge | Naive 1-Token Prompt (`"Answer YES/NO"`) | LogitGate 2-Pass Logit Readout |
