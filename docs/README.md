@@ -3,14 +3,14 @@
 LogitGate replaces slow generative LLM-as-a-Judge calls with calibrated first-token log-probability gating (`max_tokens=1`, `0` generated reasoning tokens) and deterministic Layer 0 validation, cutting evaluation latency by 4.6x to 17.0x across CI suites, live RAG chatbots, and MCP agent pipelines.
 
 **Asking *"How does first-token logit evaluation actually work?"*** Start with the foundational end-to-end walkthroughs:
-- **[How LogitGate Works (Visual ELI5)](./eli5/how_logitgate_works.md)**: Plain-English visual guide to reading next-word confidence scores, canceling option bias, setting safety cutoffs, and routing through a 3-stage funnel.
+- **[How LogitGate Works](./eli5/how_logitgate_works.md)**: Illustrated walkthrough of first-token scoring, two-pass bias cancellation, calibrated tolerance bands, and 3-stage triage.
 - **[Systems Architecture & Execution Mechanics](./architecture.md)**: Deep engineering blueprint of trait-based routing, KV-cache prefix retention, client pooling, and fault-isolated lifecycles.
 
 This portal organizes all guides into **three depth tiers** plus specialized research references:
 
 - **⚡ Quick Notes**: Direct, copy-paste recipes with exact constructor parameters, defaults, and production deployment patterns.
 - **🔬 Deep Notes**: Systems architecture blueprints, mathematical proofs, adversarial security threat models, and empirical benchmark sweeps.
-- **🌱 Visual ELI5**: Everyday analogies and mobile-friendly animated SVG diagrams that introduce each concept in plain English before any technical jargon.
+- **🧭 Visual Guide**: End-to-end walkthroughs and animated SVG diagrams showing how each mechanism works from first principles.
 - **🚀 Power-User & Research**: Specialized guides for student distillation, PEFT LoRA training, online drift monitoring, and recurrent hardware.
 
 ![LogitGate 3-Layer Cascade Flow](./assets/cascade_flow.svg)
@@ -39,7 +39,7 @@ flowchart TD
         D_Integ["Integration Guides<br/>(docs/integrations.md)"]
     end
 
-    subgraph ELI5["🌱 Tier 3: Visual ELI5"]
+    subgraph Visual["🧭 Tier 3: Visual Guide"]
         E_How["How LogitGate Works<br/>(docs/eli5/how_logitgate_works.md)"]
     end
 
@@ -51,7 +51,7 @@ flowchart TD
 
     Hub --> Quick
     Hub --> Deep
-    Hub --> ELI5
+    Hub --> Visual
     Hub --> Power
 
     Q_Recipes -.-> D_Arch
@@ -80,8 +80,8 @@ Choose the starting point aligned with what you are building today:
 - [Security & Adversarial Defense](deep/security_and_adversarial.md): Randomized prompt boundary nonces, linear-time regex scanning, and untrusted candidate isolation.
 - [Empirical Benchmarks](benchmarks.md): Hardware sweeps across GPUs and CPUs, latency distributions, and Wilson confidence intervals.
 
-### 3. Visual Learners & Technical Decision Makers (Intuition)
-- [How LogitGate Works (Visual ELI5)](eli5/how_logitgate_works.md): Intuitive analogies, step-by-step visual breakdowns, and interactive mental models.
+### 3. Visual Walkthroughs & Architecture Overview
+- [How LogitGate Works](eli5/how_logitgate_works.md): Illustrated walkthroughs and SVG diagrams covering every stage from first-token scoring to streaming circuit breakers.
 - [Production Use Cases](use_cases.md): CI/CD merge gates, regression suites, and live LLM guardrails in production.
 
 ### 4. ML Researchers & Model Developers (Advanced Optimization)
@@ -105,7 +105,7 @@ Choose the starting point aligned with what you are building today:
 | **🔬 Deep Notes** | [Empirical Benchmarks](benchmarks.md) | Researchers | Multi-model latency, accuracy, and CI hardware sweeps |
 | **🔬 Deep Notes** | [Production Use Cases](use_cases.md) | Architects | CI gates, regression pipelines, and production patterns |
 | **🔬 Deep Notes** | [Framework Integrations](integrations.md) | Developers | Extended ecosystem integration patterns |
-| **🌱 Visual ELI5** | [How LogitGate Works](eli5/how_logitgate_works.md) | Everyone | Visual analogies, SVG diagrams, and intuitive mental models |
+| **🧭 Visual Guide** | [How LogitGate Works](eli5/how_logitgate_works.md) | All Readers | End-to-end visual walkthroughs and SVG diagrams |
 | **🚀 Power-User** | [Distillation & LoRA](advanced/distillation_and_lora.md) | Research | Student bundles and PEFT LoRA training recipes |
 | **🚀 Power-User** | [Drift & Adaptive Conformal](advanced/drift_and_adaptive_conformal.md) | Production | Rolling drift detection and dynamic conformal thresholds |
 | **🚀 Power-User** | [Recurrent & Hardware](advanced/recurrent_and_hardware.md) | Systems | Recurrent PyTorch looping and GPU acceleration |

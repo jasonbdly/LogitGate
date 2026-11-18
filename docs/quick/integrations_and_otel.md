@@ -73,9 +73,9 @@ logitgate explain .logitgate/failures/latest.json
 ```
 
 <details>
-<summary>🌱 <b>ELI5 / Why this works</b></summary>
+<summary>💡 <b>Why this works</b></summary>
 
-Instead of writing brittle string-matching rules to test AI outputs, `@check` reads the model's pass/fail confidence in milliseconds with zero explanation words written when tests pass. Whenever a test fails, you can run `logitgate explain` to get a plain written explanation of what went wrong.
+Instead of writing brittle string-matching rules to test AI outputs, `@check` reads the model's pass/fail confidence in milliseconds with zero explanation words written when tests pass. Whenever a test fails, you can run `logitgate explain` to get a written explanation of what went wrong.
 </details>
 
 [🔬 Framework Integration Guide](../integrations.md) · [🔬 Production CI/CD Gate Patterns](../use_cases.md)

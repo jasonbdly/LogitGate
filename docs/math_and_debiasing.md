@@ -1,4 +1,4 @@
-[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
 
 # Deep Notes: Mathematical & Statistical Foundations
 
@@ -46,7 +46,7 @@ The calibrated probability of passing is computed via the standard logistic sigm
 $$P(\text{Pass}) = \sigma(\bar{L}) = \frac{1}{1 + e^{-\bar{L}}}$$
 
 <details>
-<summary>🌱 <b>Plain-Language Intuition: Taring a biased balance scale by swapping pans</b></summary>
+<summary>💡 <b>Weighing twice on an uneven balance scale</b></summary>
 <blockquote>
 Imagine a two-pan balance scale whose left arm is slightly heavier than its right arm, adding an unknown `+5` gram tilt to whatever sits on the left pan.
 
@@ -349,4 +349,4 @@ if __name__ == "__main__":
 
 ---
 
-[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🌱 Visual ELI5](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)

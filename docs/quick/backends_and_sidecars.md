@@ -60,7 +60,7 @@ gate = LogitGate("Does the code follow PEP 8?", backend=b_ollama)
 ```
 
 <details>
-<summary>🌱 <b>ELI5 / Why this works</b></summary>
+<summary>💡 <b>Why this works</b></summary>
 
 Different model servers format their next-word probability scores differently under the hood. LogitGate translates Ollama, OpenAI/vLLM, llama.cpp, and Gemini responses into one common score automatically, so you can switch between a small model on your laptop and a cloud server by changing a single connection string.
 </details>
@@ -162,7 +162,7 @@ print(f"Passed: {verdict.passed} via escalated critique")
 ```
 
 <details>
-<summary>🌱 <b>ELI5 / Why this works</b></summary>
+<summary>💡 <b>Why this works</b></summary>
 
 Large closed models like Claude or OpenAI `o3` are great at writing answers, but their APIs hide internal word probabilities. Sidecar mode lets a fast helper model (such as a compact 3B local model or Gemini Flash) handle the quick pass/fail gauge read, keeping checks under 100 ms even when your main model is closed.
 </details>

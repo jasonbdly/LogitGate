@@ -1,4 +1,4 @@
-[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🌱 Visual ELI5](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)
 
 ---
 
@@ -20,7 +20,7 @@
 ---
 
 <details>
-<summary>💡 <b>Plain-Language Intuition: Re-Reading Silently Before Answering, and Checking Free Memory Early</b></summary>
+<summary>💡 <b>Re-Reading Before Answering, and Checking Free VRAM Early</b></summary>
 
 > When checking a tricky multi-step rule, an AI has three ways to work:
 > 1. **Single Glance**: Read the prompt once and answer right away. Very fast, but easy to miss a two-step logical catch.

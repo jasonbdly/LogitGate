@@ -1,4 +1,4 @@
-[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🌱 Visual ELI5](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)
 
 ---
 
@@ -16,7 +16,7 @@
 ---
 
 <details>
-<summary>💡 <b>Plain-Language Intuition: Cruise Control That Leaves Extra Following Distance in Heavy Rain</b></summary>
+<summary>💡 <b>Widening Safety Margins When Live Traffic Shifts</b></summary>
 
 > Static pass/fail cutoffs are like cruise control tuned for dry pavement: as long as live traffic looks like your test set, a fixed following distance stays safe.
 >

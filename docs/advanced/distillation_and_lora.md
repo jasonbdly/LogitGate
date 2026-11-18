@@ -1,4 +1,4 @@
-[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🌱 Visual ELI5](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)
 
 ---
 
@@ -18,7 +18,7 @@
 ---
 
 <details>
-<summary>💡 <b>Plain-Language Intuition: Open-Book Cheat Sheet (Tier A) vs. Practice Drills (Tier B)</b></summary>
+<summary>💡 <b>Reference Examples (Tier A) vs. Fine-Tuned Adapter (Tier B)</b></summary>
 
 > - **Standard check**: Runs a small model as-is and hands uncertain cases to a larger reviewer.
 > - **Tier A (Open-Book Cheat Sheet, zero GPU training)**: Leaves the small model's weights untouched. Before grading a new item, LogitGate shows the small model one relevant pass/fail example from past reviews (skipping the example if the topic does not match) and adjusts the final score with a tiny correction table to fix any habit of grading too harshly or too softly. Because it is just a tiny JSON file, it works anywhere, including local Ollama or CPU.

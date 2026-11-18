@@ -46,7 +46,7 @@ print(f"Tokens generated: {verdict.total_tokens_generated}")  # 0
 | `sidecar_backend` | `str \| Backend \| None` | `None` | Alternative backend when using sidecar mode. |
 
 <details>
-<summary>🌱 <b>ELI5 / Why this works</b></summary>
+<summary>💡 <b>Why this works</b></summary>
 
 Standard AI evaluators write 200+ words of explanation before saying yes or no. LogitGate stops right after the model reads the prompt and checks its next-word probabilities directly. Running two quick passes with the labels swapped (`A = Pass, B = Fail`, then `A = Fail, B = Pass`) cancels out any built-in habit of picking `"A"` or `"Yes"`. See [How LogitGate Works](../eli5/how_logitgate_works.md).
 </details>
@@ -128,7 +128,7 @@ print(f"Distribution: {verdict.choice_probabilities}")
 - `min_margin`: Rejects with `DecisionStatus.AMBIGUOUS` if difference between top and second choice is below this margin.
 
 <details>
-<summary>🌱 <b>ELI5 / Why this works</b></summary>
+<summary>💡 <b>Why this works</b></summary>
 
 Models prefer option 'A' over 'B' simply because 'A' appears earlier in the alphabet and earlier in the prompt. By evaluating the question twice with rotated letter assignments, ChoiceGate removes letter favoritism entirely.
 </details>
