@@ -9,7 +9,7 @@
 >
 > **Concrete Bottleneck**: Static split-conformal calibration (`fit_calibration_profile` targeting $\alpha^* = 0.05$ or $0.10$) relies on exchangeability between your calibration split and live traffic. When production prompts drift into unseen domains (covariate shift) or face borderline adversarial inputs, fixed thresholds ($\tau_{\text{rej}}, \tau_{\text{acc}}$) silently exceed your target Layer-1 error rate.
 >
-> **Quantified Payoff**: Coupling `RollingDriftMonitor` and `AdaptiveConformalController` with `cascade_audit` automatically widens the ambiguous escalation band during distribution shifts and relaxes it back down once traffic recovers. Across the 120-step 4-regime shift benchmark with **`0` human labels**, `cascade_audit` (`p = 0.25`) cuts Layer-1 selective risk from `9.2% -> 4.2%` on `gemma4:e4b`, `5.8% -> 3.3%` on `qwen2.5-coder:3b`, and `4.2% -> 1.7%` on `qwen2.5:14b` (reducing Regime-3 adversarial L1 errors to `0.0%` on all three `3B`/`4B` models).
+> **Quantified Payoff**: Coupling `RollingDriftMonitor` and `AdaptiveConformalController` with `cascade_audit` automatically widens the ambiguous escalation band during distribution shifts and relaxes it back down once traffic recovers. Across the 120-step 4-regime shift benchmark with **`0` human labels**, `cascade_audit` (`p = 0.25`) cuts Layer-1 selective risk from `9.2% -> 4.2%` on `gemma4:e4b` (`alpha = 0.10`), `5.8% -> 3.3%` on `qwen2.5-coder:3b` (`alpha = 0.05`), and `4.2% -> 1.7%` on `qwen2.5:14b` (`alpha = 0.10`) (reducing Regime-3 adversarial Layer-1 errors to `0.0%` on all three `3B`/`4B` models).
 >
 > **When to Skip It**: If your traffic distribution is stationary (same domain, prompt format, and error profile as your calibration holdout), static `Cascade` + `CalibrationProfile` handles ~90% of workloads with finite-sample coverage guarantees and zero runtime tracking overhead. Only enable online drift monitoring and adaptive control for non-stationary streams, adversarial exposure, or long-running services needing autonomous margin control without manual relabeling.
 
@@ -22,8 +22,8 @@
 >
 > When sudden rain or unfamiliar road conditions arrive (new user topics or adversarial prompts), a fixed margin is too tight:
 > - **Road Sensor (Drift Monitor)**: Watches a rolling window of live scores to spot when incoming requests look noticeably different from normal traffic.
-> - **Automatic Following-Distance Adjuster (Adaptive Controller)**: Whenever the fast check makes a mistake, it widens the middle gray zone so more borderline items get a careful Stage-2 review. Once requests settle back down, it gradually narrows the gray zone back toward normal speed.
-> - **Random Spot Checks (Zero Human Labeling)**: Because humans are not grading live traffic in real time, the system randomly double-checks a small slice (say `10%`) of fast-lane decisions with the full Stage-2 reviewer to keep its error estimate honest automatically.
+> - **Automatic Following-Distance Adjuster (Adaptive Controller)**: Whenever the fast check makes a mistake, it widens the middle gray zone so more borderline items get a careful Layer-2 review. Once requests settle back down, it gradually narrows the gray zone back toward normal speed.
+> - **Random Spot Checks (Zero Human Labeling)**: Because humans are not grading live traffic in real time, the system randomly double-checks a small slice (say `10%`) of fast-lane decisions with the full Layer-2 reviewer to keep its error estimate honest automatically.
 </details>
 
 ---
@@ -37,21 +37,22 @@ flowchart TD
     end
 
     subgraph ADAPT["2. Dynamic Conformal Decision"]
-        ACC["AdaptiveConformalController\n(Maintains offset theta_t)"] -.->|"Dynamic Margins\n[tau_rej(t), tau_acc(t)]"| L1
+        ACC["AdaptiveConformalController<br/>(Maintains offset theta_t)"] -.->|"Dynamic Margins<br/>[tau_rej(t), tau_acc(t)]"| L1
         L1 -->|"High Confidence"| FP["Fast-Path PASS / FAIL"]
-        L1 -->|"Ambiguous Band"| ESC["Escalate to Layer 2 Judge"]
+        L1 -->|"Ambiguous Band"| ESC["Escalate to Layer 2 JudgeGate"]
     end
 
-    subgraph DRIFT["3. Streaming Statistical Audit"]
-        L1 & FP & ESC --> RDM["RollingDriftMonitor\n- Cochran/Jeffreys PSI\n- Exact Stephens KS Test\n- Positional Bias & Escalation Rate"]
+    subgraph AUDIT["3. Zero-Human Shadow Audit & Gibbs-Candès Update"]
+        FP -.->|"Sample with probability p"| SHAD["Layer 2 JudgeGate Shadow Audit<br/>(Populates teacher_passed)"]
+        SHAD -->|"Compare Layer 1 vs Layer 2"| HT["Horvitz-Thompson Loss:<br/>err_t / p"]
+        HT -->|"Online Gibbs-Candès Update<br/>theta_{t+1} = max(theta_min, theta_t + eta*(err - alpha))"| ACC
+    end
+
+    subgraph DRIFT["4. Streaming Drift Detection"]
+        FP & ESC & SHAD --> REC["Completed TelemetryRecord<br/>(Includes teacher_passed)"]
+        REC --> RDM["RollingDriftMonitor<br/>- Cochran/Jeffreys PSI & Stephens KS<br/>- Positional Bias & Escalation Rate<br/>- Teacher Disagreement Rate"]
         RDM -->|"Moderate / Severe Shift"| BOOST["Nudge theta_t (+boost)"]
         BOOST -.-> ACC
-    end
-
-    subgraph AUDIT["4. Zero-Human Shadow Audit"]
-        FP -.->|"Sample with probability p"| SHAD["Tier 2 Judge Shadow Audit"]
-        SHAD -->|"Compare L1 vs L2"| HT["Horvitz-Thompson Loss:\nerr_t / p"]
-        HT -->|"Online Gibbs-Candès Update\ntheta_{t+1} = max(theta_min, theta_t + eta*(err - alpha))"| ACC
     end
 ```
 
@@ -61,7 +62,7 @@ flowchart TD
 
 ### 1. Online Streaming Cascade with Autonomous Shadow Auditing
 
-Attach `RollingDriftMonitor` and `AdaptiveConformalController` directly to your production `Cascade`. Fast-path Layer-1 decisions are automatically audited by Tier-2 `JudgeGate` with probability `audit_sample_rate=0.05` ($p=0.05$), updating thresholds with zero human labels:
+Attach `RollingDriftMonitor` and `AdaptiveConformalController` directly to your production `Cascade`. Fast-path Layer-1 decisions are automatically audited by Layer-2 `JudgeGate` with probability `audit_sample_rate=0.05` ($p=0.05$), updating thresholds with zero human labels:
 
 ```python
 from logitgate import (
@@ -72,7 +73,7 @@ from logitgate import (
     RollingDriftMonitor,
 )
 
-# 1. Initialize Gibbs-Candes online adaptive controller
+# 1. Initialize Gibbs-Candès online adaptive controller
 controller = AdaptiveConformalController(
     pass_threshold=0.85,
     fail_threshold=0.20,
@@ -90,7 +91,7 @@ monitor = RollingDriftMonitor(
     drift_boost_theta=0.5,
 )
 
-# 3. Assemble self-healing Cascade
+# 3. Assemble adaptive Cascade
 cascade = Cascade(
     gates=[
         LogitGate(
@@ -109,12 +110,12 @@ cascade = Cascade(
 
 # 4. Evaluate production stream
 verdict = cascade.evaluate("Thank you for contacting support. Your refund has been processed.")
-print(f"Status: {verdict.status.value}, Escalated: {verdict.escalated}, Current theta: {controller.theta:.4f}")
+print(f"Status: {verdict.status.value}, Layer: {verdict.triggered_layer}, Current theta: {controller.theta:.4f}")
 ```
 
 ### 2. Inspecting Production Drift via the CLI
 
-Compare historical baseline telemetry against an active production traffic window:
+Compare historical baseline telemetry against an active production traffic window using **PSI (Population Stability Index)** and the **KS (Kolmogorov-Smirnov two-sample test)** to quantify distributional shift:
 
 ```bash
 # Detect distribution shift between baseline and current production logs
@@ -156,15 +157,24 @@ Teacher Disagreement Rate: 6.8% of escalations
 
 The Population Stability Index (PSI) measures the divergence between a reference distribution $P$ and a current distribution $Q$:
 
-$$\text{PSI} = \sum_{k=1}^B (q_k - p_k) \ln\left(\frac{q_k}{p_k}\right)$$
+$$
+\text{PSI} = \sum_{k=1}^B (q_k - p_k) \ln\left(\frac{q_k}{p_k}\right)
+$$
 
 In production rolling windows ($N \approx 30\text{--}100$), standard fixed-bin PSI fails due to empty bins (causing infinite log-ratios) or over-binning. `RollingDriftMonitor` implements:
 
 1. **Cochran's Minimum-Cell Rule**: Bin count $B$ dynamically scales to guarantee an expected count of $\ge 5$ items per bin:
-   $$B = \min\left(\text{num\_bins}, \max\left(2, \left\lfloor \frac{\min(N_{\text{ref}}, N_{\text{cur}})}{5} \right\rfloor\right)\right)$$
+
+   $$
+   B = \min\left(\text{num\_bins}, \max\left(2, \left\lfloor \frac{\min(N_{\text{ref}}, N_{\text{cur}})}{5} \right\rfloor\right)\right)
+   $$
+
 2. **Quantile Boundary Estimation**: Bin edges are derived from reference quantiles, ensuring balanced baseline cells.
 3. **Jeffreys Prior ($\epsilon = 0.5$) Smoothing**: Pseudo-counts prevent division by zero while preserving asymptotic divergence properties:
-   $$p_k = \frac{r_k + 0.5}{N_{\text{ref}} + B \cdot 0.5}, \qquad q_k = \frac{c_k + 0.5}{N_{\text{cur}} + B \cdot 0.5}$$
+
+   $$
+   p_k = \frac{r_k + 0.5}{N_{\text{ref}} + B \cdot 0.5}, \qquad q_k = \frac{c_k + 0.5}{N_{\text{cur}} + B \cdot 0.5}
+   $$
 
 **Interpretation Rubric**:
 - $\text{PSI} < 0.10$: Negligible shift. Baseline calibration remains trustworthy.
@@ -175,13 +185,19 @@ In production rolling windows ($N \approx 30\text{--}100$), standard fixed-bin P
 
 To detect subtle shape changes and multi-modal splits without binning artifacts, `compute_ks_two_sample` computes the exact empirical cumulative distribution difference:
 
-$$D = \sup_x |F_{\text{ref}}(x) - F_{\text{cur}}(x)|$$
+$$
+D = \sup_x |F_{\text{ref}}(x) - F_{\text{cur}}(x)|
+$$
 
 Using the Stephens (1970) small-sample modification for the Kolmogorov-Smirnov asymptotic expansion:
 
-$$N_{\text{eff}} = \frac{N_{\text{ref}} \cdot N_{\text{cur}}}{N_{\text{ref}} + N_{\text{cur}}}, \qquad \lambda = \left(\sqrt{N_{\text{eff}}} + 0.12 + \frac{0.11}{\sqrt{N_{\text{eff}}}}\right) D$$
+$$
+N_{\text{eff}} = \frac{N_{\text{ref}} \cdot N_{\text{cur}}}{N_{\text{ref}} + N_{\text{cur}}}, \qquad \lambda = \left(\sqrt{N_{\text{eff}}} + 0.12 + \frac{0.11}{\sqrt{N_{\text{eff}}}}\right) D
+$$
 
-$$p\text{-value} = 2 \sum_{j=1}^{100} (-1)^{j-1} \exp\left(-2 j^2 \lambda^2\right)$$
+$$
+p\text{-value} = 2 \sum_{j=1}^{100} (-1)^{j-1} \exp\left(-2 j^2 \lambda^2\right)
+$$
 
 This allows exact hypothesis testing ($p < \alpha_{\text{KS}}$, default $0.01$) without importing SciPy.
 
@@ -192,13 +208,13 @@ This allows exact hypothesis testing ($p < \alpha_{\text{KS}}$, default $0.01$) 
 2. **Probability PSI & KS**: Measures changes in calibrated output risk.
 3. **Positional Bias Delta**: Detects prompt ordering susceptibility shifts.
 4. **Escalation Rate Delta**: Flags surges in ambiguous-band traffic.
-5. **Teacher Disagreement Rate**: Tracks how often Tier-2 `JudgeGate` contradicts Tier-1 `LogitGate`.
+5. **Teacher Disagreement Rate**: Tracks how often Layer-2 `JudgeGate` contradicts Layer-1 `LogitGate`.
 
 ---
 
 ## 🔬 Deep Mechanics: Gibbs-Candès Adaptive Conformal Control
 
-Static conformal prediction assumes that calibration data and production data are independent and identically distributed (exchangeable). Under covariate shift or adversarial prompting, exchangeability breaks, causing empirical risk to violate the target risk $\alpha^*$.
+Static conformal prediction assumes that calibration and production samples are exchangeable (a weaker condition than i.i.d.). Under covariate shift or adversarial prompting, exchangeability breaks, causing empirical risk to violate the target risk $\alpha^*$.
 
 `AdaptiveConformalController` implements the **Gibbs-Candès (2021) Online Adaptive Conformal Inference (ACI)** algorithm adapted to symmetric log-odds thresholds.
 
@@ -206,11 +222,15 @@ Static conformal prediction assumes that calibration data and production data ar
 
 Let $(\tau_{\text{rej},0}, \tau_{\text{acc},0})$ be baseline calibrated probability thresholds. The controller maps these to baseline log-odds:
 
-$$L_{\text{acc},0} = \operatorname{logit}(\tau_{\text{acc},0}), \qquad L_{\text{rej},0} = \operatorname{logit}(\tau_{\text{rej},0})$$
+$$
+L_{\text{acc},0} = \operatorname{logit}(\tau_{\text{acc},0}), \qquad L_{\text{rej},0} = \operatorname{logit}(\tau_{\text{rej},0})
+$$
 
 At time step $t$, the controller maintains a scalar safety margin $\theta_t \ge \theta_{\min}$ (default $\theta_1 = 0$):
 
-$$\tau_{\text{acc},t} = \sigma\left(L_{\text{acc},0} + \theta_t\right), \qquad \tau_{\text{rej},t} = \sigma\left(L_{\text{rej},0} - \theta_t\right)$$
+$$
+\tau_{\text{acc},t} = \sigma\left(L_{\text{acc},0} + \theta_t\right), \qquad \tau_{\text{rej},t} = \sigma\left(L_{\text{rej},0} - \theta_t\right)
+$$
 
 As $\theta_t$ increases, the acceptance threshold $\tau_{\text{acc},t}$ rises towards $1.0$ and the rejection threshold $\tau_{\text{rej},t}$ falls towards $0.0$, widening the ambiguous band and escalating more traffic to Layer 2.
 
@@ -218,7 +238,9 @@ As $\theta_t$ increases, the acceptance threshold $\tau_{\text{acc},t}$ rises to
 
 After each evaluated artifact, $\theta_t$ updates according to observed error $\text{err}_t \in \{0, 1\}$:
 
-$$\theta_{t+1} = \max\left(\theta_{\min},\; \theta_t + \eta \left(\hat{\text{err}}_t - \alpha^*\right)\right)$$
+$$
+\theta_{t+1} = \max\left(\theta_{\min},\; \theta_t + \eta \left(\hat{\text{err}}_t - \alpha^*\right)\right)
+$$
 
 where:
 - $\eta > 0$ is the learning step size (default `1.5`).
@@ -234,18 +256,24 @@ In naive bounded ACI, clamping $\theta_t \le \theta_{\max}$ introduces positive 
 
 LogitGate solves this via **Forced Ambiguity**:
 When $\theta_t \ge \theta_{\text{abstain}}$ (default `8.0` log-odds units):
-1. `controller.force_ambiguous` activates.
-2. Layer 1 abstains on 100% of inputs, routing all traffic to Tier-2 `JudgeGate`.
+1. `_, _, force_ambiguous = controller.current_thresholds()` returns `force_ambiguous=True`.
+2. Layer 1 abstains on 100% of inputs, routing all traffic to Layer-2 `JudgeGate`.
 3. Because Layer 1 abstained, no Layer-1 error can occur ($\text{err}_t = 0$).
 4. The update equation forces $\theta_t$ to decay deterministically by $\eta \alpha^*$ per evaluation:
-   $$\theta_{t+1} = \theta_t - \eta \alpha^*$$
+
+   $$
+   \theta_{t+1} = \theta_t - \eta \alpha^*
+   $$
+
 5. Once $\theta_t < \theta_{\text{abstain}}$, selective Layer-1 fast paths resume.
 
 ### 4. Telescoping Risk Guarantee Over Arbitrary Sequences
 
 By telescoping the update equation over any arbitrary (even adversarial) sequence of length $T$:
 
-$$\frac{1}{T} \sum_{t=1}^T \mathbb{E}[\text{err}_t] \le \alpha^* + \frac{\theta_{\text{abstain}} + \eta - \theta_1}{\eta T}$$
+$$
+\frac{1}{T} \sum_{t=1}^T \mathbb{E}[\text{err}_t] \le \alpha^* + \frac{\theta_{\text{abstain}} + \eta - \theta_1}{\eta T}
+$$
 
 As $T \to \infty$, the average selective error rate converges to $\le \alpha^*$ regardless of distribution shift!
 
@@ -254,10 +282,14 @@ As $T \to \infty$, the average selective error rate converges to $\le \alpha^*$ 
 In production, ground truth labels are rarely available immediately. Setting `feedback_mode="cascade_audit"` and `audit_sample_rate=p` (e.g. $p=0.05$) creates a closed feedback loop:
 
 1. When Layer 1 issues a fast-path decision, it randomly samples that item with Bernoulli probability $p$.
-2. The sampled item is asynchronously evaluated by Tier-2 `JudgeGate`.
-3. If Tier 2 contradicts Tier 1, an error is recorded: $\text{err}_t = 1$.
+2. The sampled item is asynchronously evaluated by Layer-2 `JudgeGate`.
+3. If Layer 2 contradicts Layer 1, an error is recorded: $\text{err}_t = 1$.
 4. The error is scaled by the Horvitz-Thompson inverse-propensity weight:
-   $$\hat{\text{err}}_t = \frac{\text{err}_t}{p}$$
+
+   $$
+   \hat{\text{err}}_t = \frac{\text{err}_t}{p}
+   $$
+
 5. Non-audited items contribute $\hat{\text{err}}_t = 0$.
 
 Because $\mathbb{E}[\hat{\text{err}}_t] = \text{err}_t$, the estimator is mathematically unbiased, allowing the controller to adapt in real time with zero human labeling.
@@ -319,7 +351,7 @@ print(f"Dynamic thresholds are now: fail={fail_t:.4f}, pass={pass_t:.4f}")
 # Re-evaluating same input: 0.86 is now below dynamic pass threshold -> AMBIGUOUS!
 v2 = gate.evaluate("harmless input")
 assert v2.status == DecisionStatus.AMBIGUOUS
-print(f"Step 2: status={v2.status.value} (safely escalated to Tier 2!)")
+print(f"Step 2: status={v2.status.value} (safely escalated to Layer 2!)")
 ```
 
 ---
@@ -330,6 +362,10 @@ print(f"Step 2: status={v2.status.value} (safely escalated to Tier 2!)")
 | :--- | :--- | :--- | :--- |
 | `target_risk_alpha` | `0.05` (5% risk) | Narrows ambiguous band; increases fast-path rate | Lower to `0.01` for safety-critical medical / legal tasks |
 | `step_size` ($\eta$) | `1.5` | Reacts faster to errors; causes wider threshold oscillations | Increase if attacks are sudden; decrease for stable traffic |
-| `audit_sample_rate` ($p$) | `0.05` (5%) | Better error estimation; higher Layer-2 token consumption | Increase to `0.10` during Canary releases; reduce to `0.02` at scale |
+| `audit_sample_rate` ($p$) | `0.05` (5% recommended; constructor default `0.0`, explicit mode) | Better error estimation; higher Layer-2 token consumption | Set `0.05` to enable zero-label `cascade_audit`; increase to `0.10` during Canary releases or reduce to `0.02` at scale |
 | `baseline_window` | `30` - `100` | Smoother reference distribution; slower to initialize | Increase if baseline traffic is highly diverse |
 | `drift_boost_theta` | `0.5` - `1.0` | Proactively widens safety band on statistical drift | Increase in zero-tolerance compliance pipelines |
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)

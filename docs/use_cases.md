@@ -1,8 +1,8 @@
-[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🔬 Deep Architecture](./architecture.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
 
 # Production Use Cases & Execution Recipes
 
-This document provides role-based architecture guides, production execution recipes, and prompting best practices for **LogitGate v0.15.0+**. For introductory tutorials, see [Quickstart Recipes](./quick/quickstart_recipes.md); for weight distillation, see [Distillation & LoRA](./advanced/distillation_and_lora.md).
+This document provides role-based architecture guides, production execution recipes, and prompting best practices for **LogitGate**. For introductory tutorials, see [Quickstart Recipes](./quick/quickstart_recipes.md); for weight distillation, see [Distillation & LoRA](./advanced/distillation_and_lora.md).
 
 ---
 
@@ -20,7 +20,7 @@ In modern software delivery, **local iteration loops** and **CI/CD merge gates**
 | **Layer 2 (`JudgeGate`) Trigger** | Omitted, or `trigger="on_ambiguous_only"` | **`trigger="on_ambiguous_only"` + `save_on_fail=True`** (0 CoT tokens on clear verdicts; invokes judge only when ambiguous) |
 | **Caching** | In-memory `VerdictCache(max_entries=500)` | **Persistent `VerdictCache(path=".cache/logitgate.db")`** for instant re-runs |
 
-- **Operational Impact**: Clear passes and clear fails incur **0 CoT tokens** (~40-90 ms on GPU; ~0.14 ms on SQLite WAL cache hit). Only ambiguous items (`0.20 < P < 0.85`) pay Layer-2 generative judge latency, while `save_on_fail=True` guarantees deterministic local reproduction of CI failures.
+- **Operational Impact**: Clear passes and clear fails incur **0 CoT tokens** (~40-90 ms on GPU; ~0.14 ms on SQLite WAL (Write-Ahead Log) cache hit). Only ambiguous items (`0.20 < P < 0.85`) pay Layer-2 generative judge latency, while `save_on_fail=True` guarantees deterministic local reproduction of CI failures.
 
 ### Production CI Merge Gate Recipe
 
@@ -29,10 +29,10 @@ from logitgate import ASTGate, Cascade, JudgeGate, LogitGate
 from logitgate.backends import OllamaBackend
 from logitgate.cache import VerdictCache
 
-# 1. Configure backend for CPU CI runner (0 GPU, ~3.2 GB RAM for 3B / ~9.4 GB RAM for gemma4:e4b)
+# 1. Configure compact CPU CI backend (0 GPU, ~2.1 GB RAM); GPU CI runners can drop "num_gpu": 0 or step up to 14b
 backend = OllamaBackend(
-    model="qwen2.5-coder:14b",
-    options={"num_ctx": 4096},
+    model="qwen2.5-coder:3b",
+    options={"num_gpu": 0, "num_ctx": 4096},
     keep_alive="5m",
 )
 
@@ -40,7 +40,7 @@ backend = OllamaBackend(
 cache = VerdictCache(path=".cache/logitgate.db", max_entries=5000)
 
 # 3. Assemble 3-Layer Gate with deterministic context management
-with Cascade(
+with Cascade([
     # Layer 0: Catch syntax and dangerous imports in <0.1ms without LLM calls
     ASTGate(syntax=True, forbidden_imports=["pickle", "subprocess", "shutil"]),
     # Layer 1: Full 2-pass symmetric debiasing (0 CoT tokens on clear pass OR clear fail)
@@ -58,7 +58,7 @@ with Cascade(
         backend=backend,
         cache=cache,
     ),
-) as ci_pipeline:
+]) as ci_pipeline:
     candidate_code = (
         "def compute_interest(principal: float, rate: float, periods: int) -> float:\n"
         "    if principal < 0 or rate < 0 or periods < 0:\n"
@@ -78,7 +78,7 @@ LogitGate solves this via **Deterministic Verdict Snapshots**:
 2. Developers diagnose the exact failure locally with a single CLI command without re-running the application:
 
 ```bash
-# Replay and explain the latest failure with full System-2 reasoning
+# Replay and explain the latest failure with full Layer-2 generative critique
 logitgate explain
 
 # Or explain a specific snapshot with custom token limit
@@ -144,17 +144,18 @@ verdict = rag_verifier.evaluate(
 if not verdict.passed:
     # Trigger fallback or retrieve secondary sources
     generated_answer = "I cannot verify that answer against official documentation."
-print(f"Groundedness Verified: {verdict.passed} (P = {verdict.probability:.2f})")
+prob_str = f"{verdict.probability:.2f}" if verdict.probability is not None else "N/A"
+print(f"Groundedness Verified: {verdict.passed} (P = {prob_str})")
 ```
 
 ---
 
 ## 3. Autonomous AI Agent & Tool-Call Sandboxing (`ToolCallGate`)
 
-Autonomous agents frequently execute tools across APIs, databases, and local operating systems. Indirect prompt injection attacks or hallucinations can cause agents to emit catastrophic parameters: SSRF requests against cloud metadata endpoints (`169.254.169.254`), path traversal outside the project directory, or destructive SQL commands.
+Autonomous agents frequently execute tools across APIs, databases, and local operating systems. Indirect prompt injection attacks or hallucinations can cause agents to emit catastrophic parameters: SSRF (Server-Side Request Forgery) requests against cloud metadata endpoints (`169.254.169.254`), path traversal outside the project directory, or destructive SQL commands.
 
 `ToolCallGate` separates the **untrusted tool payload** (`candidate` passed to `evaluate()`) from the **trusted user request** (`user_intent=`), enforcing a dual-stage barrier:
-- **Operational Impact**: Stage-0 structural rules (path traversal, SSRF, destructive SQL/shell) reject attacks in **<0.05 ms with 0 LLM calls**; Stage-1 semantic intent checks fire only on structurally clean calls (~45 ms GPU), catching indirect prompt injections that stay inside valid parameter syntax.
+- **Operational Impact**: Stage-0 structural rules (path traversal, SSRF, destructive SQL/shell) reject attacks in **~0.08 ms p50 with 0 LLM calls**; Stage-1 semantic intent checks fire only on structurally clean calls (~45 ms GPU), catching indirect prompt injections that stay inside valid parameter syntax.
 
 ```python
 from logitgate import Cascade, JudgeGate, ToolCallGate
@@ -163,7 +164,7 @@ from logitgate.backends import OllamaBackend
 backend = OllamaBackend(model="qwen2.5-coder:14b")
 
 # Configure hybrid ToolCallGate:
-# - Stage 0 (<0.1ms): Blocks path traversal, SSRF against metadata/internal IPs, destructive SQL
+# - Stage 0 (~0.08ms p50): Blocks path traversal, SSRF against metadata/internal IPs, destructive SQL
 # - Stage 1 (~45ms): Assesses semantic alignment against user intent
 tool_guard = ToolCallGate(
     allowed_tools=["fetch_url", "read_file", "execute_sql"],
@@ -178,10 +179,10 @@ tool_guard = ToolCallGate(
 )
 
 # Connect to Cascade for escalation if semantic intent is ambiguous
-agent_firewall = Cascade(
+agent_firewall = Cascade([
     tool_guard,
     JudgeGate(trigger="on_ambiguous_only", backend=backend),
-)
+])
 
 # Safe tool call:
 safe_call = {
@@ -190,7 +191,7 @@ safe_call = {
 }
 assert agent_firewall.evaluate(safe_call).passed
 
-# Malicious SSRF call: Blocked immediately at Stage 0 in <0.05ms (0 LLM calls)
+# Malicious SSRF call: Blocked immediately at Stage 0 in ~0.08ms p50 (0 LLM calls)
 ssrf_call = {
     "name": "fetch_url",
     "arguments": {"url": "http://169.254.169.254/latest/meta-data/"},
@@ -222,6 +223,7 @@ import asyncio
 from typing import AsyncIterable
 from logitgate import LogitGate
 from logitgate.backends import OllamaBackend
+from logitgate.exceptions import StreamAbortedError
 from logitgate.streaming import aguard_stream
 
 async def mock_streaming_llm() -> AsyncIterable[str]:
@@ -250,7 +252,7 @@ async def run_stream() -> None:
     try:
         async for safe_token in guarded:
             print(safe_token, end="", flush=True)
-    except Exception as exc:
+    except StreamAbortedError as exc:
         print(f"\n[STREAM INTERCEPTED & HALTED]: {exc}")
 
 if __name__ == "__main__":
@@ -274,13 +276,14 @@ primary_backend = OpenAICompatBackend(
     model="o3-mini",
     api_key="your-api-key",
     base_url="https://api.openai.com/v1",
+    supports_logprobs=False,  # Skip failing logprob round-trip and route directly to sidecar
 )
 
 # Sidecar backend: Local compact model providing fast first-token logprobs
 local_sidecar = OllamaBackend(model="qwen2.5-coder:14b")
 
 # Configure Cascade with transparent sidecar offloading:
-with Cascade(
+with Cascade([
     LogitGate(
         rubric="Is the financial report accurate and free of arithmetic discrepancies?",
         backend=primary_backend,
@@ -291,7 +294,7 @@ with Cascade(
         trigger="on_ambiguous_only",  # Invokes o3-mini only when ambiguous
         backend=primary_backend,
     ),
-) as hybrid_pipeline:
+]) as hybrid_pipeline:
     candidate_report = "Revenue increased by 15% from $10M to $11.5M. Net margin was 20% ($2.3M)."
     verdict = hybrid_pipeline.evaluate(candidate_report)
     print(f"Passed: {verdict.passed} (Layer: {verdict.triggered_layer})")
@@ -343,4 +346,4 @@ print(f"Overall Passed: {verdict.passed} | Reason: {verdict.reason}")
 
 ---
 
-[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
+[🏠 README](../README.md) · [📚 Docs Hub](./README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🔬 Deep Architecture](./architecture.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)

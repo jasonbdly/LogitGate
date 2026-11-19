@@ -10,8 +10,8 @@
 > **Concrete Bottleneck**: Sub-3B edge and CPU models (`llama3.2:1b`, `qwen2.5-coder:1.5b`, `qwen2.5-coder:3b`) often suffer from polarity skew (systematic over-skepticism or sycophancy) and weak edge-case calibration when evaluating nuanced rubrics standalone, forcing expensive escalations to a larger teacher model.
 >
 > **Quantified Payoff**:
-> - **Tier A (Weight-Free Bundle)**: Fits a `<1 KB` `LogitMetaCalibrator` (`621-627 B` JSON) and `<50 KB` `DistilledAnchorBank` in `<20 ms` on CPU with **`0` extra LLM calls** from existing teacher telemetry logs, lifting `qwen2.5-coder:3b` OOD `hard_positive` recall by `+29.2 pp` (`20.8% -> 50.0%`) and bringing `gemma4:e4b` OOD Layer-1 error within `alpha = 0.10` (`9.4% <= 10.0%`).
-> - **Tier B (PEFT LoRA)**: Compiles domain rubrics into a rank-8 LoRA adapter (`15-50 MB` at 3B scale) via 2x symmetric first-token SFT so the student requires zero anchor tokens in the prompt at runtime.
+> - **Tier A (Weight-Free Bundle)**: Fits a `<1 KB` `LogitMetaCalibrator` (`621-627 B` JSON) and `<50 KB` `DistilledAnchorBank` in `<20 ms` on CPU with **`0` extra LLM calls** from existing teacher telemetry logs, lifting `qwen2.5-coder:3b` out-of-domain (OOD) `hard_positive` recall by `+29.2 pp` (`20.8% -> 50.0%`) and bringing `gemma4:e4b` OOD Layer-1 error within `alpha = 0.10` (`9.4% <= 10.0%`).
+> - **Tier B (Parameter-Efficient Fine-Tuning, PEFT LoRA)**: Compiles domain rubrics into a rank-8 LoRA adapter (`15-50 MB` at 3B scale) via 2x symmetric first-token Supervised Fine-Tuning (SFT) so the student requires zero anchor tokens in the prompt at runtime.
 >
 > **When to Skip It**: In ~90% of production workloads, standard `Cascade` + `CalibrationProfile` with a 3B-4B model already delivers sub-100 ms verification and 10x-20x token savings without distillation. Only reach for Tier A or Tier B when you must run sub-3B edge/CPU models standalone with minimal escalations, want zero-LLM-call recalibration from production telemetry logs, or serve high-volume fixed-domain traffic on dedicated GPUs.
 
@@ -37,15 +37,15 @@ flowchart TD
 
     subgraph TIERA["Tier A: Weight-Free BYO Distillation (Zero GPU Training)"]
         TS --> AC["compile_distillation_bundle()"]
-        AC --> AB["DistilledAnchorBank\n(BM25 + Szymkiewicz-Simpson OOD Filter)"]
-        AC --> MC["LogitMetaCalibrator\n(5-Feature Newton-Raphson L2 Head, <1 KB)"]
-        AB & MC --> DB["DistillationBundle (.json)\nModel-Agnostic, Portable"]
+        AC --> AB["DistilledAnchorBank<br/>(Model-Agnostic BM25 + Szymkiewicz-Simpson OOD Filter)"]
+        AC --> MC["LogitMetaCalibrator<br/>(Student-Calibrated 5-Feature L2 Head, <1 KB JSON, 0 Weight Changes)"]
+        AB & MC --> DB["DistillationBundle (.json)<br/>Anchor Bank Model-Agnostic; Meta-Head Student-Calibrated"]
         DB --> L1A["LogitGate(distillation_bundle=...)"]
     end
 
     subgraph TIERB["Tier B: Open-Weights PEFT LoRA Compilation"]
-        TS --> SE["prepare_symmetric_lora_examples()\n2x Symmetric Masked First-Token Pairs"]
-        SE --> TR["train_distillation_lora()\ntarget_modules='all-linear'"]
+        TS --> SE["prepare_symmetric_lora_examples()<br/>2x Symmetric Masked First-Token Pairs"]
+        SE --> TR["train_distillation_lora()<br/>target_modules='all-linear'"]
         TR --> AD["PEFT LoRA Adapter (Rank 8)"]
         AD --> MAN["emit_deployment_manifests()"]
         MAN --> OLL["Modelfile.ollama"]
@@ -60,30 +60,30 @@ flowchart TD
 
 ### Tier A: Compile a Portable Weight-Free Bundle (Zero LLM Calls)
 
-Tier A compiles a contrastive `DistilledAnchorBank` from a labeled split (`dataset=...`) or both an anchor bank and a 5-feature Newton-Raphson `LogitMetaCalibrator` directly from production `DistillationSink` JSONL logs (`telemetry=...`) with `0` extra LLM calls in under 20 ms on CPU:
+Tier A compiles both a model-agnostic `DistilledAnchorBank` and a student-calibrated 5-feature Newton-Raphson `LogitMetaCalibrator` (plus conformal `CalibrationProfile`) directly from production `DistillationSink` JSONL logs (`telemetry=...`) with `0` extra LLM calls in under 20 ms on CPU, or fits against a student `backend=...` on a labeled split (`dataset=...`):
 
 ```python
 from pathlib import Path
 from logitgate import LogitGate
 from logitgate.distill import compile_distillation_bundle
 
-# 1. Compile model-agnostic anchor bundle from labeled split (0 LLM calls)
-#    (Or pass telemetry="logs/distill_telemetry.jsonl" to also fit LogitMetaCalibrator in 0 LLM calls)
+# 1. Compile anchor bank + student LogitMetaCalibrator + conformal profile from telemetry (0 LLM calls)
+#    (Alternatively pass dataset="benchmarks/data/cal_distill_80.json", backend="ollama://llama3.2:3b")
 bundle = compile_distillation_bundle(
-    dataset="benchmarks/data/cal_distill_80.json",
+    telemetry="telemetry.jsonl",
     student_model="llama3.2:3b",
     max_bank_pairs=16,
     target_risk_alpha=0.10,
 )
 
-# 2. Save portable JSON artifact (<50 KB)
+# 2. Save portable JSON artifact (<50 KB; <1 KB for calibrator head alone)
 bundle_path = Path("artifacts/llama3b_distill_bundle.json")
 bundle.save(bundle_path)
 
-# 3. Load into LogitGate (zero-shot transfer across any runtime)
+# 3. Load into LogitGate on the calibrated student (anchors alone transfer zero-shot across runtimes)
 gate = LogitGate(
     rubric="Does the SQL query use parameterized statements without raw string interpolation?",
-    backend="llama3.2:3b",
+    backend="ollama://llama3.2:3b",
     distillation_bundle=bundle_path,
 )
 
@@ -135,7 +135,7 @@ Tier-A distillation requires zero GPU training, zero external optimizer packages
 
 ### 1. Contrastive `DistilledAnchorBank` & Szymkiewicz-Simpson OOD Filter
 
-When a compact student model evaluates a nuanced prompt, it often lacks strong in-context grounding for domain edge cases. `DistilledAnchorBank` retrieves matched pairs of positive and negative historical artifacts evaluated under similar rubrics:
+When a compact student model evaluates a nuanced prompt, it often lacks strong in-context grounding for domain edge cases. `DistilledAnchorBank` retrieves matched pairs of positive and negative historical artifacts evaluated under similar rubrics using lexical BM25 (Okapi BM25 term-frequency ranking):
 
 1. **Greedy Lexical Pairing**: Historical passing and failing items are paired by Jaccard similarity between candidate texts, creating natural minimal contrastive pairs.
 2. **Token-Neutral Rationale Distillation**: Multi-bullet teacher critiques are distilled into a single concise line, systematically stripping explicit references to "Option A" or "Option B" to maintain complete slot symmetry.
@@ -143,7 +143,9 @@ When a compact student model evaluates a nuanced prompt, it often lacks strong i
 4. **Szymkiewicz-Simpson Overlap Coefficient Gating**:
    Before injecting anchors into the prompt prefix, the bank measures lexical overlap between query tokens $Q$ and candidate anchor rubric tokens $R$:
 
-   $$\text{Overlap}(Q, R) = \frac{|Q \cap R|}{\min(|Q|, |R|)}$$
+   $$
+   \text{Overlap}(Q, R) = \frac{|Q \cap R|}{\min(|Q|, |R|)}
+   $$
 
    If $\text{Overlap}(Q, R) < \text{min\_rubric\_overlap}$ (default `0.25`), the anchor is rejected as Out-Of-Domain (OOD). This prevents anchors from polluting unrelated rubrics. If all anchors are rejected, `LogitGate` cleanly falls back to unanchored evaluation without crashing.
 5. **Shared KV-Cache Prefix Preservation**: Anchors are placed inside `[CALIBRATION ANCHORS]` ahead of `[DECISION MAPPING]`. Both forward ($A=\text{Pass}, B=\text{Fail}$) and reverse ($B=\text{Pass}, A=\text{Fail}$) passes share the identical token prefix, preserving 100% KV-cache reuse.
@@ -153,19 +155,40 @@ When a compact student model evaluates a nuanced prompt, it often lacks strong i
 Even with anchors, compact models often exhibit polarity skew (systematic skepticism or sycophancy) or positional bias. `LogitMetaCalibrator` extracts a 5-dimensional feature vector $\mathbf{x} \in \mathbb{R}^5$ from first-token top log-probabilities:
 
 1. **Symmetric Log-Odds**:
-   $$x_1 = \frac{1}{2}\left(L_{\text{fwd}} + L_{\text{rev}}\right)$$
+
+   $$
+   x_1 = \frac{1}{2}\left(L_{\text{fwd}} + L_{\text{rev}}\right)
+   $$
+
 2. **Signed Slot Bias**:
-   $$x_2 = \frac{1}{2}\left(L_{\text{fwd}} - L_{\text{rev}}\right)$$
+
+   $$
+   x_2 = \frac{1}{2}\left(L_{\text{fwd}} - L_{\text{rev}}\right)
+   $$
+
 3. **Positional Bias Magnitude**:
-   $$x_3 = |x_2|$$
+
+   $$
+   x_3 = |x_2|
+   $$
+
 4. **Top-$K$ Shannon Entropy (nats)**:
-   $$x_4 = -\sum_{i} p_i \ln p_i - p_{\text{res}} \ln p_{\text{res}}$$
+
+   $$
+   x_4 = -\sum_{i} p_i \ln p_i - p_{\text{res}} \ln p_{\text{res}}
+   $$
+
 5. **Unobserved Residual Mass**:
-   $$x_5 = 1 - \sum_{t \in \{A, B\}} p_t$$
+
+   $$
+   x_5 = 1 - \sum_{t \in \{A, B\}} p_t
+   $$
 
 The calibrator solves L2-regularized logistic regression via pure-Python Newton-Raphson optimization with Gaussian elimination and partial pivoting (zero NumPy / SciPy runtime dependencies):
 
-$$\mathbf{w}^{(t+1)} = \mathbf{w}^{(t)} - \left(\mathbf{X}^T \mathbf{W} \mathbf{X} + \lambda \mathbf{I}\right)^{-1} \left(\mathbf{X}^T (\mathbf{p} - \mathbf{y}) + \lambda \mathbf{w}^{(t)}\right)$$
+$$
+\mathbf{w}^{(t+1)} = \mathbf{w}^{(t)} - \left(\mathbf{X}^T \mathbf{W} \mathbf{X} + \lambda \mathbf{I}\right)^{-1} \left(\mathbf{X}^T (\mathbf{p} - \mathbf{y}) + \lambda \mathbf{w}^{(t)}\right)
+$$
 
 The resulting calibrator is serialized to plain JSON (<1 KB). At inference time, calculating $P(\text{pass}) = \sigma(\mathbf{w}^T \mathbf{x} + b)$ takes under $0.01$ ms.
 
@@ -234,6 +257,7 @@ exec llama-server -m "$BASE_GGUF" --lora ./adapter.gguf --port 8080 "$@"
 The following self-contained script shows how to compile a Tier-A bundle, evaluate candidates with strict conformal safety, and inspect decision features:
 
 ```python
+import tempfile
 from pathlib import Path
 from logitgate.distill import (
     DistillationBundle,
@@ -293,10 +317,11 @@ bundle = DistillationBundle(
 )
 
 # 5. Save and reload bundle
-out_path = Path("/tmp/sample_bundle.json")
-bundle.save(out_path)
-reloaded = DistillationBundle.load(out_path)
-print(f"Bundle loaded successfully. Pairs: {len(reloaded.anchor_bank.pairs)}")
+with tempfile.TemporaryDirectory() as tmp:
+    out_path = Path(tmp) / "sample_bundle.json"
+    bundle.save(out_path)
+    reloaded = DistillationBundle.load(out_path)
+    print(f"Bundle loaded successfully. Pairs: {len(reloaded.anchor_bank.pairs)}")
 ```
 
 ---
@@ -311,3 +336,7 @@ print(f"Bundle loaded successfully. Pairs: {len(reloaded.anchor_bank.pairs)}")
 | **Runtime Portability** | Works directly with any backend (Ollama, vLLM, llama.cpp, CPU) | Requires runtime with PEFT/LoRA support |
 | **OOD Safety** | Szymkiewicz-Simpson rubric gating rejects OOD prompts | Implicitly bounds activations; retains base model fallback |
 | **Recommended Use Case** | Fast iterations, multi-tenant setups, air-gapped CPU runners | Millions of daily queries on fixed domains with dedicated GPU |
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)

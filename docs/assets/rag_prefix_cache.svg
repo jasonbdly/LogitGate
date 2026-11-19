@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="540" height="520" viewBox="0 0 540 520" role="img" aria-label="Prefix-Cached Grounded RAG Verification">
   <title>Prefix-Cached Grounded RAG Verification</title>
-  <desc>Timeline comparison: without prefix sharing, 2000 context tokens are recomputed 3 times (~540 ms). With LogitGate shared KV prefix, docs prefill once and fan out to 3 ~80-token candidate checks (~177 ms, 3.1x faster).</desc>
+  <desc>Timeline comparison: without prefix sharing, 2,000 tokens of Docs, Question, and Draft Reply are recomputed 3 times (3 x 180 ms = 540 ms). With LogitGate shared KV prefix, the shared prefix prefills once (~160 ms) and fans out to 3 ~80-token rubric checks (+20 ms each, 220 ms total, 2.5x faster).</desc>
   <defs>
     <style>
     :root {
@@ -11,16 +11,17 @@
       --text-primary: #0f172a;
       --text-secondary: #334155;
       --text-muted: #475569;
-      --accent-emerald: #059669;
+      --ink-on-solid: #ffffff;
+      --accent-emerald: #047857;
       --accent-emerald-bg: #ecfdf5;
       --accent-emerald-border: #6ee7b7;
-      --accent-rose: #dc2626;
+      --accent-rose: #be123c;
       --accent-rose-bg: #fef2f2;
       --accent-rose-border: #fca5a5;
-      --accent-amber: #d97706;
+      --accent-amber: #b45309;
       --accent-amber-bg: #fffbeb;
       --accent-amber-border: #fcd34d;
-      --accent-sky: #0284c7;
+      --accent-sky: #0369a1;
       --accent-sky-bg: #f0f9ff;
       --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
@@ -41,10 +42,11 @@
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --accent-emerald: #10b981;
+        --ink-on-solid: #0f172a;
+        --accent-emerald: #34d399;
         --accent-emerald-bg: #064e3b;
         --accent-emerald-border: #059669;
-        --accent-rose: #f43f5e;
+        --accent-rose: #fb7185;
         --accent-rose-bg: #4c0519;
         --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
@@ -140,36 +142,36 @@
   <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Keep reference docs in GPU reading memory instead of re-reading them every time</text>
 
   <!-- TOP TIMELINE: Without Prefix Sharing -->
-  <text x="24" y="88" font-size="13.5" font-weight="700" fill="var(--accent-rose)">Without Shared Memory (~540 ms total)</text>
+  <text x="24" y="88" font-size="13.5" font-weight="700" fill="var(--accent-rose)">Without Shared Memory (3 x 180 ms = 540 ms)</text>
 
   <text x="24" y="116" font-size="12" fill="var(--text-secondary)" class="mono">Check 1</text>
   <rect x="92" y="100" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">2,000-token Docs + Question</text>
+  <text x="237" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">2,000-token Docs + Q + Reply</text>
   <rect x="386" y="100" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
+  <text x="413" y="115" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Check</text>
   <text x="448" y="115" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
   <text x="24" y="146" font-size="12" fill="var(--text-secondary)" class="mono">Check 2</text>
   <rect x="92" y="130" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads 2,000-token Docs</text>
+  <text x="237" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads Docs + Q + Reply</text>
   <rect x="386" y="130" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
+  <text x="413" y="145" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Check</text>
   <text x="448" y="145" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
   <text x="24" y="176" font-size="12" fill="var(--text-secondary)" class="mono">Check 3</text>
   <rect x="92" y="160" width="290" height="22" rx="4" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
-  <text x="237" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads 2,000-token Docs</text>
+  <text x="237" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-rose)" class="mono">Re-reads Docs + Q + Reply</text>
   <rect x="386" y="160" width="54" height="22" rx="4" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.2" />
-  <text x="413" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Reply</text>
+  <text x="413" y="175" text-anchor="middle" font-size="11.5" fill="var(--accent-indigo)">Check</text>
   <text x="448" y="175" font-size="12" font-weight="600" fill="var(--text-muted)" class="mono">180 ms</text>
 
-  <text x="270" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)">Reads 6,000 document tokens total (3x duplicate work)</text>
+  <text x="270" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent-rose)">160 ms prefix + 20 ms check per rule (6,000 prefix tokens total)</text>
 
   <!-- Divider -->
   <line x1="24" y1="224" x2="516" y2="224" stroke="var(--border-muted)" stroke-width="1.5" stroke-dasharray="4 4" />
 
   <!-- BOTTOM ARCHITECTURE: LogitGate Shared Prefix -->
-  <text x="24" y="254" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">LogitGate Shared Memory (~177 ms total, 3.1x faster)</text>
+  <text x="24" y="254" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">LogitGate Shared Memory (220 ms total, 2.5x faster)</text>
 
   <!-- Pinned GPU Reading Memory Block -->
   <rect x="24" y="280" width="246" height="132" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="2" />
@@ -178,10 +180,10 @@
   <path d="M 43 302 L 43 297 A 5 5 0 0 1 53 297 L 53 302" fill="none" stroke="var(--accent-emerald)" stroke-width="2" />
   <text x="64" y="313" font-size="12.5" font-weight="700" fill="var(--accent-emerald)">SAVED IN GPU MEMORY</text>
 
-  <text x="40" y="338" font-size="12" font-weight="600" fill="var(--text-primary)">Reference Policy Doc</text>
-  <text x="40" y="356" font-size="12" font-weight="600" fill="var(--text-primary)">Customer Question</text>
+  <text x="40" y="338" font-size="12" font-weight="600" fill="var(--text-primary)">Reference Policy + Question</text>
+  <text x="40" y="356" font-size="12" font-weight="600" fill="var(--text-primary)">Draft Reply</text>
   <text x="40" y="380" font-size="12" fill="var(--text-secondary)">2,000 tokens read ONCE</text>
-  <text x="40" y="399" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">~68 ms initial read</text>
+  <text x="40" y="399" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">~160 ms initial read</text>
 
   <!-- Fan-out Paths to 3 Lightweight Suffix Probes -->
   <path d="M 270 318 C 304 318, 304 296, 336 296" fill="none" stroke="var(--accent-emerald)" stroke-width="2" class="anim-dash" marker-end="url(#arrow-emerald)" />
@@ -192,23 +194,23 @@
   <rect x="342" y="276" width="174" height="38" rx="6" fill="var(--surface-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
   <text x="352" y="294" font-size="12" font-weight="700" fill="var(--text-primary)">Grounded</text>
   <text x="506" y="294" text-anchor="end" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">P=0.96</text>
-  <text x="352" y="309" font-size="11.5" fill="var(--text-muted)" class="mono">~80 tok | +38 ms</text>
+  <text x="352" y="309" font-size="11.5" fill="var(--text-muted)" class="mono">~80 tokens | +20 ms</text>
 
   <!-- Probe 2 -->
   <rect x="342" y="327" width="174" height="38" rx="6" fill="var(--surface-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
   <text x="352" y="345" font-size="12" font-weight="700" fill="var(--text-primary)">Complete</text>
   <text x="506" y="345" text-anchor="end" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">P=0.92</text>
-  <text x="352" y="360" font-size="11.5" fill="var(--text-muted)" class="mono">~80 tok | +36 ms</text>
+  <text x="352" y="360" font-size="11.5" fill="var(--text-muted)" class="mono">~80 tokens | +20 ms</text>
 
   <!-- Probe 3 -->
   <rect x="342" y="378" width="174" height="38" rx="6" fill="var(--surface-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
   <text x="352" y="396" font-size="12" font-weight="700" fill="var(--text-primary)">Policy</text>
   <text x="506" y="396" text-anchor="end" font-size="12" font-weight="700" fill="var(--accent-emerald)" class="mono">P=0.99</text>
-  <text x="352" y="411" font-size="11.5" fill="var(--text-muted)" class="mono">~80 tok | +35 ms</text>
+  <text x="352" y="411" font-size="11.5" fill="var(--text-muted)" class="mono">~80 tokens | +20 ms</text>
 
   <!-- Bottom Comparison Strip -->
   <rect x="24" y="442" width="492" height="52" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
-  <text x="270" y="464" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">68 + 38 + 36 + 35 = 177 ms (3.1x faster than 540 ms)</text>
+  <text x="270" y="464" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">160 + 20 + 20 + 20 = 220 ms (2.5x faster than 540 ms)</text>
   <text x="270" y="483" text-anchor="middle" font-size="12" fill="var(--text-secondary)">Works automatically on Ollama, vLLM, SGLang, and llama.cpp</text>
 
 </svg>

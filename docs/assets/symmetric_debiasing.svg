@@ -11,16 +11,17 @@
       --text-primary: #0f172a;
       --text-secondary: #334155;
       --text-muted: #475569;
-      --accent-emerald: #059669;
+      --ink-on-solid: #ffffff;
+      --accent-emerald: #047857;
       --accent-emerald-bg: #ecfdf5;
       --accent-emerald-border: #6ee7b7;
-      --accent-rose: #dc2626;
+      --accent-rose: #be123c;
       --accent-rose-bg: #fef2f2;
       --accent-rose-border: #fca5a5;
-      --accent-amber: #d97706;
+      --accent-amber: #b45309;
       --accent-amber-bg: #fffbeb;
       --accent-amber-border: #fcd34d;
-      --accent-sky: #0284c7;
+      --accent-sky: #0369a1;
       --accent-sky-bg: #f0f9ff;
       --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
@@ -41,10 +42,11 @@
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --accent-emerald: #10b981;
+        --ink-on-solid: #0f172a;
+        --accent-emerald: #34d399;
         --accent-emerald-bg: #064e3b;
         --accent-emerald-border: #059669;
-        --accent-rose: #f43f5e;
+        --accent-rose: #fb7185;
         --accent-rose-bg: #4c0519;
         --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
@@ -147,9 +149,9 @@
 
   <!-- Signal +s (right) + Bias +b (right) -->
   <rect x="220" y="106" width="116" height="28" rx="4" fill="var(--accent-emerald)" opacity="0.9" />
-  <text x="278" y="125" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" class="mono">+s (signal)</text>
+  <text x="278" y="125" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink-on-solid)" class="mono">+s (signal)</text>
   <rect x="338" y="106" width="70" height="28" rx="4" fill="var(--accent-amber)" opacity="0.9" />
-  <text x="373" y="125" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" class="mono">+b bias</text>
+  <text x="373" y="125" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink-on-solid)" class="mono">+b bias</text>
   <text x="416" y="125" font-size="12.5" font-weight="700" fill="var(--text-primary)" class="mono">L1 = s+b</text>
 
   <!-- Pass 2 Vector Bar -->
@@ -161,9 +163,9 @@
 
   <!-- Bias -b (left, opposes signal!) + Signal +s (right) -->
   <rect x="148" y="210" width="70" height="28" rx="4" fill="var(--accent-amber)" opacity="0.9" />
-  <text x="183" y="229" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" class="mono">-b bias</text>
+  <text x="183" y="229" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink-on-solid)" class="mono">-b bias</text>
   <rect x="220" y="210" width="116" height="28" rx="4" fill="var(--accent-emerald)" opacity="0.9" />
-  <text x="278" y="229" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff" class="mono">+s (signal)</text>
+  <text x="278" y="229" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink-on-solid)" class="mono">+s (signal)</text>
   <text x="344" y="229" font-size="12.5" font-weight="700" fill="var(--text-primary)" class="mono">L2 = s-b</text>
 
   <!-- Mechanical Balance Scale / Opposing Bias Vectors -->

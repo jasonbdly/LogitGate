@@ -1,3 +1,7 @@
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)
+
+---
+
 # RAG & Agent Tool Safety (⚡ Quick Notes)
 
 Production recipes for prefix-cached Grounded RAG evaluation, deterministic `ToolCallGate` pre-execution shields, and mid-stream `StreamGuard` aborts.
@@ -6,7 +10,7 @@ Production recipes for prefix-cached Grounded RAG evaluation, deterministic `Too
 
 ## 1. Prefix-Cached Grounded RAG Evaluation (`context=` & `query=`)
 
-**Problem & deployment**: Catches hallucinations in live RAG chatbots and knowledge-base QA pipelines before ungrounded claims reach users, evaluating multi-chunk evidence in `~40-90 ms` with `0` generated tokens.
+**Problem & deployment**: Catches hallucinations in live Retrieval-Augmented Generation (RAG) chatbots and knowledge-base QA pipelines before ungrounded claims reach users, evaluating multi-chunk evidence in `~40-90 ms` with `0` generated tokens.
 
 ![Prefix-Cached Grounded RAG Flow](../assets/rag_prefix_cache.svg)
 
@@ -16,7 +20,7 @@ Passing retrieved passages separately via `context=` and the user's question via
 
 1. **Verifying private facts absent from weights**: Evaluates claims against internal policies, account records, or recent retrieved documents the evaluator model never saw during pretraining.
 2. **Nonce-isolating trusted context from untrusted drafts**: Wraps `context=` and `candidate=` in distinct randomized boundary tags so prompt injections inside an untrusted LLM draft cannot spoof retrieved evidence or override the rubric.
-3. **Sharing the long document KV-cache prefix**: Places the static rubric, `query=`, and `context=` chunks at the prompt root while swapping only the terminal `A/B` answer mapping, yielding a **95% to 99% KV-cache hit rate** across Pass 2 and across `MultiRubricGate` checks (up to **2.51x speedup**).
+3. **Sharing the long document KV-cache prefix**: Single-rubric `LogitGate` (`query_first=True`) orders sections as `[EVALUATION RUBRIC] -> [REFERENCE CONTEXT] -> [USER QUERY] -> [CANDIDATE ARTIFACT]` while swapping only `[DECISION MAPPING]` across Pass 1 and Pass 2; `MultiRubricGate` (`query_first=False`) pins `[REFERENCE CONTEXT] -> [USER QUERY] -> [CANDIDATE ARTIFACT]` at the prompt root and appends each `[EVALUATION RUBRIC]` + `[DECISION MAPPING]` at the suffix so all rubrics share one cached prefix (**95% to 99% KV-cache hit rate**, up to **2.51x speedup**).
 
 ### Copy-Paste Recipe (Grounded vs. Hallucinated)
 
@@ -78,7 +82,7 @@ print(f"All RAG rubrics passed: {suite_verdict.passed}")
 <details>
 <summary>💡 <b>Why this works</b></summary>
 
-Reference documents are often much longer than the AI's short answer. Instead of making the GPU re-read a 20-page document from scratch on every check, LogitGate pins the document at the top of the prompt so it stays in the GPU's reading memory while only the short question or label mapping at the bottom changes.
+Reference documents are often much longer than the AI's short answer. Instead of making the GPU re-read a 20-page document from scratch on every check, LogitGate keeps the retrieved context, user question, and candidate draft inside the cached prefix while only the short rubric or `A/B` label mapping at the bottom changes.
 </details>
 
 [🔬 Mathematical Debiasing & Prefix Mechanics](../math_and_debiasing.md) · [🔬 Production RAG Architectures](../use_cases.md)
@@ -87,7 +91,7 @@ Reference documents are often much longer than the AI's short answer. Instead of
 
 ## 2. `ToolCallGate` (Deterministic Agent Pre-Execution Shield)
 
-**Problem & deployment**: Protects MCP servers, coding agents, and database tool runners by blocking path traversal, SSRF metadata probes, and destructive shell/SQL arguments at Layer 0 (`<0.1 ms`, `0` LLM calls) before any runtime touches disk or network.
+**Problem & deployment**: Protects Model Context Protocol (MCP) servers, coding agents, and database tool runners by blocking path traversal, Server-Side Request Forgery (SSRF) metadata probes, and destructive shell/SQL arguments at Layer 0 (`<0.1 ms`, `0` LLM calls) before any runtime touches disk or network.
 
 ![ToolCallGate Structural Pre-Execution Shield](../assets/toolcall_shield.svg)
 
@@ -146,7 +150,7 @@ print(f"Blocked SSRF: {v_ssrf.reason}")
 | `block_path_traversal` | `bool` | `True` | Resolves canonical paths and rejects `../` escapes. |
 | `block_ssrf` | `bool` | `True` | Blocks private subnets, localhost, and cloud metadata (`169.254.169.254`). |
 | `block_destructive_commands` | `bool` | `True` | Blocks shell tokens (`rm -rf`, `mkfs`, `sudo`, `dd`). |
-| `block_destructive_sql` | `bool` | `True` | Blocks destructive DDL/DML statements (`DROP`, `TRUNCATE`, `ALTER`). |
+| `block_destructive_sql` | `bool` | `True` | Blocks destructive schema/data SQL statements (DDL/DML: `DROP`, `TRUNCATE`, `ALTER`). |
 | `check_intent` | `bool` | `False` | Evaluates Layer 1 semantic alignment between tool call and user intent. |
 
 <details>
@@ -161,7 +165,7 @@ Never let an AI model pass file paths, URLs, or terminal commands straight to yo
 
 ## 3. `StreamGuard` (Mid-Stream Generation Abort)
 
-**Problem & deployment**: Guards live SSE chat endpoints and streaming agent responses by checking token prefixes at sliding character strides and tearing down the upstream generator mid-flight if PII leaks, policy violations, or jailbreaks begin to emerge.
+**Problem & deployment**: Guards live Server-Sent Events (SSE) chat endpoints and streaming agent responses by checking token prefixes at sliding character strides and tearing down the upstream generator mid-flight if personally identifiable information (PII) leaks, policy violations, or jailbreaks begin to emerge.
 
 ![StreamGuard Mid-Stream Abort](../assets/stream_guard_abort.svg)
 
@@ -169,6 +173,7 @@ Never let an AI model pass file paths, URLs, or terminal commands straight to yo
 
 ```python
 from logitgate import LogitGate, guard_stream
+from logitgate.exceptions import StreamAbortedError
 
 gate = LogitGate("Does the assistant response maintain professional security boundaries?")
 
@@ -189,13 +194,19 @@ stream = guard_stream(
 try:
     for chunk in stream:
         print(chunk, end="", flush=True)
-except Exception as exc:
+except StreamAbortedError as exc:
     print(f"\n[STREAM TERMINATED BY GUARD]: {exc}")
 ```
 
 ### Delivery Modes: Optimistic vs. Buffered
 
-- **`delivery="optimistic"`**: Yields chunks to the client immediately with zero latency penalty. Evaluates safety over a sliding character window in the background. If a violation is detected, raises `StreamAbortedError` and tears down the connection.
+- **`delivery="optimistic"`**: Yields tokens immediately for zero added time-to-first-token and evaluates the **cumulative response prefix** inline at each clause/character-stride checkpoint, halting the upstream generator immediately (raising `StreamAbortedError`) if a checkpoint fails or confidence drops at or below `abort_prob_threshold`.
 - **`delivery="buffered"`**: Holds chunks in a quarantine buffer until the current stride has been validated by Layer 1. Prevents any disallowed tokens from ever reaching the end-user, at the cost of a small buffer delay.
 
+**When to skip `StreamGuard`**: For short replies under `150` characters, a single post-hoc `LogitGate.evaluate(...)` call is cheaper and avoids mid-clause ambiguity before the full sentence completes.
+
 [🔬 Systems Concurrency & Stream Lifecycle](../architecture.md)
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)

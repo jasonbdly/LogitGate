@@ -11,16 +11,17 @@
       --text-primary: #0f172a;
       --text-secondary: #334155;
       --text-muted: #475569;
-      --accent-emerald: #059669;
+      --ink-on-solid: #ffffff;
+      --accent-emerald: #047857;
       --accent-emerald-bg: #ecfdf5;
       --accent-emerald-border: #6ee7b7;
-      --accent-rose: #dc2626;
+      --accent-rose: #be123c;
       --accent-rose-bg: #fef2f2;
       --accent-rose-border: #fca5a5;
-      --accent-amber: #d97706;
+      --accent-amber: #b45309;
       --accent-amber-bg: #fffbeb;
       --accent-amber-border: #fcd34d;
-      --accent-sky: #0284c7;
+      --accent-sky: #0369a1;
       --accent-sky-bg: #f0f9ff;
       --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
@@ -41,10 +42,11 @@
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --accent-emerald: #10b981;
+        --ink-on-solid: #0f172a;
+        --accent-emerald: #34d399;
         --accent-emerald-bg: #064e3b;
         --accent-emerald-border: #059669;
-        --accent-rose: #f43f5e;
+        --accent-rose: #fb7185;
         --accent-rose-bg: #4c0519;
         --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
@@ -137,7 +139,7 @@
 
   <!-- Title -->
   <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">3-Layer Triage Funnel: Bounded Quality at Speed</text>
-  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">87% of evaluations exit before any multi-token reasoning judge is called</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">87% of evaluations exit before any written AI judge is called</text>
 
   <!-- Input Stream Mouth -->
   <text x="270" y="84" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text-primary)">100 Candidate Outputs</text>
@@ -148,11 +150,11 @@
   <!-- Funnel Outer Walls -->
   <polygon points="136,124 404,124 316,420 224,420" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="2" />
 
-  <!-- Stage 0 Sieve Mesh (y=170..210) -->
-  <rect x="148" y="166" width="244" height="36" rx="4" fill="var(--accent-sky-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
-  <line x1="154" y1="202" x2="386" y2="202" stroke="var(--accent-sky)" stroke-width="2.5" stroke-dasharray="6 4" />
+  <!-- Stage 0 Sieve Mesh (y=166..204) -->
+  <rect x="148" y="166" width="244" height="38" rx="4" fill="var(--accent-sky-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <line x1="154" y1="204" x2="386" y2="204" stroke="var(--accent-sky)" stroke-width="2.5" stroke-dasharray="6 4" />
   <text x="270" y="183" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">Stage 0: Code &amp; Format Check</text>
-  <text x="270" y="198" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt; 0.1 ms | CPU | 0 AI calls</text>
+  <text x="270" y="196" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt; 0.1 ms | CPU | 0 AI calls</text>
 
   <!-- Stage 0 Left Chute (15 Blocked) -->
   <path d="M 148 184 L 112 184 Q 82 184 82 214 L 82 228" fill="none" stroke="var(--accent-rose)" stroke-width="2.5" marker-end="url(#arrow-rose)" />
@@ -199,8 +201,8 @@
 
   <!-- Bottom Outcome Strip -->
   <rect x="24" y="544" width="492" height="40" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
-  <text x="114" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">87% Fast-Pathed</text>
-  <text x="270" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">13% Escalated</text>
-  <text x="424" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-indigo)">~8.5x Cost Drop</text>
+  <text x="114" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">87% Resolved Fast</text>
+  <text x="270" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-amber)">13% Sent to Review</text>
+  <text x="424" y="569" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-indigo)">4.6x-17x Faster</text>
 
 </svg>

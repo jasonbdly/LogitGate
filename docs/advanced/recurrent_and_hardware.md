@@ -39,22 +39,23 @@ flowchart TD
     subgraph GUARD["1. Hardware Memory Inspection"]
         REQ["Incoming Candidate Prompt"] --> PG["PCIeSpilloverGuard.guard_forward_pass()"]
         PG --> CHK{"Free VRAM < Headroom + KV?"}
-        CHK -->|"Yes: Risk Detected"| EC["torch.cuda.empty_cache()\nReclaim Fragmented Blocks"]
+        CHK -->|"Yes: Risk Detected"| EC["torch.cuda.empty_cache()<br/>Reclaim Fragmented Blocks"]
         CHK -->|"No: Safe Headroom"| RUN["Proceed to Execution"]
         EC --> RUN
     end
 
     subgraph RECURRENT["2. Elastic Recurrent Layer-Looping (Dory-4B)"]
         RUN --> EMB["Embedding & Initial Prefill: h^(0)"]
-        EMB --> LOOP["Recurrent Layer Block: h^(k+1) = Block(h^(k), x)"]
-        LOOP --> KL{"k >= min_loops AND\nKL(P^(k) || P^(k-1)) < epsilon?"}
-        KL -->|"Yes: Early Halting"| PROJ["Output Head Projection"]
-        KL -->|"No: k < max_loops"| LOOP
-        KL -->|"Max Loops Reached"| PROJ
+        EMB --> LOOP["Recurrent Layer Block: h^(k) = Block(h^(k-1), x)"]
+        LOOP --> PROJ["Output Head Projection: P_pos^(k)"]
+        PROJ --> HALT{"k >= min_loops AND<br/>H(P_pos^(k)) <= tau_H AND<br/>|P_pos^(k) - P_pos^(k-1)| <= epsilon?"}
+        HALT -->|"No: k < max_loops"| LOOP
+        HALT -->|"Yes: Early Halting"| LOG
+        HALT -->|"Max Loops Reached"| LOG
     end
 
     subgraph OUT["3. First-Token Verification"]
-        PROJ --> LOG["Deterministic First-Token Logits: P(A), P(B)\n0 Generated Tokens, Deep Latent Reasoning"]
+        LOG["Deterministic First-Token Logits: P(A), P(B)<br/>0 Generated Tokens, Deep Latent Reasoning"]
     end
 ```
 
@@ -62,21 +63,34 @@ flowchart TD
 
 ## ⚡ Quick Recipe
 
-### 1. Elastic Recurrent Gating via `recurrent://` URI
+### 1. Elastic Recurrent Gating (`recurrent://` Fixed-$K$ & Adaptive Early-Halting)
 
-Use the `recurrent://` URI scheme to configure model name, device, recurrent loops, and dynamic KL-threshold early halting:
+Use the `recurrent://` URI scheme (`RecurrentPyTorchBackend`) for fixed $K$-loop depth scaling inside `LogitGate`, or invoke `execute_adaptive_recurrent_loops()` directly when running custom step-by-step early halting over recurrent blocks:
 
 ```python
 from logitgate import LogitGate
+from logitgate.backends.dory_recurrent import execute_adaptive_recurrent_loops
 
-# Elastic recurrent backend: 2 latent loops with adaptive KL early-halting
+# 1. Fixed K-loop recurrent backend (num_loops=2 passes through the recurrent block)
 gate = LogitGate(
     rubric="Does the SQL query use parameterized statements without string concatenation?",
-    backend="recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16?num_loops=2&min_loops=1&max_loops=4&kl_threshold=0.02&device=cuda",
+    backend="recurrent://nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16?num_loops=2&device=cuda",
 )
 
 verdict = gate.evaluate("cursor.execute('SELECT * FROM users WHERE id = %s', (uid,))")
 print(f"Passed: {verdict.passed} (Calibrated P: {verdict.probability:.4f})")
+
+# 2. Adaptive per-loop early halting over a recurrent hidden-state block
+trace = execute_adaptive_recurrent_loops(
+    initial_hidden_state=[0.0, 0.0],
+    recurrent_step_fn=lambda h, step: [h[0] + 2.5, h[1] - 2.5],
+    lm_head=lambda h: {319: h[0], 65: h[0] - 1.0, 350: h[1], 66: h[1] - 1.0},
+    min_loops=2,
+    max_loops=6,
+    entropy_halt_threshold=0.12,
+    kl_stability_threshold=0.005,
+)
+print(f"Loops executed: {trace.loops_executed}, halted_early={trace.halted_early}")
 ```
 
 ### 2. Proactive VRAM Watermark Protection with `PCIeSpilloverGuard`
@@ -110,33 +124,40 @@ A standard causal transformer evaluates its first token in a single forward pass
 
 Architectures like **NVIDIA-Nemotron-Labs Dory** (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`) introduce **elastic recurrent depth**. Instead of traversing intermediate transformer layers once, Dory recirculates hidden state representations through a shared recurrent block for $K$ iterations (`num_loops`, typically 1 to 4) before projecting to output logits:
 
-$$\mathbf{h}^{(k+1)} = \text{RecurrentLayerBlock}\left(\mathbf{h}^{(k)}, \mathbf{x}\right), \quad k \in \{1, \dots, K\}$$
+$$
+\mathbf{h}^{(k+1)} = \text{RecurrentLayerBlock}\left(\mathbf{h}^{(k)}, \mathbf{x}\right), \quad k \in \{1, \dots, K\}
+$$
 
-$$\mathbf{y} = \text{Softmax}\left(\mathbf{W}_{\text{head}} \mathbf{h}^{(K)}\right)$$
+$$
+\mathbf{y} = \text{Softmax}\left(\mathbf{W}_{\text{head}} \mathbf{h}^{(K)}\right)
+$$
 
 - **Computational Depth without Parameter Bloat**: Looping twice ($K=2$) gives a 4B model the effective computational depth of an 8B model, while keeping the VRAM memory footprint strictly at 4B.
 - **Zero Generated Tokens**: Because reasoning occurs purely in latent hidden-state space, the model emits its final verification decision on token 1, completely avoiding autoregressive decoding latency.
 
-### 2. Adaptive Early-Halting via KL-Divergence
+### 2. Fixed-$K$ `RecurrentPyTorchBackend` vs. Adaptive Early-Halting
 
-Not every input requires deep recurrent reasoning. Simple syntax checks or obvious violations converge after a single loop, whereas subtle edge cases benefit from additional passes.
+LogitGate exposes two complementary interfaces for recurrent layer-looping depending on whether your model executes loops inside `model.forward(...)` or via step-by-step hidden-state probing:
 
-`RecurrentPyTorchBackend` dynamically halts recurrent execution when the output probability distribution stabilizes:
+- **Fixed-$K$ Depth Scaling (`RecurrentPyTorchBackend` / `recurrent://...?num_loops=2`)**: Passes a fixed `num_loops=K` argument into `model(**inputs, num_loops=K)` (and `load_dory_model(...)`) inside `PCIeSpilloverGuard.guard_forward_pass()`, recirculating hidden states $K$ times before extracting first-token `top_logprobs`.
+- **Adaptive Per-Loop Early Halting (`execute_adaptive_recurrent_loops()`)**: Imported via `from logitgate.backends.dory_recurrent import execute_adaptive_recurrent_loops`, this helper steps a recurrent block up to `max_loops` iterations, projects only the final token position $\mathbf{h}^{(k)}_{[-1]}$ through `final_norm` and `lm_head` at each step, marginalizes the binary pass-pole probability $P_{\text{pos}}^{(k)}$ over `SurfaceTokenMap`, and halts early once $k \ge \text{min\_loops}$ and both binary Shannon entropy and consecutive probability delta converge:
 
-$$\text{KL}\left(P^{(k)} \parallel P^{(k-1)}\right) = \sum_{v \in \mathcal{V}} P^{(k)}(v) \ln\left(\frac{P^{(k)}(v)}{P^{(k-1)}(v)}\right)$$
+$$
+H\!\left(P_{\text{pos}}^{(k)}\right) \le \text{entropy\_halt\_threshold} \quad \text{AND} \quad \left|P_{\text{pos}}^{(k)} - P_{\text{pos}}^{(k-1)}\right| \le \text{kl\_stability\_threshold}
+$$
 
-If $k \ge \text{min\_loops}$ and $\text{KL} < \epsilon_{\text{KL}}$ (configured via `kl_threshold`, e.g. `0.02`), looping terminates early. This preserves multi-loop accuracy on difficult items while cutting prefill latency on routine cases.
+Returning a `RecurrentLoopTrace(loops_executed, entropy_trajectory, halted_early, final_logits)` preserves multi-loop depth on hard edge cases while cutting prefill work on obvious items.
 
-### 3. URI Parameter Reference
+### 3. URI Parameter Reference (`RecurrentPyTorchBackend`)
 
-The `recurrent://` URI scheme supports the following query parameters:
+The `recurrent://` URI scheme resolves `RecurrentPyTorchBackend` with the following query parameters:
 
 | Parameter | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `num_loops` | `int` | `2` | Default number of recurrent loop iterations per token pass. |
-| `min_loops` | `int` | `None` | Minimum loop iterations before KL early-halting is evaluated. |
-| `max_loops` | `int` | `None` | Maximum loop iterations before forced projection. |
-| `kl_threshold` | `float` | `None` | KL-divergence early exit threshold (typically `0.01` to `0.05`). |
+| `num_loops` | `int` | `2` | Fixed number of recurrent loop iterations executed per forward pass (`>= 1`). |
+| `min_loops` | `int` | `None` | Optional metadata attribute recorded on `RecurrentPyTorchBackend`. |
+| `max_loops` | `int` | `None` | Optional metadata attribute recorded on `RecurrentPyTorchBackend`. |
+| `kl_threshold` | `float` | `None` | Optional metadata attribute recorded on `RecurrentPyTorchBackend`. |
 | `device` | `str` | `"cuda"` | Compute device (`"cuda"`, `"cuda:0"`, `"cpu"`, or `"auto"`). |
 
 ---
@@ -160,7 +181,11 @@ A cascade designed to deliver 50 ms decisions suddenly degrades to 2,000 ms deci
 
 1. **Hardware Memory Query**: Directly interrogates `torch.cuda.mem_get_info(device_index)` to read physical free and total bytes without PyTorch caching distortion.
 2. **Spillover Condition**:
-   $$\text{free\_mb} < \text{min\_free\_headroom\_mb} + \text{estimated\_kv\_mb} \quad \text{OR} \quad \text{reserved\_mb} > 0.96 \cdot \text{total\_mb}$$
+
+   $$
+   \text{free\_mb} < \text{min\_free\_headroom\_mb} + \text{estimated\_kv\_mb} \quad \text{OR} \quad \text{reserved\_mb} > 0.96 \cdot \text{total\_mb}
+   $$
+
 3. **Proactive Cache Eviction**: If spillover risk is detected and `auto_empty_cache=True`, it triggers `torch.cuda.empty_cache()` immediately before prefill buffers are allocated, returning unused cached blocks to the driver.
 
 ---
@@ -172,12 +197,14 @@ Evaluated across NVIDIA GeForce RTX 5090 (32 GB) and RTX 4070 (12 GB) on the 32-
 | Recurrent Depth | Tier A (Surface) | Tier B (Compound) | Tier C (Multi-Hop) | Tier D (Adversarial) | Overall 32-Item Reasoning | First-Token Latency (RTX 5090) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **$K=1$ Loop** | 4/8 (50.0%) | 4/8 (50.0%) | 6/8 (75.0%) | 3/8 (37.5%) | **17/32 (53.1%)** | **216.3 ms** |
-| **$K=2$ Loops** | 5/8 (62.5%) | **6/8 (75.0%)** | 6/8 (75.0%) | 4/8 (50.0%) | **21/32 (65.6%)** *(+12.5% jump)* | **335.5 ms** |
+| **$K=2$ Loops** | 5/8 (62.5%) | **6/8 (75.0%)** | 6/8 (75.0%) | 4/8 (50.0%) | **21/32 (65.6%)** *(+12.5 pp)* | **335.5 ms** |
 | **$K=4$ Loops** | 4/8 (50.0%) | 4/8 (50.0%) | 5/8 (62.5%) | 5/8 (62.5%) | **18/32 (56.2%)** | **628.9 ms** |
 | *Baseline Feed-Forward 4B* | *6/8 (75.0%)* | *4/8 (50.0%)* | *4/8 (50.0%)* | *4/8 (50.0%)* | *18/32 (56.2%)* | *76.0 ms* |
 
+*Note: The feed-forward 4B (`56.2%`, `gemma4:e4b`) and 14B (`68.8%`, `qwen2.5:14b`) comparison figures are uncalibrated single-pass baselines; calibrated 2-pass accuracy reaches `93.8%` and `87.5%` respectively in [Benchmarks](../benchmarks.md).*
+
 **Key Takeaways**:
-- **Sweet Spot at $K=2$**: Looping twice provides a **+12.5 percentage point accuracy jump** over $K=1$, outperforming standard feed-forward 4B models (56.2%) and approaching 14B feed-forward models (68.8%) with zero generated tokens.
+- **Sweet Spot at $K=2$**: Looping twice provides a **+12.5 percentage point accuracy jump** over $K=1$, outperforming the uncalibrated single-pass feed-forward 4B baseline (`56.2%`, `gemma4:e4b`) and approaching the uncalibrated single-pass 14B baseline (`68.8%`, `qwen2.5:14b`) with zero generated tokens.
 - **Diminishing Returns at $K=4$**: Deep latent looping without intermediate normalization can cause representation oversaturation on surface tasks. $K=2$ is the best operating point for latency and accuracy.
 
 ---
@@ -208,3 +235,7 @@ print(f"VRAM Watermark Status: allocated={status.allocated_mb} MB, free={status.
 with guard.guard_forward_pass(estimated_kv_mb=64.0) as st:
     print(f"Forward pass executed safely. Spillover risk: {st.spillover_risk_detected}")
 ```
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [⚡ Quick Notes](../quick/quickstart_recipes.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [📊 Benchmarks](../benchmarks.md)

@@ -1,3 +1,7 @@
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)
+
+---
+
 # Framework Integrations & OpenTelemetry (⚡ Quick Notes)
 
 Copy-paste integration recipes for `pytest` regression suites, `LangGraph` agent workflows, `DeepEval` pipelines, `OpenTelemetry` tracing, and the CLI.
@@ -121,7 +125,7 @@ print(f"Routing target: {next_node}")  # 'execute_action'
 
 ## 3. DeepEval System-1 Adapter
 
-**Problem & deployment**: Accelerates existing DeepEval evaluation suites without rewriting test cases by substituting slow generative judges with `LogitGateMetric` and `LogitGateSystemOneModel`.
+**Problem & deployment**: Accelerates existing DeepEval evaluation suites without rewriting test cases by substituting slow generative judges with fast System-1 (single-pass, zero-generation) scoring via `LogitGateMetric` and `LogitGateSystemOneModel`.
 
 ### Copy-Paste Recipe
 
@@ -156,7 +160,7 @@ system_one_model = LogitGateSystemOneModel(
 
 ## 4. OpenTelemetry Tracing & Telemetry Sinks
 
-**Problem & deployment**: Gives SRE and ML platform teams per-layer latency histograms, escalation rates, and PII-safe audit logs (`omit_candidate` / `hash_candidate`) in Datadog, Jaeger, Grafana Tempo, or rotating local JSONL files.
+**Problem & deployment**: Gives SRE and ML platform teams per-layer latency histograms, escalation rates, and audit logs safe for PII (personally identifiable information) (`omit_candidate` / `hash_only` / `redact_pii`) in Datadog, Jaeger, Grafana Tempo, or rotating local JSONL files.
 
 ### Copy-Paste Recipe
 
@@ -166,14 +170,14 @@ from logitgate import Cascade, LogitGate, OtelSpanSink, JsonlTelemetrySink
 # 1. OpenTelemetry Distributed Tracing Bridge
 otel_sink = OtelSpanSink(
     span_prefix="service.guardrail",
-    privacy="omit_candidate",  # "full" | "hash_candidate" | "omit_candidate"
+    privacy="omit_candidate",  # "full" | "hash_only" | "redact_pii" | "omit_candidate"
     record_layer_events=True,
 )
 
 # 2. Append-Only Local Audit Sink (JSONL)
 jsonl_sink = JsonlTelemetrySink(
     path=".logitgate/telemetry.jsonl",
-    privacy="hash_candidate",
+    privacy="hash_only",
     max_bytes=10 * 1024 * 1024,  # Auto-rotate at 10 MB
     backup_count=3,
 )
@@ -187,9 +191,10 @@ gate = LogitGate(
 
 ### Privacy Modes
 
-- `privacy="full"`: Records full prompt, candidate text, and token logprobs in trace metadata.
-- `privacy="hash_candidate"`: Records a SHA-256 hash of the candidate text and character length, omitting raw content.
-- `privacy="omit_candidate"`: Omits candidate text entirely, recording only timestamps, latencies, triggered layers, and probabilities.
+- `privacy="full"`: Records candidate text (bounded by `max_candidate_chars`), rubric, verdict reason, and per-layer scalar log-odds/metadata (not raw full prompts).
+- `privacy="hash_only"`: Sets `candidate=None` while retaining its SHA-256 digest (`candidate_sha256`), character length, reason, and trace metadata.
+- `privacy="redact_pii"`: Scrubs emails, Bearer/API tokens, US SSNs, and checksum-valid (Luhn) payment card numbers across candidate text, verdict reasons, and diagnostic reports while keeping `candidate_sha256` and `candidate_length`.
+- `privacy="omit_candidate"`: Omits candidate text and scrubs generative critique diagnostics, recording only hashes, lengths, timestamps, latencies, triggered layers, and scalar probabilities.
 
 [🔬 Systems Architecture & Telemetry Sinks](../architecture.md)
 
@@ -201,11 +206,15 @@ gate = LogitGate(
 
 | Command | Primary Use Case | Key Options | Example Invocations |
 | :--- | :--- | :--- | :--- |
-| **`eval`** | Evaluate a candidate string | `--rubric`, `--backend`, `--threshold` | `logitgate eval "Is this safe?" "input text"` |
-| **`explain`** | Diagnose a failure snapshot | `--model`, `--max-tokens` | `logitgate explain .logitgate/failures/latest.json` |
-| **`calibrate`** | Fit conformal thresholds | `--dataset`, `--target-alpha` | `logitgate calibrate --dataset holdout.json --target-alpha 0.05` |
-| **`rank`** | Rank competing completions | `--rubric`, `--backend` | `logitgate rank "Pick best" opt1.txt opt2.txt` |
-| **`stream`** | Guard streaming generation | `--rubric`, `--delivery` | `python gen.py \| logitgate stream --rubric "Safe?"` |
-| **`benchmark`** | Run hardware benchmarks | `--suite`, `--backend`, `--judge-backend` | `logitgate benchmark --suite multi_domain_24` |
-| **`telemetry`** | Inspect telemetry logs | `--format`, `--filter` | `logitgate telemetry inspect .logitgate/telemetry.jsonl` |
-| **`distill`** | Compile student bundle | `--dataset`, `--student-model` | `logitgate distill --dataset pairs.json --student-model qwen2.5:3b` |
+| **`eval`** | Evaluate a candidate string or file | `--rubric`, `--candidate`, `--file`, `--threshold` | `logitgate eval --rubric "Is this safe?" --candidate "input text"` |
+| **`explain`** | Diagnose a failure snapshot | `snapshot_path`, `--model`, `--max-tokens`, `--offline` | `logitgate explain .logitgate/failures/latest.json` |
+| **`calibrate`** | Fit conformal thresholds | `--dataset`, `--alpha`, `--backend`, `-o` | `logitgate calibrate --dataset holdout.jsonl --alpha 0.05` |
+| **`rank`** | Rank competing completions | `--rubric`, `--file`, `--candidate`, `--mode` | `logitgate rank --rubric "Pick best" --file opt1.txt --file opt2.txt` |
+| **`stream`** | Guard streaming generation | `--rubric`, `--delivery`, `--stride-chars` | `python gen.py \| logitgate stream --rubric "Safe?"` |
+| **`benchmark`** | Run hardware benchmarks | `--dataset`, `--modes`, `--backend`, `--judge-backend` | `logitgate benchmark --dataset benchmarks/data/cal_distill_80.json` |
+| **`telemetry`** | Summarize, export, or audit drift | `summary`, `export`, `recalibrate`, `drift` | `logitgate telemetry summary .logitgate/telemetry.jsonl` |
+| **`distill`** | Compile student bundle or LoRA | `compile`, `train-lora`, `--telemetry`, `--model`, `-o` | `logitgate distill compile --telemetry .logitgate/telemetry.jsonl --model qwen2.5:3b -o bundle.json` |
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)

@@ -8,6 +8,7 @@ import importlib
 import importlib.util
 import inspect
 import re
+import shlex
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import ModuleType
@@ -16,6 +17,8 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+
+from logitgate.cli.parser import create_parser
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = REPO_ROOT / "docs"
@@ -399,5 +402,302 @@ def test_grounded_rubric_examples_always_supply_reference_context() -> None:
                 missing.append(f"{rel}[text block {idx}]")
 
     assert missing == [], f"Grounded rubric examples missing reference context: {missing}"
+
+
+def _extract_piped_logitgate_commands(raw_line: str) -> list[list[str]]:
+    """Extract tokenized `logitgate ...` invocations from a shell line, stripping upstream pipes."""
+    lexer = shlex.shlex(raw_line, posix=True, punctuation_chars="|")
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
+    try:
+        raw_tokens = list(lexer)
+    except ValueError:
+        return []
+
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for tok in raw_tokens:
+        if tok == "|":
+            if current:
+                segments.append(current)
+                current = []
+        else:
+            current.append(tok)
+    if current:
+        segments.append(current)
+
+    return [seg for seg in segments if seg and seg[0] == "logitgate"]
+
+
+def _github_heading_slugs(markdown_text: str) -> list[str]:
+    """Compute ordered GitHub/GitLab heading anchor slugs outside fenced code blocks."""
+    prose = _strip_fenced_code_blocks(markdown_text)
+    counts: dict[str, int] = {}
+    slugs: list[str] = []
+    for match in re.finditer(r"^#{1,6}\s+(.+?)(?:\s+#+)?\s*$", prose, flags=re.MULTILINE):
+        heading = match.group(1).strip()
+        heading = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", heading)
+        slug = heading.lower()
+        slug = re.sub(r"[^\w\- ]", "", slug)
+        slug = slug.replace(" ", "-")
+        seen = counts.get(slug, 0)
+        counts[slug] = seen + 1
+        slugs.append(slug if seen == 0 else f"{slug}-{seen}")
+    return slugs
+
+
+def test_all_cli_invocations_in_docs_parse_cleanly() -> None:
+    """Every `logitgate ...` CLI example in bash blocks and CLI tables parses without SystemExit."""
+    parser = create_parser()
+    md_files = [README_PATH, *sorted(DOCS_DIR.rglob("*.md"))]
+    failures: list[str] = []
+    checked_count = 0
+
+    bash_block_re = re.compile(
+        r"^```(?:bash|sh|shell)\n(.*?)^```",
+        flags=re.DOTALL | re.MULTILINE,
+    )
+
+    for md_path in md_files:
+        rel = md_path.relative_to(REPO_ROOT).as_posix()
+        content = md_path.read_text(encoding="utf-8")
+
+        # 1. Fenced bash/sh blocks (join backslash continuations, strip comments & upstream pipes)
+        for block_idx, raw_block in enumerate(bash_block_re.findall(content)):
+            joined = re.sub(r"\\\n\s*", " ", raw_block)
+            for raw_line in joined.splitlines():
+                stripped = raw_line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                for tokens in _extract_piped_logitgate_commands(stripped):
+                    checked_count += 1
+                    try:
+                        parser.parse_args(tokens[1:])
+                    except SystemExit as exc:
+                        failures.append(
+                            f"{rel}[bash block {block_idx}]: {shlex.join(tokens)!r} exited with {exc.code}"
+                        )
+
+        # 2. Backticked `logitgate ...` cells in Markdown tables and >=3-token prose invocations
+        prose = _strip_fenced_code_blocks(content)
+        for line_no, line in enumerate(prose.splitlines(), 1):
+            in_table = line.lstrip().startswith("|")
+            for span_match in re.finditer(r"`([^`\n]+)`", line):
+                raw_span = span_match.group(1).replace(r"\|", "|").strip()
+                for tokens in _extract_piped_logitgate_commands(raw_span):
+                    if len(tokens) < 3:
+                        continue
+                    if not in_table and "..." in tokens:
+                        continue
+                    checked_count += 1
+                    try:
+                        parser.parse_args(tokens[1:])
+                    except SystemExit as exc:
+                        failures.append(
+                            f"{rel}:{line_no}: {shlex.join(tokens)!r} exited with {exc.code}"
+                        )
+
+    assert checked_count >= 16, f"Expected >= 16 CLI examples across docs, checked {checked_count}"
+    assert failures == [], f"CLI doc examples failed create_parser().parse_args: {failures}"
+
+
+def test_all_markdown_internal_anchor_links_resolve() -> None:
+    """Every `#anchor` link resolves to a heading slug, and TOC anchors match heading order."""
+    md_files = [README_PATH, *sorted(DOCS_DIR.rglob("*.md"))]
+    anchor_link_re = re.compile(r"\[[^\]]*\]\(#([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+    unresolved: list[str] = []
+
+    slugs_by_rel: dict[str, list[str]] = {}
+    prose_by_rel: dict[str, str] = {}
+
+    for md_path in md_files:
+        rel = md_path.relative_to(REPO_ROOT).as_posix()
+        raw_text = md_path.read_text(encoding="utf-8")
+        slugs = _github_heading_slugs(raw_text)
+        slug_set = set(slugs)
+        slugs_by_rel[rel] = slugs
+
+        prose = _strip_fenced_code_blocks(raw_text)
+        prose_no_inline_code = re.sub(r"`[^`\n]+`", "", prose)
+        prose_by_rel[rel] = prose_no_inline_code
+
+        for match in anchor_link_re.finditer(prose_no_inline_code):
+            anchor = match.group(1).strip()
+            if anchor not in slug_set:
+                unresolved.append(f"{rel} -> #{anchor}")
+
+    assert unresolved == [], f"Unresolved Markdown #anchor links: {unresolved}"
+
+    # Verify Table of Contents anchor order matches document heading order
+    toc_section_re = re.compile(
+        r"^##\s+Table of Contents\s*\n(.*?)(?=^---|\n##\s+)",
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    order_errors: list[str] = []
+    for toc_rel in ("docs/benchmarks.md", "docs/eli5/how_logitgate_works.md"):
+        prose_doc = prose_by_rel[toc_rel]
+        slugs = slugs_by_rel[toc_rel]
+        toc_match = toc_section_re.search(prose_doc)
+        assert toc_match is not None, f"Missing '## Table of Contents' section in {toc_rel}"
+        toc_anchors = [m.group(1).strip() for m in anchor_link_re.finditer(toc_match.group(1))]
+        assert toc_anchors, f"No #anchor entries found in Table of Contents of {toc_rel}"
+
+        positions = [slugs.index(a) for a in toc_anchors]
+        if positions != sorted(positions):
+            out_of_order = [
+                f"#{toc_anchors[i]} (heading idx {positions[i]}) after "
+                f"#{toc_anchors[i - 1]} (heading idx {positions[i - 1]})"
+                for i in range(1, len(positions))
+                if positions[i] < positions[i - 1]
+            ]
+            order_errors.append(f"{toc_rel}: {out_of_order}")
+
+    assert order_errors == [], f"TOC anchor order disagrees with heading order: {order_errors}"
+
+
+def test_cascade_never_called_with_varargs_in_docs() -> None:
+    """Every Cascade(...) call in docs Python blocks passes at most 1 positional argument."""
+    md_files = [README_PATH, *sorted(DOCS_DIR.rglob("*.md"))]
+    violations: list[str] = []
+
+    for md_path in md_files:
+        rel = md_path.relative_to(REPO_ROOT).as_posix()
+        content = md_path.read_text(encoding="utf-8")
+        blocks = re.findall(
+            r"^```python\n(.*?)^```",
+            content,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+        for idx, block in enumerate(blocks):
+            tree = ast.parse(block, filename=f"{rel}[block {idx}]")
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                is_cascade = (isinstance(node.func, ast.Name) and node.func.id == "Cascade") or (
+                    isinstance(node.func, ast.Attribute) and node.func.attr == "Cascade"
+                )
+                if is_cascade and len(node.args) > 1:
+                    violations.append(
+                        f"{rel}[block {idx}] line {node.lineno}: "
+                        f"Cascade() called with {len(node.args)} positional args (expected <= 1)"
+                    )
+
+    assert violations == [], f"Invalid vararg Cascade() calls in docs: {violations}"
+
+
+def _split_markdown_table_cells(line: str) -> list[str]:
+    """Split a Markdown table row into cells, ignoring escaped pipes (\\|)."""
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith(r"\|"):
+        stripped = stripped[:-1]
+    return re.split(r"(?<!\\)\|", stripped)
+
+
+def _is_table_separator_row(line: str) -> bool:
+    """Return True if a Markdown line is a GFM table alignment separator row."""
+    if not re.search(r"(?<!\\)\|", line):
+        return False
+    cells = _split_markdown_table_cells(line)
+    return len(cells) >= 2 and all(re.fullmatch(r"\s*:?-{2,}:?\s*", cell) for cell in cells)
+
+
+def test_markdown_tables_have_consistent_column_counts() -> None:
+    """Every Markdown table across README.md and docs/**/*.md has consistent column counts."""
+    md_files = [README_PATH, *sorted(DOCS_DIR.rglob("*.md"))]
+    mismatches: list[str] = []
+    fence_re = re.compile(r"^\s*(`{3,}|~{3,})")
+
+    for md_path in md_files:
+        rel = md_path.relative_to(REPO_ROOT).as_posix()
+        lines = md_path.read_text(encoding="utf-8").splitlines()
+        in_fence_char: str | None = None
+        in_fence_len = 0
+        line_in_fence: list[bool] = []
+
+        for line in lines:
+            m = fence_re.match(line)
+            if m:
+                marker = m.group(1)
+                if in_fence_char is None:
+                    in_fence_char = marker[0]
+                    in_fence_len = len(marker)
+                    line_in_fence.append(True)
+                    continue
+                if marker[0] == in_fence_char and len(marker) >= in_fence_len:
+                    in_fence_char = None
+                    in_fence_len = 0
+                    line_in_fence.append(True)
+                    continue
+            line_in_fence.append(in_fence_char is not None)
+
+        i = 1
+        while i < len(lines):
+            if (
+                not line_in_fence[i]
+                and not line_in_fence[i - 1]
+                and _is_table_separator_row(lines[i])
+                and re.search(r"(?<!\\)\|", lines[i - 1])
+            ):
+                header_cols = len(_split_markdown_table_cells(lines[i - 1]))
+                sep_cols = len(_split_markdown_table_cells(lines[i]))
+                if sep_cols != header_cols:
+                    mismatches.append(
+                        f"{rel}:{i + 1}: separator has {sep_cols} cols, header has {header_cols}"
+                    )
+                j = i + 1
+                while (
+                    j < len(lines)
+                    and not line_in_fence[j]
+                    and lines[j].strip()
+                    and re.search(r"(?<!\\)\|", lines[j])
+                ):
+                    row_cols = len(_split_markdown_table_cells(lines[j]))
+                    if row_cols != header_cols:
+                        mismatches.append(
+                            f"{rel}:{j + 1}: row has {row_cols} cols, header has {header_cols}"
+                        )
+                    j += 1
+                i = j
+            else:
+                i += 1
+
+    assert mismatches == [], f"Markdown table column count mismatches: {mismatches}"
+
+
+def test_mermaid_blocks_have_no_raw_html_tags_and_nav_bars_present() -> None:
+    """Mermaid blocks contain no raw HTML tags (except <br>/<br/>), all docs have line-1 nav bars, and README links docs/integrations.md."""
+    mermaid_re = re.compile(r"^```mermaid\n(.*?)^```", flags=re.DOTALL | re.MULTILINE)
+    raw_html_re = re.compile(r"</?([A-Za-z][A-Za-z0-9_-]*)(?:\s[^>\n]*)?/?>")
+    allowed_tags = {"<br>", "<br/>", "<br />"}
+
+    html_violations: list[str] = []
+    missing_nav_bars: list[str] = []
+
+    for md_path in sorted(DOCS_DIR.rglob("*.md")):
+        rel = md_path.relative_to(REPO_ROOT).as_posix()
+        content = md_path.read_text(encoding="utf-8")
+
+        for idx, block in enumerate(mermaid_re.findall(content)):
+            for match in raw_html_re.finditer(block):
+                tag_text = match.group(0)
+                if tag_text.lower() not in allowed_tags:
+                    html_violations.append(f"{rel}[mermaid {idx}]: {tag_text!r}")
+
+        lines = content.splitlines()
+        first_line = lines[0] if lines else ""
+        if "README.md)" not in first_line:
+            missing_nav_bars.append(f"{rel}: line 1 missing README.md nav link ({first_line!r})")
+
+    assert html_violations == [], f"Raw HTML tags in Mermaid blocks: {html_violations}"
+    assert missing_nav_bars == [], f"Docs missing top navigation link bar: {missing_nav_bars}"
+
+    readme_text = README_PATH.read_text(encoding="utf-8")
+    assert "docs/integrations.md" in readme_text, (
+        "README.md must link to docs/integrations.md"
+    )
+
+
 
 

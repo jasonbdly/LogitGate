@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="540" height="500" viewBox="0 0 540 500" role="img" aria-label="StreamGuard Mid-Stream Circuit Breaker">
   <title>StreamGuard Mid-Stream Circuit Breaker</title>
-  <desc>Live grounding confidence waveform over tokens 0 to 500: Clauses 1 and 2 stay above P=0.90, then Clause 3 plunges below the 0.15 trip line at Token 45, opening the circuit breaker and saving 455 downstream tokens.</desc>
+  <desc>Live grounding confidence waveform over words 0 to 500: Sentences 1 and 2 stay above P=0.90, then Sentence 3 plunges below the 0.15 trip line at Word 45, opening the circuit breaker and saving 455 downstream words.</desc>
   <defs>
     <style>
     :root {
@@ -11,16 +11,17 @@
       --text-primary: #0f172a;
       --text-secondary: #334155;
       --text-muted: #475569;
-      --accent-emerald: #059669;
+      --ink-on-solid: #ffffff;
+      --accent-emerald: #047857;
       --accent-emerald-bg: #ecfdf5;
       --accent-emerald-border: #6ee7b7;
-      --accent-rose: #dc2626;
+      --accent-rose: #be123c;
       --accent-rose-bg: #fef2f2;
       --accent-rose-border: #fca5a5;
-      --accent-amber: #d97706;
+      --accent-amber: #b45309;
       --accent-amber-bg: #fffbeb;
       --accent-amber-border: #fcd34d;
-      --accent-sky: #0284c7;
+      --accent-sky: #0369a1;
       --accent-sky-bg: #f0f9ff;
       --accent-sky-border: #7dd3fc;
       --accent-indigo: #4338ca;
@@ -41,10 +42,11 @@
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
-        --accent-emerald: #10b981;
+        --ink-on-solid: #0f172a;
+        --accent-emerald: #34d399;
         --accent-emerald-bg: #064e3b;
         --accent-emerald-border: #059669;
-        --accent-rose: #f43f5e;
+        --accent-rose: #fb7185;
         --accent-rose-bg: #4c0519;
         --accent-rose-border: #e11d48;
         --accent-amber: #f59e0b;
@@ -158,43 +160,43 @@
 
   <text x="58" y="308" text-anchor="end" font-size="11.5" fill="var(--text-muted)" class="mono">0.0</text>
 
-  <!-- X-Axis Labels (Tok 0=66, Tok 18=126, Tok 36=186, Tok 45=216, Tok 500=500) -->
+  <!-- X-Axis Labels (Word 0=66, Word 18=126, Word 36=186, Word 45=216, Word 500=494) -->
   <text x="66" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">0</text>
-  <text x="216" y="324" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">Tok 45</text>
-  <text x="358" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Tok 250</text>
-  <text x="494" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Tok 500</text>
+  <text x="216" y="324" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">Word 45</text>
+  <text x="358" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Word 250</text>
+  <text x="494" y="324" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Word 500</text>
 
-  <!-- Ghosted Ungenerated Zone (Tok 45..500) -->
+  <!-- Ghosted Ungenerated Zone (Word 45..500) -->
   <rect x="216" y="96" width="290" height="208" fill="var(--surface-subtle)" opacity="0.65" />
   <path d="M 216 293 C 268 296, 330 288, 396 294 C 446 298, 476 290, 502 296"
         fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-dasharray="4 5" opacity="0.6" />
   <text x="364" y="160" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-emerald)">455 Words Prevented</text>
   <text x="364" y="180" text-anchor="middle" font-size="12" fill="var(--text-secondary)">91% GPU work saved</text>
 
-  <!-- Live Confidence Waveform (Tok 0..45) -->
-  <path d="M 66 112 L 126 108 L 186 115 L 204 185 L 216 293"
+  <!-- Live Confidence Waveform (Word 0..45, continuous transition at (198, 160)) -->
+  <path d="M 66 112 L 126 108 L 186 115 L 198 160"
         fill="none" stroke="var(--accent-emerald)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
   <!-- Final plunging red segment -->
   <line x1="198" y1="160" x2="216" y2="293" stroke="var(--accent-rose)" stroke-width="3.5" stroke-linecap="round" />
 
-  <!-- Clause Markers -->
+  <!-- Sentence Markers -->
   <circle cx="126" cy="108" r="5" fill="var(--accent-emerald)" stroke="#ffffff" stroke-width="1.5" />
-  <text x="126" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)" class="mono">C1: 0.94</text>
+  <text x="120" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)" class="mono">S1: P=0.94</text>
 
   <circle cx="186" cy="115" r="5" fill="var(--accent-emerald)" stroke="#ffffff" stroke-width="1.5" />
-  <text x="192" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)" class="mono">C2: 0.91</text>
+  <text x="202" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)" class="mono">S2: P=0.91</text>
 
   <!-- Trip Point Pulse -->
   <circle cx="216" cy="293" r="10" fill="var(--accent-rose)" opacity="0.25" class="anim-pulse" />
   <circle cx="216" cy="293" r="5" fill="var(--accent-rose)" stroke="#ffffff" stroke-width="1.5" />
-  <text x="226" y="242" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">C3: P=0.05</text>
+  <text x="226" y="242" font-size="11.5" font-weight="700" fill="var(--accent-rose)" class="mono">S3: P=0.05</text>
 
   <!-- Circuit Breaker Open Switch Graphic at x=216 -->
   <line x1="216" y1="334" x2="216" y2="352" stroke="var(--accent-rose)" stroke-width="2.5" />
   <circle cx="216" cy="356" r="4" fill="var(--accent-rose)" />
   <line x1="216" y1="356" x2="246" y2="338" stroke="var(--accent-rose)" stroke-width="3" stroke-linecap="round" />
   <circle cx="252" cy="356" r="4" fill="var(--border-muted)" />
-  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER TRIPS -&gt; Stream Stopped Early</text>
+  <text x="266" y="359" font-size="12.5" font-weight="700" fill="var(--accent-rose)">BREAKER TRIPS -&gt; Stream Halted</text>
 
   <!-- Bottom 3 Outcome Summaries -->
   <line x1="24" y1="386" x2="174" y2="386" stroke="var(--accent-rose)" stroke-width="3" />
@@ -210,6 +212,6 @@
   <line x1="366" y1="386" x2="516" y2="386" stroke="var(--accent-sky)" stroke-width="3" />
   <text x="366" y="408" font-size="13" font-weight="700" fill="var(--text-primary)">GPU Recovery</text>
   <text x="366" y="428" font-size="12" fill="var(--text-secondary)">Frees GPU memory early</text>
-  <text x="366" y="446" font-size="12" fill="var(--text-muted)">455 steps saved</text>
+  <text x="366" y="446" font-size="12" fill="var(--text-muted)">455 words saved</text>
 
 </svg>

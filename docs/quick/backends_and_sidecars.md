@@ -1,3 +1,7 @@
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)
+
+---
+
 # Backends & Sidecars (⚡ Quick Notes)
 
 Provider configuration matrix, HTTP retry tuning, and sidecar routing for models that do not expose token log-probabilities.
@@ -10,11 +14,12 @@ Provider configuration matrix, HTTP retry tuning, and sidecar routing for models
 
 | Provider | URI Scheme | Class Name | Logprobs Supported | Best For |
 | :--- | :--- | :--- | :---: | :--- |
-| **Ollama** | `ollama://localhost:11434/model` | `OllamaBackend` | Yes (`top_logprobs`) | Local GGUF models on developer laptops & workstations |
+| **Ollama** | `ollama://localhost:11434/model` | `OllamaBackend` | Yes (`top_logprobs`) | Local quantized (GGUF) models on developer laptops & workstations |
 | **vLLM / SGLang** | `vllm://localhost:8000/v1/model` | `OpenAICompatBackend` | Yes (`top_logprobs`) | High-throughput server clusters & prefix caching |
 | **OpenAI API** | `openai://gpt-4o-mini` | `OpenAICompatBackend` | Yes (`logprobs=True`) | Hosted commercial API evaluation |
 | **Google Gemini** | `gemini://gemini-2.5-flash` | `GeminiBackend` | Yes (`response_logprobs`) | Fast cloud evaluation with large context windows |
 | **llama.cpp** | `llamacpp://localhost:8080` | `LlamaCppBackend` | Yes (`probs`) | C++ in-process binding or standalone HTTP daemon |
+| **Recurrent PyTorch** | `recurrent://model?num_loops=2` | `RecurrentPyTorchBackend` | Yes (Full logits) | Fixed-$K$ recurrent depth looping (see [Recurrent & Hardware](../advanced/recurrent_and_hardware.md)) |
 | **Offline Stub** | `stub://default` | `StubBackend` | Yes (Synthetic) | Unit tests, CI plumbing checks, zero GPU required |
 
 ### Copy-Paste Configuration Recipes
@@ -73,11 +78,11 @@ Different model servers format their next-word probability scores differently un
 
 **Problem & deployment**: Keeps high-throughput batch evaluation and live guardrail services resilient against transient `429`/`503` rate limits and brief network blips without retrying permanent `4xx` configuration or auth errors.
 
-All HTTP-backed inference engines share transient retry and client-pooling lifecycle mechanics (`_HTTPClientMixin`).
+`OllamaBackend`, `OpenAICompatBackend`, and `GeminiBackend` implement transient HTTP retries (`timeout=30.0`, `max_retries=2`, `retry_backoff_base=0.25`, `retry_max_wait=5.0` by default) and connection pooling via `_HTTPClientMixin`, while `LlamaCppBackend` inherits `_HTTPClientMixin` for client pooling and event-loop lifecycle only.
 
 ### Transient Retries & Exponential Backoff
 
-HTTP backends retry only transient failures (`{408, 429, 502, 503, 504}` and `httpx.TransportError`). Permanent client errors (`4xx` such as 400 Bad Request, 401 Unauthorized, 404 Not Found) fail immediately without wasted retry cycles.
+`OllamaBackend`, `OpenAICompatBackend`, and `GeminiBackend` retry only transient failures (`{408, 429, 502, 503, 504}` and `httpx.TransportError`). Permanent client errors (`4xx` such as 400 Bad Request, 401 Unauthorized, 404 Not Found) fail immediately without wasted retry cycles.
 
 ```python
 from logitgate.backends import OllamaBackend
@@ -85,16 +90,16 @@ from logitgate.backends import OllamaBackend
 backend = OllamaBackend(
     model="qwen2.5:7b",
     base_url="http://localhost:11434",
-    timeout=45.0,
-    max_retries=3,            # Up to 3 retry attempts on transient network errors
-    retry_backoff_base=0.5,   # Exponential backoff base (seconds)
-    retry_max_wait=10.0,      # Ceiling cap on individual backoff sleep
+    timeout=45.0,             # Default: 30.0s
+    max_retries=3,            # Up to 3 retry attempts on transient errors (default: 2)
+    retry_backoff_base=0.5,   # Exponential backoff base in seconds (default: 0.25)
+    retry_max_wait=10.0,      # Ceiling cap on individual backoff sleep (default: 5.0)
 )
 ```
 
 ### Server Rate Limits (`Retry-After`)
 
-When an endpoint returns HTTP `429 Too Many Requests` or `503 Service Unavailable` with a `Retry-After` header (in integer seconds or RFC 7231 HTTP-date format), LogitGate honors the server-specified sleep duration (clamped by `retry_max_wait`) before issuing the retry.
+When an endpoint returns HTTP `429 Too Many Requests` or `503 Service Unavailable` with a `Retry-After` header, `_HTTPClientMixin` parses numeric seconds via `float()` (clamped by `retry_max_wait`) and falls back to exponential backoff on non-numeric values.
 
 ### Async Event Loop Reuse Guarantee
 
@@ -113,6 +118,12 @@ Several popular commercial APIs do not expose token log-probabilities:
 - **Amazon Bedrock Converse API**
 
 LogitGate resolves this with two explicit routing strategies:
+
+- **Choose Strategy A (`sidecar`)** when you want sub-100 ms Layer 1 gating on every request using a fast logprob-capable local GPU or cloud sidecar (`OllamaBackend`, vLLM, or `GeminiBackend`).
+- **Choose Strategy B (`escalate`)** when no logprob-capable sidecar is available or when you want the primary model itself to produce a full Layer 2 `JudgeGate` critique on every item.
+
+> [!TIP]
+> When constructing `OpenAICompatBackend` directly for a known non-logprob model (such as `o1`, `o3-mini`, or Groq endpoints), pass `supports_logprobs=False` so LogitGate routes directly to your sidecar or escalation path without waiting for an initial failed logprob probe.
 
 ### Strategy A: Sidecar Evaluation (`on_unsupported_logprobs="sidecar"`)
 
@@ -145,20 +156,23 @@ print(f"Passed: {verdict.passed} via sidecar: {verdict.triggered_layer}")
 
 ### Strategy B: Escalation Routing (`on_unsupported_logprobs="escalate"`)
 
-When no logprob sidecar is available, LogitGate skips the Layer 1 logit probe and escalates directly to Layer 2 (`JudgeGate`), prompting the primary model to generate a structured text critique and verdict.
+When no logprob sidecar is available, chaining `LogitGate(..., on_unsupported_logprobs="escalate") >> JudgeGate(...)` skips the Layer 1 logit probe (`DecisionStatus.AMBIGUOUS`) and escalates directly to Layer 2 (`JudgeGate`), prompting the primary model to generate a structured text critique and verdict.
 
 ```python
-from logitgate import LogitGate
+from logitgate import JudgeGate, LogitGate
 
-gate = LogitGate(
-    rubric="Does the output strictly adhere to the requested schema?",
-    backend="openai://o3-mini",
-    on_unsupported_logprobs="escalate",
+cascade = (
+    LogitGate(
+        rubric="Does the output strictly adhere to the requested schema?",
+        backend="openai://o3-mini",
+        on_unsupported_logprobs="escalate",
+    )
+    >> JudgeGate(backend="openai://o3-mini")
 )
 
 candidate = "{'data': [1, 2, 3]}"
-verdict = gate.evaluate(candidate)
-print(f"Passed: {verdict.passed} via escalated critique")
+verdict = cascade.evaluate(candidate)
+print(f"Passed: {verdict.passed} via {verdict.triggered_layer} escalated critique")
 ```
 
 <details>
@@ -168,3 +182,7 @@ Large closed models like Claude or OpenAI `o3` are great at writing answers, but
 </details>
 
 [🔬 Production Use Cases & Sidecar Deployments](../use_cases.md)
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)

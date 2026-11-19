@@ -1,3 +1,7 @@
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)
+
+---
+
 # Quickstart Recipes (⚡ Quick Notes)
 
 Copy-paste recipes, constructor defaults, and production deployment patterns for core LogitGate primitives.
@@ -37,13 +41,13 @@ print(f"Tokens generated: {verdict.total_tokens_generated}")  # 0
 | `rubric` | `str` | *(required)* | Evaluation criteria stated as a clear yes/no question. |
 | `pass_threshold` | `float` | `0.85` | Probability threshold for decisive `PASSED` status. |
 | `fail_threshold` | `float` | `0.20` | Probability threshold below which status is decisive `FAILED`. |
-| `backend` | `str \| Backend \| None` | `None` | URI or instance (defaults to `LOGITGATE_BACKEND` or stub). |
+| `backend` | `str \| LogitBackend \| None` | `None` | URI or instance (defaults to `LOGITGATE_BACKEND` or stub). |
 | `model` | `str \| None` | `None` | Model override for the backend endpoint. |
 | `symmetric_debiasing` | `bool` | `True` | 2-pass permutation canceling token and position priors. |
 | `logit_temperature` | `float \| "auto" \| None` | `None` | Temperature scaling divisor ($T$) for sigmoid calibration. |
-| `max_positional_bias` | `float` | `3.0` | Abstains if log-odds difference between passes exceeds this delta. |
+| `max_positional_bias` | `float \| None` | `None` | Abstains if log-odds difference between passes exceeds this cap (e.g., `3.0`). |
 | `on_unsupported_logprobs`| `Literal["raise", "escalate", "sidecar"]` | `"raise"` | Behavior when backend lacks logprobs. |
-| `sidecar_backend` | `str \| Backend \| None` | `None` | Alternative backend when using sidecar mode. |
+| `sidecar_backend` | `str \| LogitBackend \| None` | `None` | Alternative backend when using sidecar mode. |
 
 <details>
 <summary>💡 <b>Why this works</b></summary>
@@ -88,7 +92,7 @@ with cascade:
 
 - `trigger="on_ambiguous_only"` (Default): Layer 2 executes only when Layer 1 confidence is ambiguous (`fail_threshold < P < pass_threshold`). Decisive passes and fails exit immediately.
 - `trigger="on_ambiguous_or_fail"`: Layer 2 executes on both ambiguity and failure.
-- `allow_fail_override=True`: Allows Tier-2 `JudgeGate` to adjudicate and rescue Tier-1 false negatives while keeping Tier-0 AST structural failures final.
+- `allow_fail_override=True`: Allows Layer 2 `JudgeGate` to adjudicate and rescue Layer 1 false negatives while keeping Layer 0 AST structural failures final.
 
 [🔬 Systems Architecture & Cascade Lifecycle](../architecture.md)
 
@@ -96,7 +100,7 @@ with cascade:
 
 ## 3. `ChoiceGate` (Discrete Categorical Routing)
 
-**Problem & deployment**: Routes support tickets, triage queues, and intent classifiers across discrete categories without token generation, eliminating alphabetical `"A"` slot bias via fixed-point-free derangement permutations.
+**Problem & deployment**: Routes support tickets, triage queues, and intent classifiers across discrete categories without token generation, eliminating alphabetical `"A"` slot bias via fixed-point-free derangement permutations (circular slot rotations where no option stays on the same letter).
 
 ### Copy-Paste Recipe
 
@@ -130,7 +134,7 @@ print(f"Distribution: {verdict.choice_probabilities}")
 <details>
 <summary>💡 <b>Why this works</b></summary>
 
-Models prefer option 'A' over 'B' simply because 'A' appears earlier in the alphabet and earlier in the prompt. By evaluating the question twice with rotated letter assignments, ChoiceGate removes letter favoritism entirely.
+Models prefer option 'A' over 'B' because 'A' appears earlier in the alphabet and earlier in the prompt. By evaluating the question twice with rotated letter assignments, ChoiceGate removes letter favoritism entirely.
 </details>
 
 [🔬 Choice Debiasing Math](../math_and_debiasing.md)
@@ -139,7 +143,7 @@ Models prefer option 'A' over 'B' simply because 'A' appears earlier in the alph
 
 ## 4. `ScoreGate` (Ordinal & Continuous Rubric Scoring)
 
-**Problem & deployment**: Replaces noisy integer-only prompt grading in automated code review, essay/summary grading, and quality dashboards by computing an exact expected value ($\mathbb{E}[S]$) across discrete anchor logits.
+**Problem & deployment**: Replaces noisy integer-only prompt grading in automated code review, essay/summary grading, and quality dashboards by computing a probability-weighted expected score across discrete anchor logits.
 
 ### Copy-Paste Recipe
 
@@ -157,14 +161,15 @@ scorer = ScoreGate(
 )
 
 verdict = scorer.evaluate("def add(a: int, b: int) -> int: return a + b")
-print(f"Expected Score: {verdict.score:.2f} / 5.00")
+score_str = f"{verdict.score:.2f} / 5.00" if verdict.score is not None else "N/A"
+print(f"Expected Score: {score_str}")
 print(f"Passed threshold (>=4.0): {verdict.passed}")
 ```
 
 ### Key Parameters & Invariants
 
-- Combines forward and reverse passes via **log-linear pooling** (geometric mean) in log-probability space before computing expected values. Never averages forward and reverse scores linearly, which distorts bimodal distributions.
-- `max_score_std`: Abstains with `DecisionStatus.AMBIGUOUS` if the posterior distribution variance exceeds this cap (indicating a split or conflicted model).
+- Combines forward and reverse passes via **log-linear pooling** (geometric mean) in log-probability space before computing expected values. Never averages forward and reverse scores linearly, which distorts bimodal (split between extremes) distributions.
+- `max_score_std`: Abstains with `DecisionStatus.AMBIGUOUS` if the posterior distribution standard deviation exceeds this cap (indicating a split or conflicted model).
 
 ---
 
@@ -200,7 +205,7 @@ for rubric, v in zip(rubrics, gate.evaluate_each(candidate), strict=True):
 
 - **Weakest-link verdict**: `MultiRubricGate` passes only when every criterion passes (`PASSED`); any `FAILED` rubric fails the overall verdict, any `AMBIGUOUS` rubric without failures marks it `AMBIGUOUS`, and `verdict.probability` equals the minimum probability across rubrics.
 - **`fail_fast=True`**: Stops sequential evaluation immediately on the first `FAILED` rubric instead of scoring remaining criteria.
-- **`**options`**: Forwards any `LogitGate` keyword argument (`pass_threshold`, `fail_threshold`, `backend`, `model`, `symmetric_debiasing`) to the shared evaluator.
+- `**options`: Forwards any `LogitGate` keyword argument (`pass_threshold`, `fail_threshold`, `backend`, `model`, `symmetric_debiasing`) to the shared evaluator.
 
 [🔬 Production Use Cases for Multi-Rubric Checks](../use_cases.md)
 
@@ -266,14 +271,14 @@ asyncio.run(run_batch())
 
 ### Concurrency Guarantees
 
-- **KV-Cache Warmup**: Batch evaluation automatically warms the shared prompt prefix on candidate 0 before fanning out concurrent requests.
-- **Fault Isolation**: With `on_error="abstain"`, unexpected per-item exceptions isolate to `DecisionStatus.AMBIGUOUS` with the exception message in `trace.metadata["error"]`. `BaseException` subclasses (`asyncio.CancelledError`, `KeyboardInterrupt`) are never swallowed.
+- **Bounded Fan-Out vs. Shared-Prefix Warmup**: Candidate batching (`aevaluate_batch(candidates=...)`) fans out concurrently across items bounded by `max_concurrency` (`asyncio.Semaphore`), whereas multi-rubric batching (`aevaluate_batch(candidate, rubrics)` and `MultiRubricGate`) evaluates rubric 0 first to populate the shared candidate prefix in KV-cache before fanning out the remaining rubrics.
+- **Fault Isolation**: With `on_error="abstain"`, unexpected per-item exceptions isolate to `DecisionStatus.AMBIGUOUS` with the exception message recorded in `trace.metadata["abstained_reason"]`. `BaseException` subclasses (`asyncio.CancelledError`, `KeyboardInterrupt`) are never swallowed.
 
 ---
 
 ## 8. `CalibrationProfile` & `VerdictCache`
 
-**Problem & deployment**: Bounds false-pass error rates via split-conformal calibration in regulated or high-stakes workflows, while `VerdictCache` eliminates redundant GPU calls on repeated CI fixtures and regression inputs with persistent SQLite caching (`<0.05 ms` cache hits).
+**Problem & deployment**: Bounds false-pass error rates via split-conformal calibration in regulated or high-stakes workflows, while `VerdictCache` eliminates redundant GPU calls on repeated CI fixtures and regression inputs with persistent SQLite caching (`~0.11-0.14 ms` cache hits).
 
 ### Copy-Paste Recipe
 
@@ -282,12 +287,14 @@ from pathlib import Path
 import tempfile
 from logitgate import CalibrationProfile, LogitGate, VerdictCache
 
-# 1. Generate split-conformal calibration profile from holdout data
-samples = [(2.5, 2.3, 1) for _ in range(25)] + [(-2.5, -2.3, 0) for _ in range(25)]
-profile = CalibrationProfile.from_log_odds_samples(
-    samples,
-    target_risk_alpha=0.05,
+# 1. Define or load a calibrated profile (e.g. saved by fit_calibration_profile or CalibrationProfile.load(...))
+profile = CalibrationProfile(
     model="qwen2.5:7b",
+    binary_temperature=0.85,
+    pass_threshold=0.88,
+    fail_threshold=0.15,
+    target_risk_alpha=0.05,
+    guarantee_holds=True,
 )
 
 # 2. Attach cache and profile to gate
@@ -296,11 +303,16 @@ with tempfile.TemporaryDirectory() as tmp:
     with VerdictCache(path=cache_path, max_entries=1024) as cache:
         gate = LogitGate(
             rubric="Is the code properly formatted?",
+            profile=profile,
             cache=cache,
         )
         v1 = gate.evaluate("def foo(): pass")
-        v2 = gate.evaluate("def foo(): pass")  # Cache hit (<0.05ms)
+        v2 = gate.evaluate("def foo(): pass")  # Cache hit (~0.11-0.14 ms)
         assert v2.traces[0].metadata.get("cache_hit") is True
 ```
 
 [🔬 Conformal Calibration Proofs & Quantiles](../math_and_debiasing.md)
+
+---
+
+[🏠 README](../../README.md) · [📚 Docs Hub](../README.md) · [🔬 Deep Architecture](../architecture.md) · [🧭 Visual Guide](../eli5/how_logitgate_works.md) · [🚀 Power-User](../advanced/distillation_and_lora.md) · [📊 Benchmarks](../benchmarks.md)

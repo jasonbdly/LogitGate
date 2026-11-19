@@ -1,8 +1,10 @@
+[🏠 README](../README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🔬 Deep Architecture](./architecture.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)
+
 # LogitGate Documentation Portal
 
-LogitGate replaces slow generative LLM-as-a-Judge calls with calibrated first-token log-probability gating (`max_tokens=1`, `0` generated reasoning tokens) and deterministic Layer 0 validation, cutting evaluation latency by 4.6x to 17.0x across CI suites, live RAG chatbots, and MCP agent pipelines.
+LogitGate replaces slow generative LLM-as-a-Judge calls with calibrated first-token log-probability gating (`max_tokens=1`, `0` generated reasoning tokens) and deterministic Layer 0 validation, cutting evaluation latency by 4.6x to 17.0x across CI suites, live RAG chatbots, and Model Context Protocol (MCP) agent pipelines.
 
-**Asking *"How does first-token logit evaluation actually work?"*** Start with the foundational end-to-end walkthroughs:
+**New to first-token logit evaluation?** Start with the foundational end-to-end walkthroughs:
 - **[How LogitGate Works](./eli5/how_logitgate_works.md)**: Illustrated walkthrough of first-token scoring, two-pass bias cancellation, calibrated tolerance bands, and 3-stage triage.
 - **[Systems Architecture & Execution Mechanics](./architecture.md)**: Deep engineering blueprint of trait-based routing, KV-cache prefix retention, client pooling, and fault-isolated lifecycles.
 
@@ -11,13 +13,13 @@ This portal organizes all guides into **three depth tiers** plus specialized res
 - **⚡ Quick Notes**: Direct, copy-paste recipes with exact constructor parameters, defaults, and production deployment patterns.
 - **🔬 Deep Notes**: Systems architecture blueprints, mathematical proofs, adversarial security threat models, and empirical benchmark sweeps.
 - **🧭 Visual Guide**: End-to-end walkthroughs and animated SVG diagrams showing how each mechanism works from first principles.
-- **🚀 Power-User & Research**: Specialized guides for student distillation, PEFT LoRA training, online drift monitoring, and recurrent hardware.
+- **🚀 Power-User & Research**: Specialized guides for student distillation, Parameter-Efficient Fine-Tuning (PEFT) LoRA training, online drift monitoring, and recurrent hardware.
 
 ![LogitGate 3-Layer Cascade Flow](./assets/cascade_flow.svg)
 
 ---
 
-## Interactive Documentation Map
+## Documentation Map
 
 ```mermaid
 flowchart TD
@@ -71,8 +73,9 @@ Choose the starting point aligned with what you are building today:
 ### 1. Application & Platform Engineers (Fast Integration)
 - [Quickstart Recipes](quick/quickstart_recipes.md): Copy-paste code for `LogitGate`, `Cascade`, `ChoiceGate`, `ScoreGate`, and batch evaluation.
 - [RAG & Agent Tool Safety](quick/rag_and_agents.md): Groundedness checks with prefix caching, `ToolCallGate` pre-execution guards, and `StreamGuard`.
-- [Backends & Sidecars](quick/backends_and_sidecars.md): Endpoint setup (`ollama://`, `vllm://`, `openai://`, `gemini://`, `llamacpp://`), retry policies, and no-logprob sidecars.
+- [Backends & Sidecars](quick/backends_and_sidecars.md): Endpoint setup (`ollama://`, `vllm://`, `openai://`, `gemini://`, `llamacpp://`, `recurrent://`, `stub://`), retry policies, and no-logprob sidecars.
 - [Integrations & OTel](quick/integrations_and_otel.md): Pytest `@check` fixtures, LangGraph conditional edges, DeepEval adapters, and OpenTelemetry spans.
+- [Framework Integrations](integrations.md): Extended ecosystem integration patterns for LangGraph, DeepEval, pytest, and custom middleware.
 
 ### 2. Systems, ML & Security Engineers (Deep Rigor)
 - [Systems Architecture](architecture.md): Concurrency guarantees, client pooling, KV-cache prefix retention, and memory lifecycles.
@@ -86,7 +89,7 @@ Choose the starting point aligned with what you are building today:
 
 ### 4. ML Researchers & Model Developers (Advanced Optimization)
 - [Distillation & PEFT LoRA](advanced/distillation_and_lora.md): Compiling Tier-A zero-GPU calibration bundles and training Tier-B single-token LoRA students.
-- [Drift Monitoring & Adaptive Conformal](advanced/drift_and_adaptive_conformal.md): Online Kolmogorov-Smirnov distribution checks and Gibbs-Candes adaptive risk tracking.
+- [Drift Monitoring & Adaptive Conformal](advanced/drift_and_adaptive_conformal.md): Online Kolmogorov-Smirnov distribution checks and Gibbs-Candès adaptive risk tracking.
 - [Recurrent Looping & Hardware](advanced/recurrent_and_hardware.md): Elastic layer recurrence and hardware execution profiles.
 
 ---
@@ -109,3 +112,7 @@ Choose the starting point aligned with what you are building today:
 | **🚀 Power-User** | [Distillation & LoRA](advanced/distillation_and_lora.md) | Research | Student bundles and PEFT LoRA training recipes |
 | **🚀 Power-User** | [Drift & Adaptive Conformal](advanced/drift_and_adaptive_conformal.md) | Production | Rolling drift detection and dynamic conformal thresholds |
 | **🚀 Power-User** | [Recurrent & Hardware](advanced/recurrent_and_hardware.md) | Systems | Recurrent PyTorch looping and GPU acceleration |
+
+---
+
+[🏠 README](../README.md) · [⚡ Quick Notes](./quick/quickstart_recipes.md) · [🔬 Deep Architecture](./architecture.md) · [🧭 Visual Guide](./eli5/how_logitgate_works.md) · [🚀 Power-User](./advanced/distillation_and_lora.md) · [📊 Benchmarks](./benchmarks.md)

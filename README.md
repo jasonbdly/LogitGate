@@ -10,17 +10,17 @@
 
 **Fast, calibrated first-token logit evaluation and 3-layer cascaded routing for LLMs.**
 
-LogitGate evaluates LLM outputs, RAG groundedness, and agent tool calls by reading **first-token log-probabilities** (`max_tokens=1`, `0` generated reasoning tokens) instead of waiting seconds for a generative Chain-of-Thought critique. A 2-pass log-odds swap cancels position and label priors, while split-conformal thresholds fast-path clear passes/fails in **16 to 101 ms** (**4.6x to 17.0x** faster than generative judges) and escalate only genuinely uncertain edge cases.
+LogitGate evaluates LLM outputs, Retrieval-Augmented Generation (RAG) groundedness, and agent tool calls by reading **first-token log-probabilities** (`max_tokens=1`, `0` generated reasoning tokens) instead of waiting seconds for a generative Chain-of-Thought (CoT) critique. On GPU, Layer-1 gating resolves clear passes and failures in **16 to 110 ms** (**4.6x to 17.0x** faster than generative judges) and escalates only uncertain edge cases.
 
 ---
 
 ## Why First-Token Logits Instead of Text Generation?
 
-When grading an LLM output or RAG reply against a rubric, there are three ways to ask a model for a verdict:
+When grading an LLM output or RAG reply against a rubric, three approaches trade off speed against calibration:
 
-1. **Generative CoT Judge (`1.5-3.0 s`)**: Prompts a model to generate 150-300 reasoning tokens sequentially before emitting `PASS` or `FAIL`. High latency and token cost make it impractical on every CI test or live chat turn.
-2. **Naive `"Answer YES or NO"` Prompt**: Generates 1 text token (`"YES"`), which hides whether the model was `51%` guessing or `99%` certain, skews heavily toward favorite tokens and positions (`"YES"` / `"A"`), splits mass across `"Yes"` / `" Yes"` / `"yes"`, and can be hijacked by prompt injection inside the candidate.
-3. **LogitGate (`~40-90 ms`, `0` generated tokens)**: Sends a structured system + nonce-isolated user prompt with `max_tokens=1` and `<think>` disabled, runs **parallel prompt prefill only**, and reads the model's raw first-token log-probabilities (`top_logprobs`) across `A/B` surface variants in two swapped passes (`A=Pass, B=Fail` and `A=Fail, B=Pass`, sharing the GPU KV-cache). Swapping slots cancels position and token-prior bias algebraically, yielding a calibrated `0.0-1.0` probability that fast-paths clear passes/fails and escalates only uncertain middle-band cases (`0.20 < P < 0.85`) to `JudgeGate`.
+1. **Generative CoT Judge (`1.5-3.0 s`)**: Generates 150-300 reasoning tokens sequentially before emitting `PASS` or `FAIL`, making per-turn checks and large CI suites costly.
+2. **Naive `"Answer YES or NO"` Prompt**: Emits 1 text token (`"YES"`), hiding whether the model was `51%` guessing or `99%` certain, skewing toward favorite tokens and positions (`"YES"` / `"A"`), splitting mass across `"Yes"` / `" Yes"` / `"yes"`, and remaining vulnerable to prompt injection inside the candidate.
+3. **LogitGate (`16 to 110 ms` on GPU, `0` generated tokens)**: Runs **parallel prompt prefill only** over a nonce-isolated prompt with `<think>` disabled, reads raw first-token `top_logprobs` across `A/B` variants in two swapped passes (`A=Pass, B=Fail` and `A=Fail, B=Pass`, sharing the GPU KV-cache), and cancels position and token-prior bias algebraically to produce a calibrated `0.0-1.0` probability.
 
 For an illustrated step-by-step walkthrough, see [docs/eli5/how_logitgate_works.md](docs/eli5/how_logitgate_works.md).
 
@@ -38,9 +38,9 @@ For an illustrated step-by-step walkthrough, see [docs/eli5/how_logitgate_works.
                            │ Passed
                            ▼
 ┌────────────────────────────────────────────────────────┐
-│  Layer 1: LogitGate / ChoiceGate / ScoreGate / RankGate ├──► [PASS: P >= 0.85, ~16-100ms, 0 tokens]
+│  Layer 1: LogitGate / ChoiceGate / ScoreGate / RankGate ├──► [PASS: P >= 0.85, 16-110ms, 0 tokens]
 └──────────────────────────┬─────────────────────────────┤
-                           │ Ambiguous                   └──► [FAIL: P <= 0.20, ~16-100ms, 0 tokens]
+                           │ Ambiguous                   └──► [FAIL: P <= 0.20, 16-110ms, 0 tokens]
                            │ (0.20 < P < 0.85)
                            ▼
 ┌────────────────────────────────────────────────────────┐
@@ -48,9 +48,9 @@ For an illustrated step-by-step walkthrough, see [docs/eli5/how_logitgate_works.
 └────────────────────────────────────────────────────────┘
 ```
 
-1. **Layer 0 (`ASTGate` / `ToolCallGate`, `<0.1 ms` on CPU)**: Deterministic validation runs first: Python AST syntax, forbidden imports, JSON/Pydantic schemas, regex security checks, and agent tool-call parameters (path traversal, SSRF, allowed tools). Malformed inputs fail immediately with 0 LLM calls.
-2. **Layer 1 (`LogitGate` / `ChoiceGate` / `ScoreGate` / `RankGate`, `~16-100 ms` on GPU, `0` generated tokens)**: Evaluates prompt prefill log-probabilities at `max_tokens=1` using 2-pass symmetric debiasing and BPE surface marginalization.
-3. **Layer 2 (`JudgeGate`, `1.5-5.0 s`)**: Generative critique runs only when Layer 1 confidence lands in an ambiguous band (`0.20 < P < 0.85`), preserving full chain-of-thought diagnostics where needed while skipping 70% to 90% of generative judge calls.
+1. **Layer 0 (`ASTGate` / `ToolCallGate`, `<0.1 ms` on CPU)**: Deterministic checks run first for Python AST syntax, forbidden imports, JSON/Pydantic schemas, regex rules, and tool-call parameters (path traversal, SSRF (internal-network probes), allowed tools), failing malformed inputs with 0 LLM calls.
+2. **Layer 1 (`LogitGate` / `ChoiceGate` / `ScoreGate` / `RankGate`, `16 to 110 ms` on GPU, `0` generated tokens)**: Combines 2-pass symmetric debiasing, byte-pair encoding (BPE) token-variant summing, and split-conformal thresholds to fast-path clear passes (`P >= 0.85`) and failures (`P <= 0.20`).
+3. **Layer 2 (`JudgeGate`, `1.5-5.0 s`)**: Runs generative critique only for the ambiguous band (`0.20 < P < 0.85`), preserving full diagnostics on borderline cases while skipping 70% to 90% of generative judge calls.
 
 For full architectural details, see [docs/architecture.md](docs/architecture.md) and [docs/README.md](docs/README.md).
 
@@ -58,7 +58,7 @@ For full architectural details, see [docs/architecture.md](docs/architecture.md)
 
 ## Installation
 
-Core package (requires only `httpx` and `pydantic`):
+Core package (requires only `httpx`, `pydantic`, and `typing-extensions`):
 
 ```bash
 pip install logitgate
@@ -72,10 +72,12 @@ pip install "logitgate[llamacpp]"    # In-process llama-cpp-python binding
 pip install "logitgate[langgraph]"   # LangGraph conditional edge routing
 pip install "logitgate[deepeval]"    # DeepEval System-1 metrics
 pip install "logitgate[recurrent]"   # Recurrent layer looping (PyTorch)
-pip install "logitgate[distill]"     # Student distillation and PEFT LoRA
+pip install "logitgate[distill]"     # Student distillation and Parameter-Efficient Fine-Tuning (PEFT) LoRA
 pip install "logitgate[otel]"        # OpenTelemetry span bridge (OtelSpanSink)
 pip install "logitgate[all]"         # All optional integrations
 ```
+
+Compatibility and dev extras: `logitgate[openai]` is a no-op alias (OpenAI-compatible HTTP support is built into core), and `logitgate[test]` adds `hypothesis` alongside `pytest`.
 
 ---
 
@@ -98,6 +100,9 @@ export LOGITGATE_BACKEND="gemini://gemini-2.5-flash"
 
 # llama.cpp server
 export LOGITGATE_BACKEND="llamacpp://localhost:8080"
+
+# Recurrent layer-looping PyTorch backend (requires logitgate[recurrent])
+export LOGITGATE_BACKEND="recurrent://Qwen/Qwen2.5-1.5B-Instruct?num_loops=2"
 
 # Offline stub for CPU-only CI plumbing tests
 export LOGITGATE_BACKEND="stub://default"
@@ -178,6 +183,7 @@ assert rag_verdict.passed
 tool_gate = ToolCallGate(
     allowed_tools=["read_invoice", "list_orders"],
     allowed_roots=["/var/data/invoices"],
+    check_intent=True,
     user_intent="Read invoice #902 for the customer",
 )
 tool_verdict = tool_gate.evaluate(
@@ -191,20 +197,20 @@ assert tool_verdict.passed
 
 ## Common vs. Power-User Feature Map (3-Tier Docs)
 
-LogitGate organizes documentation across three depth tiers: **Quick Notes** (copy-paste recipes), **Deep Notes** (systems architecture, mathematical proofs, security isolation), and **Visual ELI5** (illustrated step-by-step walkthroughs). Explore the portal in [docs/README.md](docs/README.md).
+LogitGate organizes documentation across three depth tiers: **Quick Notes** (copy-paste recipes), **Deep Notes** (systems architecture, mathematical proofs, security isolation), and **Visual Guide** (illustrated step-by-step walkthroughs). Explore the portal in [docs/README.md](docs/README.md).
 
 ### Table 1: Common Everyday Features (90% Path)
 
-| Feature & Workflow | Everyday Use Case | ⚡ Quick Notes | 🔬 Deep Notes | 🌱 Visual ELI5 |
+| Feature & Workflow | Use Case | ⚡ Quick Notes | 🔬 Deep Notes | 🧭 Visual Guide |
 | :--- | :--- | :---: | :---: | :---: |
 | **3-Layer Cascade** | `ASTGate >> LogitGate >> JudgeGate` routing | [Recipes](docs/quick/quickstart_recipes.md) | [Architecture](docs/architecture.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
 | **Grounded RAG** | Faithfulness verification with prefix caching | [RAG Notes](docs/quick/rag_and_agents.md) | [Math Foundations](docs/math_and_debiasing.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
-| **ToolCallGate** | Pre-execution MCP and agent tool validation | [Agent Notes](docs/quick/rag_and_agents.md) | [Security & Adversarial](docs/deep/security_and_adversarial.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
-| **Choice & Score Gates** | Categorical routing, Likert scoring, ranking | [Recipes](docs/quick/quickstart_recipes.md) | [Math Foundations](docs/math_and_debiasing.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
-| **StreamGuard** | Mid-stream token abort for streaming SSE | [Streaming](docs/quick/rag_and_agents.md) | [Architecture](docs/architecture.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
+| **ToolCallGate** | Pre-execution Model Context Protocol (MCP) and agent tool validation | [Agent Notes](docs/quick/rag_and_agents.md) | [Security & Adversarial](docs/deep/security_and_adversarial.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
+| **Choice & Score Gates** | Categorical routing, 1-to-5 ordinal (Likert) scoring, ranking | [Recipes](docs/quick/quickstart_recipes.md) | [Math Foundations](docs/math_and_debiasing.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
+| **StreamGuard** | Mid-stream token abort for streaming Server-Sent Events (SSE) | [Streaming](docs/quick/rag_and_agents.md) | [Architecture](docs/architecture.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
 | **No-Logprob Sidecars** | Claude / o1 fallback via `GeminiBackend` or local GPU | [Backends](docs/quick/backends_and_sidecars.md) | [Architecture](docs/architecture.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
 | **Calibration & Caching** | Conformal risk control and SQLite caching | [Recipes](docs/quick/quickstart_recipes.md) | [Math Foundations](docs/math_and_debiasing.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
-| **Frameworks & OTel** | Pytest `@check`, LangGraph, DeepEval, OpenTelemetry | [Integrations](docs/quick/integrations_and_otel.md) | [Use Cases](docs/use_cases.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
+| **Frameworks & OTel** | Pytest `@check`, LangGraph, DeepEval, OpenTelemetry | [Integrations](docs/quick/integrations_and_otel.md) | [Integrations](docs/integrations.md) · [Use Cases](docs/use_cases.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
 
 ### Table 2: Power-User & Research Features (`docs/advanced/`)
 
@@ -212,14 +218,14 @@ LogitGate organizes documentation across three depth tiers: **Quick Notes** (cop
 | :--- | :--- | :---: |
 | **Tier-A Distillation Bundle** | Zero-GPU student anchor calibration and meta-temperature mapping | [Distillation & LoRA](docs/advanced/distillation_and_lora.md) |
 | **Tier-B PEFT LoRA Compiler** | Single-token distillation training for compact student models | [Distillation & LoRA](docs/advanced/distillation_and_lora.md) |
-| **Online Drift Monitoring** | Rolling Kolmogorov-Smirnov detection with Gibbs-Candes adaptive conformal step | [Drift & Adaptive Conformal](docs/advanced/drift_and_adaptive_conformal.md) |
+| **Online Drift Monitoring** | Rolling Kolmogorov-Smirnov detection with Gibbs-Candès adaptive conformal step | [Drift & Adaptive Conformal](docs/advanced/drift_and_adaptive_conformal.md) |
 | **Elastic Recurrent Looping** | Layer-looping recurrent depth scaling (PyTorch backend) | [Recurrent & Hardware](docs/advanced/recurrent_and_hardware.md) |
 
 ---
 
 ## Headline Empirical Benchmarks
 
-Summary measurements from live evaluation sweeps (see [docs/benchmarks.md](docs/benchmarks.md) for complete hardware configurations, datasets, and reproduction commands):
+Summary measurements from live evaluation sweeps with 95% Wilson confidence intervals (see [docs/benchmarks.md](docs/benchmarks.md) for complete hardware configurations, datasets, and reproduction commands):
 
 | Benchmark Suite | Evaluated Task | N | Primary Metric (95% Wilson CI) | Headline Result |
 | :--- | :--- | :---: | :---: | :---: |
@@ -227,7 +233,8 @@ Summary measurements from live evaluation sweeps (see [docs/benchmarks.md](docs/
 | **`ScalerLab/JudgeBench`** | Math, coding, reasoning pairs | 60 | 61.7% debiased acc `[49.0%, 72.9%]` | **93.3%** swap consistency (+21.6 pp vs 1-pass) |
 | **`rag_groundedness_80`** | RAG retrieval faithfulness | 80 | 98.8% cascade acc `[93.3%, 99.8%]` | **2.51x** speedup via shared KV-cache prefix |
 | **`agent_mcp_tool_safety_80`** | Agent tool call validation | 80 | 98.8% cascade acc `[93.3%, 99.8%]` | **70%** caught at Layer 0 in **0.08 ms** |
-| **`ood_generalization_96`** | Out-of-domain transfer | 96 | 96.9% cascade acc `[91.3%, 99.0%]` | **5.37x** speedup via sidecar routing |
+| **`ood_generalization_96`** | Out-of-domain conformal cascade (`gemma4:e4b`) | 96 | 96.9% cascade acc `[91.2%, 98.9%]` | **1.04%** L1 risk (**1.63x** speedup) |
+| **`ood_generalization_96`** | No-logprob sidecar routing (`llama3.2:3b`) | 96 | 86.5% cascade acc `[78.2%, 91.9%]` | **5.37x** speedup via sidecar routing |
 
 ---
 
@@ -237,28 +244,28 @@ LogitGate includes 8 dedicated CLI subcommands:
 
 ```bash
 # Evaluate a candidate string against a rubric
-logitgate eval "Is this SQL query safe?" "SELECT * FROM users WHERE id = :id"
+logitgate eval --rubric "Is this SQL query safe?" --candidate "SELECT * FROM users WHERE id = :id"
 
 # Explain a failed check using Layer 2 diagnostic critique
 logitgate explain .logitgate/failures/latest.json
 
 # Calibrate split-conformal thresholds on a holdout dataset
-logitgate calibrate --dataset holdout.json --target-alpha 0.05
+logitgate calibrate --dataset holdout.jsonl --alpha 0.05
 
-# Rank multiple candidates against a rubric
-logitgate rank "Pick the best summary" summary_a.txt summary_b.txt summary_c.txt
+# Rank multiple candidate files against a rubric
+logitgate rank --rubric "Pick the best summary" --file summary_a.txt --file summary_b.txt --file summary_c.txt
 
-# Stream an LLM completion through a mid-stream safety guardrail
+# Stream an LLM completion through a mid-stream guardrail for personally identifiable information (PII)
 python generate.py | logitgate stream --rubric "Does the text avoid leaking PII?"
 
-# Run multi-model latency and accuracy sweeps
-logitgate benchmark --suite multi_domain_24
+# Measure latency, token usage, and accuracy across judge, logit, and cascade modes
+logitgate benchmark --dataset benchmarks/data/cal_distill_80.json
 
-# Inspect recorded OpenTelemetry and JSONL telemetry records
-logitgate telemetry inspect .logitgate/telemetry.jsonl
+# Summarize pass, escalation, discrepancy, and latency metrics from JSONL telemetry
+logitgate telemetry summary .logitgate/telemetry.jsonl
 
-# Compile a Tier-A zero-GPU student distillation bundle
-logitgate distill --dataset pairs.json --student-model qwen2.5:3b --output bundle.json
+# Compile a Tier-A zero-GPU student distillation bundle from telemetry
+logitgate distill compile --telemetry .logitgate/telemetry.jsonl --model qwen2.5:3b -o bundle.json
 ```
 
 ---
