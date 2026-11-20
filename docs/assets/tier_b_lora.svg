@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="514" viewBox="0 0 540 514" role="img" aria-label="LoRA Fine-Tuning: Symmetric First-Token Drills and Plug-In Adapters">
+  <title>LoRA Fine-Tuning: Symmetric First-Token Drills and Plug-In Adapters</title>
+  <desc>Diagram showing how each historical review becomes two label-swapped training drills with prompt tokens masked so only Token 1 updates a compact 15-50 MB LoRA adapter that plugs into Ollama, vLLM, or llama.cpp.</desc>
+  <defs>
+    <style>
+    :root {
+      --canvas-bg: #f8fafc;
+      --surface-bg: #ffffff;
+      --surface-subtle: #f1f5f9;
+      --border-muted: #cbd5e1;
+      --text-primary: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #475569;
+      --ink-on-solid: #ffffff;
+      --accent-emerald: #047857;
+      --accent-emerald-bg: #ecfdf5;
+      --accent-emerald-border: #6ee7b7;
+      --accent-rose: #be123c;
+      --accent-rose-bg: #fef2f2;
+      --accent-rose-border: #fca5a5;
+      --accent-amber: #b45309;
+      --accent-amber-bg: #fffbeb;
+      --accent-amber-border: #fcd34d;
+      --accent-sky: #0369a1;
+      --accent-sky-bg: #f0f9ff;
+      --accent-sky-border: #7dd3fc;
+      --accent-indigo: #4338ca;
+      --accent-indigo-bg: #eef2ff;
+      --accent-indigo-border: #a5b4fc;
+      --accent-purple: #7c3aed;
+      --accent-purple-bg: #f5f3ff;
+      --accent-purple-border: #c4b5fd;
+      --flow-line: #64748b;
+      --grid-line: #e2e8f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas-bg: #0b1120;
+        --surface-bg: #1e293b;
+        --surface-subtle: #0f172a;
+        --border-muted: #334155;
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        --ink-on-solid: #0f172a;
+        --accent-emerald: #34d399;
+        --accent-emerald-bg: #064e3b;
+        --accent-emerald-border: #059669;
+        --accent-rose: #fb7185;
+        --accent-rose-bg: #4c0519;
+        --accent-rose-border: #e11d48;
+        --accent-amber: #f59e0b;
+        --accent-amber-bg: #451a03;
+        --accent-amber-border: #d97706;
+        --accent-sky: #38bdf8;
+        --accent-sky-bg: #082f49;
+        --accent-sky-border: #0284c7;
+        --accent-indigo: #818cf8;
+        --accent-indigo-bg: #1e1b4b;
+        --accent-indigo-border: #4f46e5;
+        --accent-purple: #a78bfa;
+        --accent-purple-bg: #2e1065;
+        --accent-purple-border: #7c3aed;
+        --flow-line: #94a3b8;
+        --grid-line: #1e293b;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, ::before, ::after {
+        animation: none !important;
+        transition: none !important;
+        stroke-dashoffset: 0 !important;
+      }
+    }
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    .anim-dash {
+      stroke-dasharray: 6 5;
+      animation: dashMove 2.4s linear infinite;
+    }
+    .anim-pulse {
+      animation: pulseGlow 2.4s ease-in-out infinite;
+    }
+    .anim-probe {
+      animation: probeSweep 3s ease-in-out infinite alternate;
+    }
+    .anim-needle {
+      transform-origin: 0px 0px;
+      animation: needleRotate 2.8s ease-in-out infinite alternate;
+    }
+    @keyframes dashMove {
+      to {
+        stroke-dashoffset: -22;
+      }
+    }
+    @keyframes pulseGlow {
+      0%, 100% {
+        opacity: 0.95;
+      }
+      50% {
+        opacity: 0.4;
+      }
+    }
+    @keyframes probeSweep {
+      0% {
+        transform: translateX(-8px);
+      }
+      100% {
+        transform: translateX(8px);
+      }
+    }
+    @keyframes needleRotate {
+      0% {
+        transform: rotate(-14deg);
+      }
+      100% {
+        transform: rotate(14deg);
+      }
+    }
+</style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-line)" />
+    </marker>
+    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
+    </marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-rose)" />
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
+    </marker>
+  </defs>
+  <rect width="540" height="514" fill="var(--canvas-bg)" rx="12" />
+
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">LoRA Fine-Tuning (Tier B)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Bake your rubric into a small add-on adapter with balanced A/B drills</text>
+
+  <!-- Top Section: 2x Symmetric Masked Training -->
+  <text x="24" y="84" font-size="13" font-weight="700" fill="var(--text-primary)">1. Every Review Becomes Two Balanced Drills</text>
+
+  <!-- Forward Drill Strip -->
+  <text x="24" y="108" font-size="11.5" font-weight="700" fill="var(--accent-sky)">Drill 1 (Forward):</text>
+  <rect x="136" y="92" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
+  <text x="253" y="108" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <rect x="378" y="92" width="138" height="24" rx="4" fill="var(--accent-emerald)" />
+  <text x="447" y="108" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "A" (Pass)</text>
+
+  <!-- Reverse Drill Strip -->
+  <text x="24" y="142" font-size="11.5" font-weight="700" fill="var(--accent-purple)">Drill 2 (Swapped):</text>
+  <rect x="136" y="126" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
+  <text x="253" y="142" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <rect x="378" y="126" width="138" height="24" rx="4" fill="var(--accent-sky)" />
+  <text x="447" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "B" (Pass)</text>
+
+  <text x="270" y="170" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--accent-indigo)">Loss scores Token 1 only -&gt; prevents memorizing letter "A"</text>
+
+  <!-- Arrow down to Base Model + Adapter -->
+  <line x1="270" y1="180" x2="270" y2="210" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
+
+  <!-- Middle Section: Frozen Base Model + Small LoRA Adapter -->
+  <text x="24" y="232" font-size="13" font-weight="700" fill="var(--text-primary)">2. Base Weights Stay Frozen; Only a Small Adapter Trains</text>
+
+  <rect x="24" y="246" width="268" height="82" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
+  <text x="158" y="274" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--text-primary)">Frozen Base Model (3B)</text>
+  <text x="158" y="294" text-anchor="middle" font-size="12" fill="var(--text-secondary)">~6 GB weights untouched</text>
+  <text x="158" y="314" text-anchor="middle" font-size="11.5" fill="var(--text-muted)">Llama 3 · Qwen 2.5 · Gemma · Mistral</text>
+
+  <!-- Plus sign -->
+  <circle cx="316" cy="287" r="14" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
+  <text x="316" y="293" text-anchor="middle" font-size="16" font-weight="700" fill="var(--accent-indigo)">+</text>
+
+  <rect x="340" y="246" width="176" height="82" rx="8" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="2" />
+  <text x="428" y="274" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-indigo)">LoRA Adapter</text>
+  <text x="428" y="294" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">15-50 MB (Rank 8)</text>
+  <text x="428" y="314" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">0 anchor tokens needed</text>
+
+  <!-- Fan out to 3 deployment targets -->
+  <path d="M 270 328 L 270 348" fill="none" stroke="var(--flow-line)" stroke-width="2" />
+  <path d="M 102 348 L 438 348" fill="none" stroke="var(--flow-line)" stroke-width="2" />
+  <line x1="102" y1="348" x2="102" y2="372" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
+  <line x1="270" y1="348" x2="270" y2="372" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="438" y1="348" x2="438" y2="372" stroke="var(--accent-amber)" stroke-width="2" marker-end="url(#arrow-amber)" />
+
+  <!-- 3 Runtime Manifests -->
+  <rect x="24" y="378" width="156" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="102" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">Ollama</text>
+  <text x="102" y="421" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">Modelfile.ollama</text>
+
+  <rect x="192" y="378" width="156" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <text x="270" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">vLLM</text>
+  <text x="270" y="421" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">serve_vllm.sh</text>
+
+  <rect x="360" y="378" width="156" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-amber)" stroke-width="1.5" />
+  <text x="438" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-amber)">llama.cpp</text>
+  <text x="438" y="421" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">serve_llamacpp.sh</text>
+
+  <!-- Bottom Summary Strip -->
+  <rect x="24" y="452" width="492" height="44" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="270" y="479" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">Zero prompt overhead at runtime | Multi-runtime deploy scripts included</text>
+
+</svg>

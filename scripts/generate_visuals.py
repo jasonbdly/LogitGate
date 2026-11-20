@@ -789,6 +789,168 @@ def generate_stream_guard_abort_svg() -> str:
     return _svg_envelope(title, desc, body, height=500)
 
 
+def generate_tier_a_distillation_svg() -> str:
+    """Generate SVG 8: Tier-A Weight-Free Distillation (Worked Reference Pairs + Score Calibrator)."""
+    title = "Weight-Free Distillation: Open-Book Examples and Score Calibration"
+    desc = (
+        "Diagram showing past review logs compiling in under 20 ms on CPU into a portable under-50 KB "
+        "JSON bundle with a topic-gated reference pair bank and a tiny score-calibration head, "
+        "improving small models without changing model weights."
+    )
+
+    body = """
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Weight-Free Distillation (Tier A)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Teach a small model from past reviews in &lt;20 ms with zero GPU training</text>
+
+  <!-- Step 1: Past Review Logs -> Compile -->
+  <rect x="24" y="76" width="212" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <text x="130" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text-primary)">Past Review Logs</text>
+  <text x="130" y="119" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">telemetry.jsonl (0 AI calls)</text>
+
+  <line x1="236" y1="105" x2="278" y2="105" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
+
+  <rect x="284" y="76" width="232" height="58" rx="8" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
+  <text x="400" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-indigo)">Portable JSON Bundle</text>
+  <text x="400" y="119" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt;50 KB file | &lt;20 ms on CPU</text>
+
+  <!-- Split arrows down into 2 bundle components -->
+  <path d="M 350 134 C 350 156, 144 150, 144 174" fill="none" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
+  <path d="M 450 134 C 450 156, 396 150, 396 174" fill="none" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
+
+  <!-- Component 1: Reference Pair Bank + Topic Overlap Gate -->
+  <rect x="24" y="180" width="240" height="148" rx="8" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <text x="144" y="203" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">1. Reference Example Bank</text>
+  <text x="144" y="220" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">1 matched Pass + Fail pair</text>
+
+  <!-- Mini Pass/Fail Cards inside Bank -->
+  <rect x="38" y="232" width="98" height="36" rx="5" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.2" />
+  <text x="87" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)">PASS Anchor</text>
+  <text x="87" y="262" text-anchor="middle" font-size="11" fill="var(--text-secondary)">clean example</text>
+
+  <rect x="152" y="232" width="98" height="36" rx="5" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
+  <text x="201" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)">FAIL Anchor</text>
+  <text x="201" y="262" text-anchor="middle" font-size="11" fill="var(--text-secondary)">defect example</text>
+
+  <!-- Topic Overlap Filter Strip -->
+  <rect x="38" y="278" width="212" height="38" rx="5" fill="var(--accent-amber-bg)" stroke="var(--accent-amber)" stroke-width="1.2" />
+  <text x="144" y="294" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-amber)">Topic Overlap Gate (&gt;= 25%)</text>
+  <text x="144" y="309" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Skips anchors on unrelated tasks</text>
+
+  <!-- Component 2: Score Calibration Curve -->
+  <rect x="276" y="180" width="240" height="148" rx="8" fill="var(--surface-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="396" y="203" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">2. Score Calibrator (&lt;1 KB)</text>
+  <text x="396" y="220" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Fixes harsh or lenient skew</text>
+
+  <!-- Mini Skewed vs Calibrated Curve -->
+  <line x1="304" y1="296" x2="488" y2="296" stroke="var(--border-muted)" stroke-width="1.5" />
+  <line x1="304" y1="234" x2="304" y2="296" stroke="var(--border-muted)" stroke-width="1.5" />
+  <!-- Skewed dashed curve (too skeptical) -->
+  <path d="M 306 294 C 365 294, 412 292, 434 268 C 452 246, 468 238, 486 236"
+        fill="none" stroke="var(--accent-rose)" stroke-width="2" stroke-dasharray="4 3" />
+  <!-- Corrected solid emerald curve -->
+  <path d="M 306 293 C 338 291, 366 280, 396 264 C 424 249, 452 238, 486 236"
+        fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" />
+  <circle cx="396" cy="264" r="4" fill="var(--accent-emerald)" class="anim-pulse" />
+  <text x="396" y="314" text-anchor="middle" font-size="11" fill="var(--text-secondary)">5 signals -&gt; calibrated P (&lt;0.01 ms)</text>
+
+  <!-- Converge into Untouched Small Model -->
+  <line x1="144" y1="328" x2="144" y2="362" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="396" y1="328" x2="396" y2="362" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
+
+  <rect x="24" y="368" width="492" height="66" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="270" y="393" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent-emerald)">Untouched Compact Model (1B-4B)</text>
+  <text x="270" y="414" text-anchor="middle" font-size="12" fill="var(--text-primary)">Weights stay frozen | Works on Ollama, vLLM, llama.cpp, or CPU</text>
+
+  <!-- Bottom Metrics Strip -->
+  <rect x="24" y="450" width="492" height="46" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
+  <text x="108" y="478" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">+29.2 pp Hard Recall</text>
+  <text x="270" y="478" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-indigo)">0 GPU Training</text>
+  <text x="432" y="478" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-sky)">&lt;50 KB Portable JSON</text>
+"""
+    return _svg_envelope(title, desc, body, height=516)
+
+
+def generate_tier_b_lora_svg() -> str:
+    """Generate SVG 9: Tier-B LoRA Fine-Tuning (2x Symmetric Masked First-Token Training & Plug-In Adapter)."""
+    title = "LoRA Fine-Tuning: Symmetric First-Token Drills and Plug-In Adapters"
+    desc = (
+        "Diagram showing how each historical review becomes two label-swapped training drills "
+        "with prompt tokens masked so only Token 1 updates a compact 15-50 MB LoRA adapter "
+        "that plugs into Ollama, vLLM, or llama.cpp."
+    )
+
+    body = """
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">LoRA Fine-Tuning (Tier B)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Bake your rubric into a small add-on adapter with balanced A/B drills</text>
+
+  <!-- Top Section: 2x Symmetric Masked Training -->
+  <text x="24" y="84" font-size="13" font-weight="700" fill="var(--text-primary)">1. Every Review Becomes Two Balanced Drills</text>
+
+  <!-- Forward Drill Strip -->
+  <text x="24" y="108" font-size="11.5" font-weight="700" fill="var(--accent-sky)">Drill 1 (Forward):</text>
+  <rect x="136" y="92" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
+  <text x="253" y="108" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <rect x="378" y="92" width="138" height="24" rx="4" fill="var(--accent-emerald)" />
+  <text x="447" y="108" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "A" (Pass)</text>
+
+  <!-- Reverse Drill Strip -->
+  <text x="24" y="142" font-size="11.5" font-weight="700" fill="var(--accent-purple)">Drill 2 (Swapped):</text>
+  <rect x="136" y="126" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
+  <text x="253" y="142" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <rect x="378" y="126" width="138" height="24" rx="4" fill="var(--accent-sky)" />
+  <text x="447" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "B" (Pass)</text>
+
+  <text x="270" y="170" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--accent-indigo)">Loss scores Token 1 only -&gt; prevents memorizing letter "A"</text>
+
+  <!-- Arrow down to Base Model + Adapter -->
+  <line x1="270" y1="180" x2="270" y2="210" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
+
+  <!-- Middle Section: Frozen Base Model + Small LoRA Adapter -->
+  <text x="24" y="232" font-size="13" font-weight="700" fill="var(--text-primary)">2. Base Weights Stay Frozen; Only a Small Adapter Trains</text>
+
+  <rect x="24" y="246" width="268" height="82" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
+  <text x="158" y="274" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--text-primary)">Frozen Base Model (3B)</text>
+  <text x="158" y="294" text-anchor="middle" font-size="12" fill="var(--text-secondary)">~6 GB weights untouched</text>
+  <text x="158" y="314" text-anchor="middle" font-size="11.5" fill="var(--text-muted)">Llama 3 · Qwen 2.5 · Gemma · Mistral</text>
+
+  <!-- Plus sign -->
+  <circle cx="316" cy="287" r="14" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
+  <text x="316" y="293" text-anchor="middle" font-size="16" font-weight="700" fill="var(--accent-indigo)">+</text>
+
+  <rect x="340" y="246" width="176" height="82" rx="8" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="2" />
+  <text x="428" y="274" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent-indigo)">LoRA Adapter</text>
+  <text x="428" y="294" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">15-50 MB (Rank 8)</text>
+  <text x="428" y="314" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">0 anchor tokens needed</text>
+
+  <!-- Fan out to 3 deployment targets -->
+  <path d="M 270 328 L 270 348" fill="none" stroke="var(--flow-line)" stroke-width="2" />
+  <path d="M 102 348 L 438 348" fill="none" stroke="var(--flow-line)" stroke-width="2" />
+  <line x1="102" y1="348" x2="102" y2="372" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
+  <line x1="270" y1="348" x2="270" y2="372" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="438" y1="348" x2="438" y2="372" stroke="var(--accent-amber)" stroke-width="2" marker-end="url(#arrow-amber)" />
+
+  <!-- 3 Runtime Manifests -->
+  <rect x="24" y="378" width="156" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="102" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">Ollama</text>
+  <text x="102" y="421" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">Modelfile.ollama</text>
+
+  <rect x="192" y="378" width="156" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <text x="270" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">vLLM</text>
+  <text x="270" y="421" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">serve_vllm.sh</text>
+
+  <rect x="360" y="378" width="156" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-amber)" stroke-width="1.5" />
+  <text x="438" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-amber)">llama.cpp</text>
+  <text x="438" y="421" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">serve_llamacpp.sh</text>
+
+  <!-- Bottom Summary Strip -->
+  <rect x="24" y="452" width="492" height="44" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="270" y="479" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">Zero prompt overhead at runtime | Multi-runtime deploy scripts included</text>
+"""
+    return _svg_envelope(title, desc, body, height=514)
+
+
 def validate_and_save_svg(name: str, content: str, out_dir: Path) -> int:
     """Validate SVG XML string, check size constraints, and write file."""
     # Strict style rule: no em-dashes
@@ -820,7 +982,7 @@ def validate_and_save_svg(name: str, content: str, out_dir: Path) -> int:
 
 
 def main() -> int:
-    """Generate all 7 LogitGate storyboard SVGs deterministically."""
+    """Generate all 9 LogitGate storyboard SVGs deterministically."""
     repo_root = Path(__file__).resolve().parent.parent
     assets_dir = repo_root / "docs" / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -833,6 +995,8 @@ def main() -> int:
         ("rag_prefix_cache.svg", generate_rag_prefix_cache_svg()),
         ("toolcall_shield.svg", generate_toolcall_shield_svg()),
         ("stream_guard_abort.svg", generate_stream_guard_abort_svg()),
+        ("tier_a_distillation.svg", generate_tier_a_distillation_svg()),
+        ("tier_b_lora.svg", generate_tier_b_lora_svg()),
     ]
 
     print("Generating LogitGate visual storyboard SVGs...")
@@ -840,7 +1004,7 @@ def main() -> int:
         byte_size = validate_and_save_svg(filename, content, assets_dir)
         print(f"  [OK] {filename:<28} ({byte_size:,} bytes, valid XML)")
 
-    print("\nAll 7 SVGs generated and validated successfully.")
+    print("\nAll 9 SVGs generated and validated successfully.")
     return 0
 
 

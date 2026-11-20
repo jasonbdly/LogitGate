@@ -35,6 +35,8 @@ EXPECTED_SVGS: tuple[str, ...] = (
     "rag_prefix_cache.svg",
     "toolcall_shield.svg",
     "stream_guard_abort.svg",
+    "tier_a_distillation.svg",
+    "tier_b_lora.svg",
 )
 
 EXPECTED_DOC_PAGES: tuple[str, ...] = (
@@ -50,6 +52,8 @@ EXPECTED_DOC_PAGES: tuple[str, ...] = (
     "quick/integrations_and_otel.md",
     "deep/security_and_adversarial.md",
     "eli5/how_logitgate_works.md",
+    "eli5/distillation.md",
+    "eli5/fine_tuning.md",
     "advanced/distillation_and_lora.md",
     "advanced/drift_and_adaptive_conformal.md",
     "advanced/recurrent_and_hardware.md",
@@ -136,6 +140,8 @@ def test_generate_visuals_script_is_byte_deterministic_and_enforces_guards(
         ("rag_prefix_cache.svg", mod.generate_rag_prefix_cache_svg()),
         ("toolcall_shield.svg", mod.generate_toolcall_shield_svg()),
         ("stream_guard_abort.svg", mod.generate_stream_guard_abort_svg()),
+        ("tier_a_distillation.svg", mod.generate_tier_a_distillation_svg()),
+        ("tier_b_lora.svg", mod.generate_tier_b_lora_svg()),
     ]
     for filename, generated in generators:
         written_bytes = mod.validate_and_save_svg(filename, generated, tmp_path)
@@ -487,7 +493,14 @@ def test_all_cli_invocations_in_docs_parse_cleanly() -> None:
                 for tokens in _extract_piped_logitgate_commands(raw_span):
                     if len(tokens) < 3:
                         continue
-                    if not in_table and "..." in tokens:
+                    if not in_table and (
+                        "..." in tokens
+                        or (
+                            len(tokens) == 3
+                            and tokens[1] in {"distill", "telemetry"}
+                            and not tokens[2].startswith("-")
+                        )
+                    ):
                         continue
                     checked_count += 1
                     try:
@@ -534,7 +547,12 @@ def test_all_markdown_internal_anchor_links_resolve() -> None:
         flags=re.DOTALL | re.MULTILINE,
     )
     order_errors: list[str] = []
-    for toc_rel in ("docs/benchmarks.md", "docs/eli5/how_logitgate_works.md"):
+    for toc_rel in (
+        "docs/benchmarks.md",
+        "docs/eli5/how_logitgate_works.md",
+        "docs/eli5/distillation.md",
+        "docs/eli5/fine_tuning.md",
+    ):
         prose_doc = prose_by_rel[toc_rel]
         slugs = slugs_by_rel[toc_rel]
         toc_match = toc_section_re.search(prose_doc)

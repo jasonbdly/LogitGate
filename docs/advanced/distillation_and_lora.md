@@ -21,8 +21,8 @@
 <summary>💡 <b>Reference Examples (Tier A) vs. Fine-Tuned Adapter (Tier B)</b></summary>
 
 > - **Standard check**: Runs a small model as-is and hands uncertain cases to a larger reviewer.
-> - **Tier A (Open-Book Cheat Sheet, zero GPU training)**: Leaves the small model's weights untouched. Before grading a new item, LogitGate shows the small model one relevant pass/fail example from past reviews (skipping the example if the topic does not match) and adjusts the final score with a tiny correction table to fix any habit of grading too harshly or too softly. Because it is just a tiny JSON file, it works anywhere, including local Ollama or CPU.
-> - **Tier B (Practice Drills, lightweight fine-tuning)**: Trains a small add-on adapter from past reviews so the model learns your grading boundary directly in its own instincts, needing zero extra examples in the prompt at runtime.
+> - **Tier A (Open-Book Cheat Sheet, zero GPU training)**: Leaves the small model's weights untouched. Before grading a new item, LogitGate shows the small model one relevant pass/fail example from past reviews (skipping the example if the topic does not match) and adjusts the final score with a tiny correction table to fix any habit of grading too harshly or too softly. Because it is just a tiny JSON file, it works anywhere, including local Ollama or CPU. See [How Weight-Free Distillation Works](../eli5/distillation.md).
+> - **Tier B (Practice Drills, lightweight fine-tuning)**: Trains a small add-on adapter from past reviews so the model learns your grading boundary directly in its own instincts, needing zero extra examples in the prompt at runtime. See [How LoRA Fine-Tuning Works](../eli5/fine_tuning.md).
 </details>
 
 ---

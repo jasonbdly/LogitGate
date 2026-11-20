@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="516" viewBox="0 0 540 516" role="img" aria-label="Weight-Free Distillation: Open-Book Examples and Score Calibration">
+  <title>Weight-Free Distillation: Open-Book Examples and Score Calibration</title>
+  <desc>Diagram showing past review logs compiling in under 20 ms on CPU into a portable under-50 KB JSON bundle with a topic-gated reference pair bank and a tiny score-calibration head, improving small models without changing model weights.</desc>
+  <defs>
+    <style>
+    :root {
+      --canvas-bg: #f8fafc;
+      --surface-bg: #ffffff;
+      --surface-subtle: #f1f5f9;
+      --border-muted: #cbd5e1;
+      --text-primary: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #475569;
+      --ink-on-solid: #ffffff;
+      --accent-emerald: #047857;
+      --accent-emerald-bg: #ecfdf5;
+      --accent-emerald-border: #6ee7b7;
+      --accent-rose: #be123c;
+      --accent-rose-bg: #fef2f2;
+      --accent-rose-border: #fca5a5;
+      --accent-amber: #b45309;
+      --accent-amber-bg: #fffbeb;
+      --accent-amber-border: #fcd34d;
+      --accent-sky: #0369a1;
+      --accent-sky-bg: #f0f9ff;
+      --accent-sky-border: #7dd3fc;
+      --accent-indigo: #4338ca;
+      --accent-indigo-bg: #eef2ff;
+      --accent-indigo-border: #a5b4fc;
+      --accent-purple: #7c3aed;
+      --accent-purple-bg: #f5f3ff;
+      --accent-purple-border: #c4b5fd;
+      --flow-line: #64748b;
+      --grid-line: #e2e8f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas-bg: #0b1120;
+        --surface-bg: #1e293b;
+        --surface-subtle: #0f172a;
+        --border-muted: #334155;
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        --ink-on-solid: #0f172a;
+        --accent-emerald: #34d399;
+        --accent-emerald-bg: #064e3b;
+        --accent-emerald-border: #059669;
+        --accent-rose: #fb7185;
+        --accent-rose-bg: #4c0519;
+        --accent-rose-border: #e11d48;
+        --accent-amber: #f59e0b;
+        --accent-amber-bg: #451a03;
+        --accent-amber-border: #d97706;
+        --accent-sky: #38bdf8;
+        --accent-sky-bg: #082f49;
+        --accent-sky-border: #0284c7;
+        --accent-indigo: #818cf8;
+        --accent-indigo-bg: #1e1b4b;
+        --accent-indigo-border: #4f46e5;
+        --accent-purple: #a78bfa;
+        --accent-purple-bg: #2e1065;
+        --accent-purple-border: #7c3aed;
+        --flow-line: #94a3b8;
+        --grid-line: #1e293b;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, ::before, ::after {
+        animation: none !important;
+        transition: none !important;
+        stroke-dashoffset: 0 !important;
+      }
+    }
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    .anim-dash {
+      stroke-dasharray: 6 5;
+      animation: dashMove 2.4s linear infinite;
+    }
+    .anim-pulse {
+      animation: pulseGlow 2.4s ease-in-out infinite;
+    }
+    .anim-probe {
+      animation: probeSweep 3s ease-in-out infinite alternate;
+    }
+    .anim-needle {
+      transform-origin: 0px 0px;
+      animation: needleRotate 2.8s ease-in-out infinite alternate;
+    }
+    @keyframes dashMove {
+      to {
+        stroke-dashoffset: -22;
+      }
+    }
+    @keyframes pulseGlow {
+      0%, 100% {
+        opacity: 0.95;
+      }
+      50% {
+        opacity: 0.4;
+      }
+    }
+    @keyframes probeSweep {
+      0% {
+        transform: translateX(-8px);
+      }
+      100% {
+        transform: translateX(8px);
+      }
+    }
+    @keyframes needleRotate {
+      0% {
+        transform: rotate(-14deg);
+      }
+      100% {
+        transform: rotate(14deg);
+      }
+    }
+</style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--flow-line)" />
+    </marker>
+    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-emerald)" />
+    </marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-rose)" />
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent-amber)" />
+    </marker>
+  </defs>
+  <rect width="540" height="516" fill="var(--canvas-bg)" rx="12" />
+
+  <!-- Title -->
+  <text x="24" y="34" font-size="18" font-weight="700" fill="var(--text-primary)">Weight-Free Distillation (Tier A)</text>
+  <text x="24" y="54" font-size="12" fill="var(--text-secondary)">Teach a small model from past reviews in &lt;20 ms with zero GPU training</text>
+
+  <!-- Step 1: Past Review Logs -> Compile -->
+  <rect x="24" y="76" width="212" height="58" rx="8" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <text x="130" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text-primary)">Past Review Logs</text>
+  <text x="130" y="119" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">telemetry.jsonl (0 AI calls)</text>
+
+  <line x1="236" y1="105" x2="278" y2="105" stroke="var(--flow-line)" stroke-width="2" class="anim-dash" marker-end="url(#arrow)" />
+
+  <rect x="284" y="76" width="232" height="58" rx="8" fill="var(--accent-indigo-bg)" stroke="var(--accent-indigo)" stroke-width="1.5" />
+  <text x="400" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-indigo)">Portable JSON Bundle</text>
+  <text x="400" y="119" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)" class="mono">&lt;50 KB file | &lt;20 ms on CPU</text>
+
+  <!-- Split arrows down into 2 bundle components -->
+  <path d="M 350 134 C 350 156, 144 150, 144 174" fill="none" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
+  <path d="M 450 134 C 450 156, 396 150, 396 174" fill="none" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
+
+  <!-- Component 1: Reference Pair Bank + Topic Overlap Gate -->
+  <rect x="24" y="180" width="240" height="148" rx="8" fill="var(--surface-bg)" stroke="var(--accent-sky)" stroke-width="1.5" />
+  <text x="144" y="203" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-sky)">1. Reference Example Bank</text>
+  <text x="144" y="220" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">1 matched Pass + Fail pair</text>
+
+  <!-- Mini Pass/Fail Cards inside Bank -->
+  <rect x="38" y="232" width="98" height="36" rx="5" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.2" />
+  <text x="87" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)">PASS Anchor</text>
+  <text x="87" y="262" text-anchor="middle" font-size="11" fill="var(--text-secondary)">clean example</text>
+
+  <rect x="152" y="232" width="98" height="36" rx="5" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
+  <text x="201" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)">FAIL Anchor</text>
+  <text x="201" y="262" text-anchor="middle" font-size="11" fill="var(--text-secondary)">defect example</text>
+
+  <!-- Topic Overlap Filter Strip -->
+  <rect x="38" y="278" width="212" height="38" rx="5" fill="var(--accent-amber-bg)" stroke="var(--accent-amber)" stroke-width="1.2" />
+  <text x="144" y="294" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-amber)">Topic Overlap Gate (&gt;= 25%)</text>
+  <text x="144" y="309" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Skips anchors on unrelated tasks</text>
+
+  <!-- Component 2: Score Calibration Curve -->
+  <rect x="276" y="180" width="240" height="148" rx="8" fill="var(--surface-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="396" y="203" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-emerald)">2. Score Calibrator (&lt;1 KB)</text>
+  <text x="396" y="220" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Fixes harsh or lenient skew</text>
+
+  <!-- Mini Skewed vs Calibrated Curve -->
+  <line x1="304" y1="296" x2="488" y2="296" stroke="var(--border-muted)" stroke-width="1.5" />
+  <line x1="304" y1="234" x2="304" y2="296" stroke="var(--border-muted)" stroke-width="1.5" />
+  <!-- Skewed dashed curve (too skeptical) -->
+  <path d="M 306 294 C 365 294, 412 292, 434 268 C 452 246, 468 238, 486 236"
+        fill="none" stroke="var(--accent-rose)" stroke-width="2" stroke-dasharray="4 3" />
+  <!-- Corrected solid emerald curve -->
+  <path d="M 306 293 C 338 291, 366 280, 396 264 C 424 249, 452 238, 486 236"
+        fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" />
+  <circle cx="396" cy="264" r="4" fill="var(--accent-emerald)" class="anim-pulse" />
+  <text x="396" y="314" text-anchor="middle" font-size="11" fill="var(--text-secondary)">5 signals -&gt; calibrated P (&lt;0.01 ms)</text>
+
+  <!-- Converge into Untouched Small Model -->
+  <line x1="144" y1="328" x2="144" y2="362" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="396" y1="328" x2="396" y2="362" stroke="var(--accent-emerald)" stroke-width="2" marker-end="url(#arrow-emerald)" />
+
+  <rect x="24" y="368" width="492" height="66" rx="8" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
+  <text x="270" y="393" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent-emerald)">Untouched Compact Model (1B-4B)</text>
+  <text x="270" y="414" text-anchor="middle" font-size="12" fill="var(--text-primary)">Weights stay frozen | Works on Ollama, vLLM, llama.cpp, or CPU</text>
+
+  <!-- Bottom Metrics Strip -->
+  <rect x="24" y="450" width="492" height="46" rx="8" fill="var(--surface-bg)" stroke="var(--border-muted)" stroke-width="1.5" />
+  <text x="108" y="478" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-emerald)">+29.2 pp Hard Recall</text>
+  <text x="270" y="478" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-indigo)">0 GPU Training</text>
+  <text x="432" y="478" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-sky)">&lt;50 KB Portable JSON</text>
+
+</svg>

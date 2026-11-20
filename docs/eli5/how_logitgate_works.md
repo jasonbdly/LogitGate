@@ -480,7 +480,9 @@ Combined inside `Cascade` with calibrated cutoffs, these stages filter structura
 - [⚡ Quickstart Recipes](../quick/quickstart_recipes.md): Copy-paste recipes for LogitGate, Cascade, ChoiceGate, ScoreGate, and batch evaluation.
 - [🔌 Integrations & OTel](../quick/integrations_and_otel.md): Copy-paste recipes for pytest @check, LangGraph, DeepEval, and OpenTelemetry.
 - [📊 Benchmarks & Tradeoffs](../benchmarks.md): Latency, cost, and accuracy across code, math, and grounded Q&A suites.
-- [🚀 LoRA Distillation & Quantization](../advanced/distillation_and_lora.md): Distilling larger judges into compact 1B-3B evaluators.
+- [🧭 Weight-Free Distillation (Tier A)](./distillation.md): Teaching compact 1B-4B models from past reviews without GPU training.
+- [🧭 LoRA Fine-Tuning (Tier B)](./fine_tuning.md): Baking domain rubrics into a compact 15-50 MB adapter with balanced first-token drills.
+- [🚀 Deep Power-User Guide: Distillation & PEFT LoRA](../advanced/distillation_and_lora.md): Full Newton-Raphson math, training configs, and deployment manifests.
 
 ---
 

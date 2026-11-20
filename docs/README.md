@@ -43,6 +43,8 @@ flowchart TD
 
     subgraph Visual["🧭 Tier 3: Visual Guide"]
         E_How["How LogitGate Works<br/>(docs/eli5/how_logitgate_works.md)"]
+        E_Distill["Weight-Free Distillation<br/>(docs/eli5/distillation.md)"]
+        E_LoRA["LoRA Fine-Tuning<br/>(docs/eli5/fine_tuning.md)"]
     end
 
     subgraph Power["🚀 Power-User & Research"]
@@ -85,6 +87,8 @@ Choose the starting point aligned with what you are building today:
 
 ### 3. Visual Walkthroughs & Architecture Overview
 - [How LogitGate Works](eli5/how_logitgate_works.md): Illustrated walkthroughs and SVG diagrams covering every stage from first-token scoring to streaming circuit breakers.
+- [How Weight-Free Distillation Works (Tier A)](eli5/distillation.md): Teaching compact 1B-4B models from past reviews in under 20 ms on CPU without changing weights.
+- [How LoRA Fine-Tuning Works (Tier B)](eli5/fine_tuning.md): Baking domain rubrics into a compact 15-50 MB adapter with balanced first-token drills.
 - [Production Use Cases](use_cases.md): CI/CD merge gates, regression suites, and live LLM guardrails in production.
 
 ### 4. ML Researchers & Model Developers (Advanced Optimization)
@@ -109,6 +113,8 @@ Choose the starting point aligned with what you are building today:
 | **🔬 Deep Notes** | [Production Use Cases](use_cases.md) | Architects | CI gates, regression pipelines, and production patterns |
 | **🔬 Deep Notes** | [Framework Integrations](integrations.md) | Developers | Extended ecosystem integration patterns |
 | **🧭 Visual Guide** | [How LogitGate Works](eli5/how_logitgate_works.md) | All Readers | End-to-end visual walkthroughs and SVG diagrams |
+| **🧭 Visual Guide** | [Weight-Free Distillation (Tier A)](eli5/distillation.md) | All Readers | Visual walkthrough of anchor banks, overlap gating, and 5-signal calibration |
+| **🧭 Visual Guide** | [LoRA Fine-Tuning (Tier B)](eli5/fine_tuning.md) | All Readers | Visual walkthrough of 2x symmetric masked first-token drills and adapters |
 | **🚀 Power-User** | [Distillation & LoRA](advanced/distillation_and_lora.md) | Research | Student bundles and PEFT LoRA training recipes |
 | **🚀 Power-User** | [Drift & Adaptive Conformal](advanced/drift_and_adaptive_conformal.md) | Production | Rolling drift detection and dynamic conformal thresholds |
 | **🚀 Power-User** | [Recurrent & Hardware](advanced/recurrent_and_hardware.md) | Systems | Recurrent PyTorch looping and GPU acceleration |

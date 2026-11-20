@@ -214,12 +214,12 @@ LogitGate organizes documentation across three depth tiers: **Quick Notes** (cop
 
 ### Table 2: Power-User & Research Features (`docs/advanced/`)
 
-| Power-User Feature | Description & Capability | Research Guide |
-| :--- | :--- | :---: |
-| **Tier-A Distillation Bundle** | Zero-GPU student anchor calibration and meta-temperature mapping | [Distillation & LoRA](docs/advanced/distillation_and_lora.md) |
-| **Tier-B PEFT LoRA Compiler** | Single-token distillation training for compact student models | [Distillation & LoRA](docs/advanced/distillation_and_lora.md) |
-| **Online Drift Monitoring** | Rolling Kolmogorov-Smirnov detection with Gibbs-Candès adaptive conformal step | [Drift & Adaptive Conformal](docs/advanced/drift_and_adaptive_conformal.md) |
-| **Elastic Recurrent Looping** | Layer-looping recurrent depth scaling (PyTorch backend) | [Recurrent & Hardware](docs/advanced/recurrent_and_hardware.md) |
+| Power-User Feature | Description & Capability | Research Guide | 🧭 Visual Guide |
+| :--- | :--- | :---: | :---: |
+| **Tier-A Distillation Bundle** | Zero-GPU student anchor calibration and meta-temperature mapping | [Distillation & LoRA](docs/advanced/distillation_and_lora.md) | [Weight-Free Distillation](docs/eli5/distillation.md) |
+| **Tier-B PEFT LoRA Compiler** | Single-token distillation training for compact student models | [Distillation & LoRA](docs/advanced/distillation_and_lora.md) | [LoRA Fine-Tuning](docs/eli5/fine_tuning.md) |
+| **Online Drift Monitoring** | Rolling Kolmogorov-Smirnov detection with Gibbs-Candès adaptive conformal step | [Drift & Adaptive Conformal](docs/advanced/drift_and_adaptive_conformal.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
+| **Elastic Recurrent Looping** | Layer-looping recurrent depth scaling (PyTorch backend) | [Recurrent & Hardware](docs/advanced/recurrent_and_hardware.md) | [How It Works](docs/eli5/how_logitgate_works.md) |
 
 ---
 
