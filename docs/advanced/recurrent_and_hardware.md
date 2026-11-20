@@ -125,7 +125,7 @@ A standard causal transformer evaluates its first token in a single forward pass
 Architectures like **NVIDIA-Nemotron-Labs Dory** (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`) introduce **elastic recurrent depth**. Instead of traversing intermediate transformer layers once, Dory recirculates hidden state representations through a shared recurrent block for $K$ iterations (`num_loops`, typically 1 to 4) before projecting to output logits:
 
 $$
-\mathbf{h}^{(k+1)} = \text{RecurrentLayerBlock}\left(\mathbf{h}^{(k)}, \mathbf{x}\right), \quad k \in \{1, \dots, K\}
+\mathbf{h}^{(k)} = \text{RecurrentLayerBlock}\left(\mathbf{h}^{(k-1)}, \mathbf{x}\right), \quad k \in \{1, \dots, K\}
 $$
 
 $$

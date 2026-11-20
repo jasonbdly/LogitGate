@@ -290,7 +290,7 @@ with Cascade(
 
 When building autonomous agents using Anthropic's Model Context Protocol (MCP) or OpenAI function calling, tools frequently execute system commands, filesystem queries, or database modifications.
 
-`ToolCallGate` inspects tool-call payloads before execution, separating the untrusted `candidate` JSON-RPC/tool dict from the trusted `user_intent`. Stage-0 deterministic defenses (SSRF, path traversal, destructive SQL/shell) block structural attacks in **~0.08 ms p50 with 0 LLM calls**, while optional Stage-1 intent alignment (`check_intent=True`) verifies semantic compliance in **~45 ms**:
+`ToolCallGate` inspects tool-call payloads before execution, separating the untrusted `candidate` JSON-RPC/tool dict from the trusted `user_intent`. Layer-0 deterministic defenses (SSRF, path traversal, destructive SQL/shell) block structural attacks in **~0.08 ms p50 with 0 LLM calls**, while optional Layer-1 intent alignment (`check_intent=True`) verifies semantic compliance in **~45 ms**:
 
 ```python
 from logitgate import ToolCallGate
@@ -324,7 +324,7 @@ mcp_call = {
 verdict = mcp_shield.evaluate(mcp_call)
 assert verdict.passed, "Legitimate MCP call failed!"
 
-# 2. Path Traversal Attack: Blocked in ~0.08ms p50 at Stage 0
+# 2. Path Traversal Attack: Blocked in ~0.08ms p50 at Layer 0
 traversal_call = {
     "jsonrpc": "2.0",
     "method": "tools/call",
@@ -348,9 +348,8 @@ print(f"Attack Blocked: {attack_verdict.reason}")
 When initialized with `normalize=True`, `ASTGate` automatically strips conversational preamble, reasoning tags (`<think>...</think>`), and markdown fences (` ```python ... ``` `) before running structural validators:
 
 ```python
-import ast
 from pydantic import BaseModel, Field
-from logitgate import ASTGate, Cascade, JudgeGate, LogitGate
+from logitgate import ASTGate, JudgeGate, LogitGate
 
 class DatabaseMigrationPayload(BaseModel):
     table_name: str

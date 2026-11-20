@@ -9,6 +9,8 @@ animated geometric/scientific SVGs for:
 5. docs/assets/rag_prefix_cache.svg (Prefix-Cached RAG Timeline & KV Block)
 6. docs/assets/toolcall_shield.svg (Concentric Pre-Execution Tool Defense)
 7. docs/assets/stream_guard_abort.svg (Mid-Stream Confidence Waveform & Breaker)
+8. docs/assets/tier_a_distillation.svg (Tier-A Weight-Free Distillation Bundle)
+9. docs/assets/tier_b_lora.svg (Tier-B 2x Symmetric LoRA Fine-Tuning)
 
 All SVGs are valid XML, contain zero scripts, zero external fonts, zero em-dashes,
 zero private LAN IPs, and maintain >= 11.5px typography for mobile legibility.
@@ -826,16 +828,16 @@ def generate_tier_a_distillation_svg() -> str:
   <!-- Mini Pass/Fail Cards inside Bank -->
   <rect x="38" y="232" width="98" height="36" rx="5" fill="var(--accent-emerald-bg)" stroke="var(--accent-emerald)" stroke-width="1.2" />
   <text x="87" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-emerald)">PASS Anchor</text>
-  <text x="87" y="262" text-anchor="middle" font-size="11" fill="var(--text-secondary)">clean example</text>
+  <text x="87" y="262" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">clean example</text>
 
   <rect x="152" y="232" width="98" height="36" rx="5" fill="var(--accent-rose-bg)" stroke="var(--accent-rose)" stroke-width="1.2" />
   <text x="201" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-rose)">FAIL Anchor</text>
-  <text x="201" y="262" text-anchor="middle" font-size="11" fill="var(--text-secondary)">defect example</text>
+  <text x="201" y="262" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">defect example</text>
 
   <!-- Topic Overlap Filter Strip -->
   <rect x="38" y="278" width="212" height="38" rx="5" fill="var(--accent-amber-bg)" stroke="var(--accent-amber)" stroke-width="1.2" />
   <text x="144" y="294" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent-amber)">Topic Overlap Gate (&gt;= 25%)</text>
-  <text x="144" y="309" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Skips anchors on unrelated tasks</text>
+  <text x="144" y="309" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Skips anchors on unrelated tasks</text>
 
   <!-- Component 2: Score Calibration Curve -->
   <rect x="276" y="180" width="240" height="148" rx="8" fill="var(--surface-bg)" stroke="var(--accent-emerald)" stroke-width="1.5" />
@@ -852,7 +854,7 @@ def generate_tier_a_distillation_svg() -> str:
   <path d="M 306 293 C 338 291, 366 280, 396 264 C 424 249, 452 238, 486 236"
         fill="none" stroke="var(--accent-emerald)" stroke-width="2.5" />
   <circle cx="396" cy="264" r="4" fill="var(--accent-emerald)" class="anim-pulse" />
-  <text x="396" y="314" text-anchor="middle" font-size="11" fill="var(--text-secondary)">5 signals -&gt; calibrated P (&lt;0.01 ms)</text>
+  <text x="396" y="314" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">5 signals -&gt; calibrated P (&lt;0.01 ms)</text>
 
   <!-- Converge into Untouched Small Model -->
   <line x1="144" y1="328" x2="144" y2="362" stroke="var(--accent-sky)" stroke-width="2" marker-end="url(#arrow)" />
@@ -891,14 +893,14 @@ def generate_tier_b_lora_svg() -> str:
   <!-- Forward Drill Strip -->
   <text x="24" y="108" font-size="11.5" font-weight="700" fill="var(--accent-sky)">Drill 1 (Forward):</text>
   <rect x="136" y="92" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
-  <text x="253" y="108" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <text x="253" y="108" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
   <rect x="378" y="92" width="138" height="24" rx="4" fill="var(--accent-emerald)" />
   <text x="447" y="108" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "A" (Pass)</text>
 
   <!-- Reverse Drill Strip -->
   <text x="24" y="142" font-size="11.5" font-weight="700" fill="var(--accent-purple)">Drill 2 (Swapped):</text>
   <rect x="136" y="126" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
-  <text x="253" y="142" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <text x="253" y="142" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
   <rect x="378" y="126" width="138" height="24" rx="4" fill="var(--accent-sky)" />
   <text x="447" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "B" (Pass)</text>
 

@@ -29,7 +29,6 @@ import os
 from logitgate import LogitGate
 from logitgate.backends import (
     GeminiBackend,
-    LlamaCppBackend,
     OllamaBackend,
     OpenAICompatBackend,
     StubBackend,

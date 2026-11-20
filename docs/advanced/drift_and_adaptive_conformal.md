@@ -282,7 +282,7 @@ As $T \to \infty$, the average selective error rate converges to $\le \alpha^*$ 
 In production, ground truth labels are rarely available immediately. Setting `feedback_mode="cascade_audit"` and `audit_sample_rate=p` (e.g. $p=0.05$) creates a closed feedback loop:
 
 1. When Layer 1 issues a fast-path decision, it randomly samples that item with Bernoulli probability $p$.
-2. The sampled item is asynchronously evaluated by Layer-2 `JudgeGate`.
+2. The sampled item is evaluated inline by Layer-2 `JudgeGate` (with `override_on_audit=True` by default so audited Layer-1 errors are corrected in the returned verdict).
 3. If Layer 2 contradicts Layer 1, an error is recorded: $\text{err}_t = 1$.
 4. The error is scaled by the Horvitz-Thompson inverse-propensity weight:
 

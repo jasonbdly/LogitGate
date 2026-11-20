@@ -5,7 +5,7 @@
 LogitGate replaces slow generative LLM-as-a-Judge calls with calibrated first-token log-probability gating (`max_tokens=1`, `0` generated reasoning tokens) and deterministic Layer 0 validation, cutting evaluation latency by 4.6x to 17.0x across CI suites, live RAG chatbots, and Model Context Protocol (MCP) agent pipelines.
 
 **New to first-token logit evaluation?** Start with the foundational end-to-end walkthroughs:
-- **[How LogitGate Works](./eli5/how_logitgate_works.md)**: Illustrated walkthrough of first-token scoring, two-pass bias cancellation, calibrated tolerance bands, and 3-stage triage.
+- **[How LogitGate Works](./eli5/how_logitgate_works.md)**: Illustrated walkthrough of first-token scoring, two-pass bias cancellation, calibrated tolerance bands, and 3-layer triage.
 - **[Systems Architecture & Execution Mechanics](./architecture.md)**: Deep engineering blueprint of trait-based routing, KV-cache prefix retention, client pooling, and fault-isolated lifecycles.
 
 This portal organizes all guides into **three depth tiers** plus specialized research references:

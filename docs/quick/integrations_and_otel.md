@@ -15,7 +15,6 @@ Copy-paste integration recipes for `pytest` regression suites, `LangGraph` agent
 ### Copy-Paste Recipes
 
 ```python
-import pytest
 from logitgate import check
 
 # 1. Standard boolean evaluation
@@ -165,7 +164,7 @@ system_one_model = LogitGateSystemOneModel(
 ### Copy-Paste Recipe
 
 ```python
-from logitgate import Cascade, LogitGate, OtelSpanSink, JsonlTelemetrySink
+from logitgate import JsonlTelemetrySink, LogitGate, OtelSpanSink
 
 # 1. OpenTelemetry Distributed Tracing Bridge
 otel_sink = OtelSpanSink(

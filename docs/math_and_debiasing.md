@@ -136,8 +136,8 @@ print(f"LogitGate Log-Odds Space:     {p_logitgate:.4f} (Exact)")
 
 ## 2. BPE Surface-Variant Marginalization & Missing-Token Bounded Floor
 
-In Byte-Pair Encoding (BPE) and SentencePiece tokenizers, a single semantic letter (e.g. `'A'`) is split across multiple discrete token IDs depending on preceding whitespace and punctuation:
-- Target variants: `["A", " A", "\nA", "\tA", "A."]`
+In Byte-Pair Encoding (BPE) and SentencePiece tokenizers, a single semantic letter (e.g. `'A'`) is split across multiple discrete token IDs depending on preceding whitespace and casing:
+- Target variants: `["A", " A", "\nA", "\tA", "a", " a"]`
 
 ### Surface-Variant Log-Sum-Exp Aggregation
 

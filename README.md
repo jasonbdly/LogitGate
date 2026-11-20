@@ -179,7 +179,7 @@ rag_verdict = rag_gate.evaluate(
 assert rag_verdict.passed
 # Note: A hallucinated reply such as "Yes, 30 days" fails against a live backend (P <= 0.20, passed=False).
 
-# Pre-execution agent tool-call guardrail (<0.1ms Stage-0 sink check + Stage-1 intent check)
+# Pre-execution agent tool-call guardrail (<0.1ms Layer-0 sink check + Layer-1 intent check)
 tool_gate = ToolCallGate(
     allowed_tools=["read_invoice", "list_orders"],
     allowed_roots=["/var/data/invoices"],
@@ -190,7 +190,7 @@ tool_verdict = tool_gate.evaluate(
     {"name": "read_invoice", "arguments": {"path": "/var/data/invoices/inv_902.pdf"}}
 )
 assert tool_verdict.passed
-# Path traversal ("../../etc/passwd") or SSRF ("http://169.254.169.254") fails in <0.1ms at Stage 0.
+# Path traversal ("../../etc/passwd") or SSRF ("http://169.254.169.254") fails in <0.1ms at Layer 0.
 ```
 
 ---

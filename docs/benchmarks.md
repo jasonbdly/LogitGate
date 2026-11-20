@@ -226,7 +226,7 @@ Evaluated across **24 items spanning 4 domains** ([`benchmarks/data/multi_domain
 
 | Model Configuration | Baseline Judge Time | Cascade Time (`on_ambiguous_or_fail`) | Cascade Time (`on_ambiguous_only`) | Speedup (`on_ambiguous_only`) | CoT Tokens Saved | Baseline Accuracy | Cascade Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`gemma4:e4b` (GPU)** | 39,147.1 ms | 22,658.7 ms | **8,510.3 ms** | **4.6x** | 2,696 | 24/24 (100.0%) | **24/24 (100.0%)** |
+| **`gemma4:e4b` (GPU)** | 37,203.5 ms | 22,658.7 ms | **8,054.6 ms** | **4.6x** | 2,696 | 24/24 (100.0%) | **24/24 (100.0%)** |
 | **`gemma4:e4b` (Pure CPU)** | 513,598.1 ms | 344,147.5 ms | **142,086.2 ms** | **3.6x** | 2,916 | 23/24 (95.8%) | **23/24 (95.8%)** |
 | **`qwen2.5-coder:3b` (GPU)** | 25,994.8 ms | - | **5,958.5 ms** | **4.4x** | 2,993 | 18/24 (75.0%) | **22/24 (91.7%)** |
 | **`qwen2.5-coder:3b` (Pure CPU)** | 280,087.4 ms | - | **70,928.0 ms** | **4.0x** | 2,316 | 17/24 (70.8%) | **22/24 (91.7%)** |
@@ -460,15 +460,15 @@ Rather than repeating a single boilerplate paragraph, [`benchmarks/data/haystack
 
 | Document Length | `gemma4:e4b` Latency | `gemma4:e4b` $\Delta P$ | `qwen2.5:14b` Latency | `qwen2.5:14b` $\Delta P$ | `gemma4:26b` Latency | `gemma4:26b` $\Delta P$ | `gemma4:31b` Latency | `gemma4:31b` $\Delta P$ |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Short (~200 tok)** | 280.1 ms | 1.0000 | 434.6 ms | 1.0000 | **207.2 ms** | 1.0000 | 738.0 ms | 1.0000 |
-| **Medium (~1,500 tok)** | 467.9 ms | 0.9985 | 1,366.2 ms | 1.0000 | **524.6 ms** | 1.0000 | 1,807.9 ms | 1.0000 |
-| **Long (~4,500 tok)** | 1,128.1 ms | 0.9506 | 2,611.5 ms | 1.0000 | **827.6 ms** | 1.0000 | 2,858.9 ms | 1.0000 |
-| **Very Long (~8,000 tok)** | 1,985.5 ms | 0.9621 | 4,774.7 ms | 1.0000 | **1,229.7 ms** | 1.0000 | 4,406.8 ms | 1.0000 |
-| **16K Context (~16,000 tok)** | 4,044.0 ms | 0.9448 | 11,122.8 ms | 1.0000 | **2,118.3 ms** | 1.0000 | 7,621.9 ms | 1.0000 |
+| **Short (~200 tok)** | 303.6 ms | 1.0000 | 445.6 ms | 1.0000 | **204.4 ms** | 1.0000 | 798.6 ms | 1.0000 |
+| **Medium (~1,500 tok)** | 483.5 ms | 0.9985 | 1,408.3 ms | 1.0000 | **549.7 ms** | 1.0000 | 1,760.8 ms | 1.0000 |
+| **Long (~4,500 tok)** | 1,141.3 ms | 0.9506 | 2,649.4 ms | 1.0000 | **841.1 ms** | 1.0000 | 2,903.3 ms | 1.0000 |
+| **Very Long (~8,000 tok)** | 2,013.5 ms | 0.9621 | 4,833.9 ms | 1.0000 | **1,272.7 ms** | 1.0000 | 4,430.1 ms | 1.0000 |
+| **16K Context (~16,000 tok)** | 4,059.7 ms | 0.9448 | 11,343.3 ms | 1.0000 | **2,071.5 ms** | 1.0000 | 7,652.7 ms | 1.0000 |
 
 #### Key Architectural Findings:
 - **Realistic Attention Dilution on 4B vs. 14B–31B Models**: In a diverse technical haystack where surrounding sections also mention `config.yaml` and Vault credentials, the 4B model (`gemma4:e4b`) exhibits gradual probability attenuation from $\Delta P = 1.0000$ at 200 tokens down to $\Delta P = 0.9448$ ($P_{\text{compliant}} = 0.9448$, $P_{\text{violating}} = 0.0000$) at 16,000 tokens: still well above the `0.85` pass threshold, while 14B, 26B MoE, and 31B Dense models maintain $\Delta P = 1.0000$ across all lengths.
-- **MoE vs. Dense Pre-Fill Advantage**: At 16,000 tokens, **`gemma4:26b` (MoE)** processed the prompt in **2,118.3 ms** (3.60x faster than `gemma4:31b` (Dense, 7,621.9 ms)) and **5.25x faster than `qwen2.5:14b` (11,122.8 ms)** because MoE routes each token through ~4B active parameters while retaining 26B capacity.
+- **MoE vs. Dense Pre-Fill Advantage**: At 16,000 tokens, **`gemma4:26b` (MoE)** processed the prompt in **2,071.5 ms** (3.69x faster than `gemma4:31b` (Dense, 7,652.7 ms)) and **5.48x faster than `qwen2.5:14b` (11,343.3 ms)** because MoE routes each token through ~4B active parameters while retaining 26B capacity.
 
 ---
 
@@ -537,7 +537,7 @@ A causal transformer evaluates its first token in a single forward pass through 
 Architectures like **NVIDIA-Nemotron-Labs Dory** (`nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16`) and Universal Transformers overcome this limitation by introducing **elastic recurrent depth**. Instead of traversing intermediate transformer layers once, Dory recirculates hidden state representations through a shared recurrent block for $K$ iterations (`num_loops`, typically 1 to 4) before projecting to output logits:
 
 $$
-\mathbf{h}^{(k+1)} = \text{RecurrentLayerBlock}(\mathbf{h}^{(k)}, \mathbf{x}), \quad k \in \{1, \dots, K\}
+\mathbf{h}^{(k)} = \text{RecurrentLayerBlock}(\mathbf{h}^{(k-1)}, \mathbf{x}), \quad k \in \{1, \dots, K\}
 $$
 
 This performs multi-step iterative latent reasoning directly in embedding space prior to emitting token 1. While looping increases prefill compute by ~30–60%, it completely eliminates the memory-bandwidth bottleneck of autoregressive token generation, providing high-fidelity first-token logits on complex constraints with **zero generated CoT tokens**.

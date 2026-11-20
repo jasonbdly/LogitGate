@@ -51,7 +51,7 @@ Instead of stuffing fixed examples into every prompt, LogitGate treats past revi
 
 1. **Pair contrasting past reviews**: LogitGate matches historical passing and failing items that look structurally similar (**contrastive pairs**) and trims any `"Option A"` / `"Option B"` wording from teacher notes so the examples stay label-neutral.
 2. **Check topic overlap before injecting**: Before adding an example pair to the prompt, LogitGate measures what fraction of the rubric's vocabulary overlaps with the saved pair (**overlap gating**, defaulting to at least `25%`). If the incoming rule is on a new topic (**out-of-domain**), the anchor is skipped cleanly so off-topic examples never pollute the check.
-3. **Exclude exact matches & preserve GPU memory**: Any saved item matching the current candidate's hash is excluded automatically, and selected examples sit ahead of the `A`/`B` decision block so Pass 1 and Pass 2 still reuse 100% of the cached prompt prefix.
+3. **Exclude exact matches & preserve GPU memory**: Any saved item matching the current candidate's text fingerprint (**hash**) is excluded automatically, and selected examples sit ahead of the `A`/`B` decision block so Pass 1 and Pass 2 still reuse 100% of the cached prompt prefix.
 
 **Where to use it:** Multi-domain verification pipelines where small models need crisp examples on known rubrics without breaking when an unfamiliar rubric appears.
 
@@ -59,13 +59,13 @@ Instead of stuffing fixed examples into every prompt, LogitGate treats past revi
 
 ## 3. Straightening Harsh or Lenient Scoring Habits
 
-Even with good reference examples, a compact model's raw confidence scores can sit off-center: on hard valid examples (`hard_positive`), a skeptical 3B model might output `P = 0.40` even when the evidence leans toward passing.
+Even with good reference examples, a compact model's raw confidence scores can sit off-center: on hard valid examples, a skeptical 3B model might output `P = 0.40` even when the evidence leans toward passing.
 
 ### Re-Zeroing a Skewed Sensor From Five Signals
 
 Rather than trusting a single raw score, LogitGate reads **five lightweight signals** already produced during the normal two-pass check:
 
-1. **Combined `A` vs. `B` balance**: The debiased log-odds score across Pass 1 and Pass 2.
+1. **Combined `A` vs. `B` balance**: The debiased score on a symmetric `+/-` scale (**log-odds**) across Pass 1 and Pass 2.
 2. **Direction of label bias**: Whether the model leaned toward `A` or `B` between the two passes.
 3. **Size of label bias**: How strongly the model's answer shifted when the labels swapped.
 4. **Spread of next-word odds**: How scattered the top candidate probabilities were (**entropy**).
@@ -75,7 +75,7 @@ Rather than trusting a single raw score, LogitGate reads **five lightweight sign
 
 1. **Fit a tiny correction head from past logs**: Using pure-Python math on CPU (no PyTorch, NumPy, or GPU needed), LogitGate fits a 5-weight logistic curve (`621-627 bytes` in JSON) that maps those five signals to true pass probabilities.
 2. **Score live checks in `<0.01 ms`**: At runtime, multiplying five numbers and applying the curve takes microseconds, lifting `qwen2.5-coder:3b` out-of-domain hard-positive recall by **`+29.2 pp`** (`20.8% -> 50.0%`).
-3. **Recompute safety cutoffs automatically**: Compilation also updates the conformal pass/fail thresholds so Stage-1 error stays within your target budget (such as `alpha = 0.10`).
+3. **Recompute safety cutoffs automatically**: Compilation also updates the data-calibrated (**conformal**) pass/fail thresholds so Stage-1 error stays within your target budget (such as `10%`, `alpha = 0.10`).
 
 **Where to use it:** Whenever a compact model under-scores subtle valid outputs or over-escalates borderline items to Stage 2.
 

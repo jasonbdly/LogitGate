@@ -42,11 +42,11 @@ Updating all 3 billion parameters of a language model (**full fine-tuning**) dem
 
 ### Clip-On Lenses Over a Shared Camera Body
 
-Instead of rebuilding the entire camera body for each assignment, **Parameter-Efficient Fine-Tuning (PEFT)** with **LoRA** freezes the base model and inserts tiny trainable correction layers across the model's linear projections (`rank=8`). You train a fraction of 1% of the weights, keep the model's core language fluency intact, and swap lightweight `15-50 MB` adapters on top of one shared base model.
+Instead of rebuilding the entire camera body for each assignment, **Parameter-Efficient Fine-Tuning (PEFT)** with **LoRA** freezes the base model and inserts tiny trainable correction layers (a compact width of 8, or **rank 8**) across the model's weight layers (**linear layers**). You train a fraction of 1% of the weights, keep the model's core language fluency intact, and swap lightweight `15-50 MB` adapters on top of one shared base model.
 
-### How `all-linear` Transfer Works Across Model Families
+### How One Adapter Layout Transfers Across Model Families
 
-1. **Freeze the base weights**: Original model parameters stay read-only during training, cutting GPU memory and preventing catastrophic forgetting.
+1. **Freeze the base weights**: Original model parameters stay read-only during training, cutting GPU memory and preventing the model from erasing its general reading ability (**catastrophic forgetting**).
 2. **Attach low-rank updates to every linear layer**: Targeting all linear layers automatically adapts across `Llama 3`, `Qwen 2.5`, `Gemma`, and `Mistral` architectures without hand-picking layer names.
 3. **Save only the delta**: The output directory stores only the small adapter weights (`15-50 MB`), never a duplicated 6 GB checkpoint.
 

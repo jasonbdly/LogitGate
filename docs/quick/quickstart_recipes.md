@@ -30,7 +30,8 @@ verdict = gate.evaluate(candidate)
 
 print(f"Passed: {verdict.passed}")              # True
 print(f"Status: {verdict.status.value}")        # "passed"
-print(f"Confidence: {verdict.probability:.4f}")  # e.g. 0.9982
+prob_str = f"{verdict.probability:.4f}" if verdict.probability is not None else "N/A"
+print(f"Confidence: {prob_str}")  # e.g. 0.9982
 print(f"Tokens generated: {verdict.total_tokens_generated}")  # 0
 ```
 
@@ -66,7 +67,7 @@ Standard AI evaluators write 200+ words of explanation before saying yes or no. 
 ### Copy-Paste Recipe
 
 ```python
-from logitgate import ASTGate, Cascade, JudgeGate, LogitGate
+from logitgate import ASTGate, JudgeGate, LogitGate
 
 # Build cascade using the >> operator
 cascade = (
@@ -121,7 +122,8 @@ router = ChoiceGate(
 
 verdict = router.evaluate("My credit card was charged twice for invoice #104.")
 print(f"Selected route: {verdict.choice}")                  # 'A'
-print(f"Confidence: {verdict.probability:.4f}")
+prob_str = f"{verdict.probability:.4f}" if verdict.probability is not None else "N/A"
+print(f"Confidence: {prob_str}")
 print(f"Distribution: {verdict.choice_probabilities}")
 ```
 
@@ -197,8 +199,8 @@ print(f"Overall passed: {verdict.passed}")
 
 # Individual breakdown per rubric
 for rubric, v in zip(rubrics, gate.evaluate_each(candidate), strict=True):
-    status = "PASS" if v.passed else "FAIL"
-    print(f"[{status}] P={v.probability:.4f} | {rubric}")
+    prob_str = f"{v.probability:.4f}" if v.probability is not None else "N/A"
+    print(f"[{v.status.value.upper()}] P={prob_str} | {rubric}")
 ```
 
 ### Weakest-Link Aggregation & `fail_fast`

@@ -147,14 +147,14 @@
   <!-- Forward Drill Strip -->
   <text x="24" y="108" font-size="11.5" font-weight="700" fill="var(--accent-sky)">Drill 1 (Forward):</text>
   <rect x="136" y="92" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
-  <text x="253" y="108" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <text x="253" y="108" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
   <rect x="378" y="92" width="138" height="24" rx="4" fill="var(--accent-emerald)" />
   <text x="447" y="108" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "A" (Pass)</text>
 
   <!-- Reverse Drill Strip -->
   <text x="24" y="142" font-size="11.5" font-weight="700" fill="var(--accent-purple)">Drill 2 (Swapped):</text>
   <rect x="136" y="126" width="234" height="24" rx="4" fill="var(--surface-subtle)" stroke="var(--border-muted)" stroke-width="1.2" />
-  <text x="253" y="142" text-anchor="middle" font-size="11" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
+  <text x="253" y="142" text-anchor="middle" font-size="11.5" fill="var(--text-muted)" class="mono">Prompt tokens masked (ignored)</text>
   <rect x="378" y="126" width="138" height="24" rx="4" fill="var(--accent-sky)" />
   <text x="447" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink-on-solid)" class="mono">Token 1: "B" (Pass)</text>
 

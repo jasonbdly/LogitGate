@@ -51,7 +51,8 @@ v_grounded = rag_gate.evaluate(
     context=retrieved_policy_chunks,
     query=user_question,
 )
-print(f"Grounded: {v_grounded.passed} (P={v_grounded.probability:.4f})")
+prob_str = f"{v_grounded.probability:.4f}" if v_grounded.probability is not None else "N/A"
+print(f"Grounded: {v_grounded.passed} (P={prob_str})")
 
 # Example B: Hallucinated reply (contradicts the 14-day Standard policy -> fails on live backend, P <= 0.20)
 hallucinated_reply = "Yes, Standard plans qualify for a 30-day refund window."

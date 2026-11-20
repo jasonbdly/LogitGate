@@ -154,8 +154,8 @@ print(f"Groundedness Verified: {verdict.passed} (P = {prob_str})")
 
 Autonomous agents frequently execute tools across APIs, databases, and local operating systems. Indirect prompt injection attacks or hallucinations can cause agents to emit catastrophic parameters: SSRF (Server-Side Request Forgery) requests against cloud metadata endpoints (`169.254.169.254`), path traversal outside the project directory, or destructive SQL commands.
 
-`ToolCallGate` separates the **untrusted tool payload** (`candidate` passed to `evaluate()`) from the **trusted user request** (`user_intent=`), enforcing a dual-stage barrier:
-- **Operational Impact**: Stage-0 structural rules (path traversal, SSRF, destructive SQL/shell) reject attacks in **~0.08 ms p50 with 0 LLM calls**; Stage-1 semantic intent checks fire only on structurally clean calls (~45 ms GPU), catching indirect prompt injections that stay inside valid parameter syntax.
+`ToolCallGate` separates the **untrusted tool payload** (`candidate` passed to `evaluate()`) from the **trusted user request** (`user_intent=`), enforcing a dual-layer barrier:
+- **Operational Impact**: Layer-0 structural rules (path traversal, SSRF, destructive SQL/shell) reject attacks in **~0.08 ms p50 with 0 LLM calls**; Layer-1 semantic intent checks fire only on structurally clean calls (~45 ms GPU), catching indirect prompt injections that stay inside valid parameter syntax.
 
 ```python
 from logitgate import Cascade, JudgeGate, ToolCallGate
@@ -164,8 +164,8 @@ from logitgate.backends import OllamaBackend
 backend = OllamaBackend(model="qwen2.5-coder:14b")
 
 # Configure hybrid ToolCallGate:
-# - Stage 0 (~0.08ms p50): Blocks path traversal, SSRF against metadata/internal IPs, destructive SQL
-# - Stage 1 (~45ms): Assesses semantic alignment against user intent
+# - Layer 0 (~0.08ms p50): Blocks path traversal, SSRF against metadata/internal IPs, destructive SQL
+# - Layer 1 (~45ms): Assesses semantic alignment against user intent
 tool_guard = ToolCallGate(
     allowed_tools=["fetch_url", "read_file", "execute_sql"],
     allowed_roots=["/home/user/workspace/app"],
@@ -191,7 +191,7 @@ safe_call = {
 }
 assert agent_firewall.evaluate(safe_call).passed
 
-# Malicious SSRF call: Blocked immediately at Stage 0 in ~0.08ms p50 (0 LLM calls)
+# Malicious SSRF call: Blocked immediately at Layer 0 in ~0.08ms p50 (0 LLM calls)
 ssrf_call = {
     "name": "fetch_url",
     "arguments": {"url": "http://169.254.169.254/latest/meta-data/"},
